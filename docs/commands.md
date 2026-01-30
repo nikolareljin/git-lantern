@@ -1,0 +1,266 @@
+# Lantern command reference
+
+This document explains every `lantern ...` command, the data it produces, and how to interpret it.
+
+## Common concepts
+
+- **Workspace root**: A directory that contains multiple Git repositories. Most commands accept `--root` (defaults to the current working directory).
+- **Repository discovery**: Lantern considers any directory with a `.git` folder to be a repo.
+- **Depth**: `--max-depth` limits how deep Lantern traverses from `--root` (default: 6).
+- **Hidden directories**: By default, directories starting with `.` are skipped. Use `--include-hidden` to include them.
+- **Tables**: Output from `lantern table`, `lantern status`, etc. is a fixed-width text table.
+- **JSON scans**: `lantern scan` stores the full repository records to JSON for later `table` or `report` usage.
+
+## Local repository commands
+
+### `lantern repos`
+
+**Purpose**: List local repositories with minimal metadata.
+
+**What it does**:
+- Scans `--root` for Git repos.
+- Returns one row per repo with the repository name, filesystem path, and `origin` remote URL (if present).
+
+**Output columns**:
+- `name`: Directory name of the repo.
+- `path`: Absolute path to the repo.
+- `origin`: Output of `git remote get-url origin` (or `-` if missing).
+
+**Example**:
+```bash
+lantern repos --root ~/workspace
+```
+
+### `lantern scan`
+
+**Purpose**: Scan for repos and write detailed status data to JSON.
+
+**What it does**:
+- Finds all repos under `--root`.
+- Optionally runs `git fetch --prune` when `--fetch` is provided.
+- Builds a record per repo with branch/upstream/main-branch status fields.
+- Writes JSON to `--output` (default: `data/repos.json`) or stdout if `--output` is empty.
+
+**Record fields**:
+- `name`: Repo directory name.
+- `path`: Absolute path to the repo.
+- `branch`: Current branch name, or `detached`.
+- `upstream`: Upstream ref for the current branch (for example `origin/main`).
+- `up_ahead` / `up_behind`: How many commits `HEAD` is ahead/behind its upstream.
+- `main_ref`: Default branch ref inferred from remotes (for example `origin/main`).
+- `main_ahead` / `main_behind`: How many commits `HEAD` is ahead/behind the default branch ref.
+- `default_refs`: Comma-separated list of default refs detected across remotes.
+- `origin`: `origin` remote URL (or null).
+
+**Example**:
+```bash
+lantern scan --root ~/workspace --output data/repos.json --fetch
+```
+
+### `lantern status`
+
+**Purpose**: Show a live table of repo status without writing JSON.
+
+**What it does**:
+- Runs the same scan logic as `lantern scan`.
+- Prints a table with the most relevant status columns.
+
+**Output columns**:
+- `name`, `branch`, `upstream`, `up_ahead`, `up_behind`, `main_ref`, `main_ahead`, `main_behind`.
+
+**Example**:
+```bash
+lantern status --root ~/workspace
+```
+
+### `lantern table`
+
+**Purpose**: Render a table from a JSON scan.
+
+**How it works**:
+- Reads `--input` (default: `data/repos.json`) created by `lantern scan`.
+- If `--columns` is set, only those comma-separated columns are shown.
+- Otherwise, it renders every field from the first repo record in the JSON.
+
+**What it shows**:
+- The scan fields from `lantern scan` (see the list above), formatted as a fixed-width table.
+- This is useful for reformatting or sharing the scan data without re-scanning.
+
+**Example**:
+```bash
+lantern table --input data/repos.json
+lantern table --input data/repos.json --columns name,branch,up_ahead,up_behind
+```
+
+### `lantern find`
+
+**Purpose**: Filter repositories by name or remote URL.
+
+**What it does**:
+- Scans `--root` for repos.
+- Filters by `--name` (substring match on repo directory name).
+- Filters by `--remote` (substring match on `origin` URL).
+
+**Output columns**:
+- `name`, `path`, `origin`.
+
+**Example**:
+```bash
+lantern find --root ~/workspace --name lantern
+lantern find --root ~/workspace --remote github.com/my-org
+```
+
+### `lantern duplicates`
+
+**Purpose**: Identify multiple clones pointing at the same origin URL.
+
+**What it does**:
+- Scans `--root` for repos.
+- Groups repos by `origin` remote URL.
+- Prints only groups with 2+ repos sharing the same origin.
+
+**Output columns**:
+- `count`: How many repos share the origin.
+- `origin`: The shared origin URL.
+- `paths`: A ` | ` separated list of repo paths.
+
+**Example**:
+```bash
+lantern duplicates --root ~/workspace
+```
+
+### `lantern sync`
+
+**Purpose**: Run `git fetch`, `git pull`, and/or `git push` across many repos.
+
+**What it does**:
+- If no action flags are given, it defaults to `--fetch`.
+- Executes the chosen Git commands in each repo:
+  - `fetch` => `git fetch --prune`
+  - `pull` => `git pull --ff-only`
+  - `push` => `git push`
+- Adds `--only-clean` to skip repos with uncommitted changes.
+- Adds `--only-upstream` to skip repos without an upstream.
+- Adds `--dry-run` to print intended actions without running Git.
+
+**Output columns**:
+- `name`: Repo name.
+- `result`: A summary such as `fetch:ok pull:ok`, or `skip:dirty`.
+- `path`: Repo path.
+
+**Example**:
+```bash
+lantern sync --root ~/workspace --fetch
+lantern sync --root ~/workspace --pull --only-clean --only-upstream
+lantern sync --root ~/workspace --push --dry-run
+```
+
+### `lantern report`
+
+**Purpose**: Export scan results to CSV, JSON, or Markdown.
+
+**What it does**:
+- Reads a JSON scan (`--input`, default `data/repos.json`).
+- Writes in the selected `--format`:
+  - `csv` (default)
+  - `json`
+  - `md`
+- If `--columns` is provided, only those fields are exported.
+- If `--output` is empty, writes to stdout.
+
+**Examples**:
+```bash
+lantern report --input data/repos.json --output data/repos.csv
+lantern report --input data/repos.json --format md --output data/repos.md
+lantern report --input data/repos.json --format json
+```
+
+## GitHub commands
+
+The GitHub commands use environment variables from `.env` (or `--user`/`--token`).
+
+- `GITHUB_USER`: GitHub username used for listing repos or gists.
+- `GITHUB_TOKEN`: Personal access token for authenticated API access.
+
+### `lantern github list`
+
+**Purpose**: List GitHub repositories and write to JSON.
+
+**What it does**:
+- Uses `--user` or `GITHUB_USER` to scope repos.
+- If `--token`/`GITHUB_TOKEN` is set, it uses the authenticated endpoint and can include private repos owned by the user.
+- If `--include-forks` is not set, forked repos are excluded.
+- Writes JSON to `--output` (default `data/github.json`) or stdout.
+
+**Output fields per repo**:
+- `name`, `private`, `default_branch`, `ssh_url`, `clone_url`, `html_url`.
+
+**Example**:
+```bash
+lantern github list --user my-user --output data/github.json
+```
+
+### `lantern github clone`
+
+**Purpose**: Clone repos from a GitHub list JSON.
+
+**What it does**:
+- Reads `--input` (default `data/github.json`).
+- Clones each repo by its `ssh_url` into `--root`.
+- Skips repos already present.
+- With `--dry-run`, prints the clone commands without executing.
+
+**Example**:
+```bash
+lantern github clone --input data/github.json --root ~/workspace
+```
+
+### `lantern github gists list`
+
+**Purpose**: List gists and write to JSON.
+
+**What it does**:
+- Uses `--user` or `GITHUB_USER` for public gists, or uses a token to list the authenticated user's gists.
+- Writes JSON to `--output` (default `data/gists.json`) or stdout.
+
+**Output fields per gist**:
+- `id`, `description`, `public`, `files`, `html_url`, `updated_at`.
+
+**Example**:
+```bash
+lantern github gists list --user my-user --output data/gists.json
+```
+
+### `lantern github gists update`
+
+**Purpose**: Update or delete files in an existing gist.
+
+**What it does**:
+- Requires a GitHub token (`--token` or `GITHUB_TOKEN`).
+- `--file` can be repeated and supports `name=path` syntax.
+- `--delete` can be repeated to remove files.
+- If you would overwrite or delete existing files, you must provide `--force`.
+- `--description` updates the gist description.
+
+**Examples**:
+```bash
+lantern github gists update GIST_ID --file ./notes.txt --force
+lantern github gists update GIST_ID --file readme.md=./README.md
+lantern github gists update GIST_ID --delete old.txt --force
+```
+
+### `lantern github gists create`
+
+**Purpose**: Create a new gist.
+
+**What it does**:
+- Requires a GitHub token (`--token` or `GITHUB_TOKEN`).
+- `--file` can be repeated and supports `name=path` syntax.
+- Visibility defaults to private unless `--public` is set.
+- `--description` sets the gist description.
+
+**Examples**:
+```bash
+lantern github gists create --file ./notes.txt --description "Notes" --public
+lantern github gists create --file ./notes.txt --description "Notes" --private
+```
