@@ -1,5 +1,7 @@
 # git-lantern
 
+<img src="./git-lantern.png" />
+
 Local and GitHub repository visibility toolkit. The CLI is `lantern`.
 
 ## Quick start
