@@ -1,0 +1,11 @@
+name: auto-tag
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  tag:
+    uses: ./.github/ci-helpers/.github/workflows/auto-tag-release.yml

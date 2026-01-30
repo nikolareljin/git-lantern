@@ -1,0 +1,18 @@
+name: homebrew
+
+on:
+  workflow_dispatch:
+
+jobs:
+  brew:
+    uses: ./.github/ci-helpers/.github/workflows/homebrew-package.yml
+    with:
+      working_directory: "."
+      name: "lantern"
+      desc: "Repository visibility toolkit"
+      homepage: "https://github.com/OWNER/git-lantern"
+      license: "MIT"
+      entrypoint: "lantern"
+      man_path: "man/lantern.1"
+      dist_dir: "dist"
+      exclude_paths: ".git,.github,dist,venv,__pycache__"
