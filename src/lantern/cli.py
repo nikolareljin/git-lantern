@@ -1,0 +1,519 @@
+import argparse
+import json
+import os
+import subprocess
+import sys
+from typing import Dict, List, Tuple
+
+from . import git
+from . import github
+from .table import render_table
+
+
+def load_dotenv() -> None:
+    path = os.environ.get("GIT_LANTERN_ENV", os.path.join(os.getcwd(), ".env"))
+    if not os.path.isfile(path):
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+def repo_depth(root: str, path: str) -> int:
+    rel = os.path.relpath(path, root)
+    if rel == ".":
+        return 0
+    return rel.count(os.sep) + 1
+
+
+def find_repos(root: str, max_depth: int, include_hidden: bool) -> List[str]:
+    matches = []
+    for current, dirs, files in os.walk(root):
+        if not include_hidden:
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+        if ".git" in dirs:
+            matches.append(current)
+            dirs[:] = []
+            continue
+        if max_depth is not None and repo_depth(root, current) >= max_depth:
+            dirs[:] = []
+    return matches
+
+
+def build_repo_record(path: str, fetch: bool) -> Dict[str, str]:
+    name = os.path.basename(path)
+    if fetch:
+        git.fetch(path)
+    status = git.repo_status(path)
+    return {
+        "name": name,
+        "path": path,
+        "branch": status.get("branch"),
+        "upstream": status.get("upstream"),
+        "up_ahead": status.get("upstream_ahead"),
+        "up_behind": status.get("upstream_behind"),
+        "main_ref": status.get("main_ref"),
+        "main_ahead": status.get("main_ahead"),
+        "main_behind": status.get("main_behind"),
+        "default_refs": status.get("default_refs"),
+        "origin": git.get_origin_url(path),
+    }
+
+
+def cmd_repos(args: argparse.Namespace) -> int:
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    records = []
+    for path in repos:
+        records.append(
+            {
+                "name": os.path.basename(path),
+                "path": path,
+                "origin": git.get_origin_url(path),
+            }
+        )
+    columns = ["name", "path", "origin"]
+    print(render_table(records, columns))
+    return 0
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    records = [build_repo_record(path, args.fetch) for path in repos]
+    output = {"root": args.root, "repos": records}
+
+    if args.output:
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            json.dump(output, handle, indent=2)
+    else:
+        json.dump(output, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    records = [build_repo_record(path, args.fetch) for path in repos]
+    columns = [
+        "name",
+        "branch",
+        "upstream",
+        "up_ahead",
+        "up_behind",
+        "main_ref",
+        "main_ahead",
+        "main_behind",
+    ]
+    print(render_table(records, columns))
+    return 0
+
+
+def cmd_table(args: argparse.Namespace) -> int:
+    with open(args.input, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    records = payload.get("repos", [])
+    if not records:
+        print("No records.")
+        return 0
+    columns = args.columns.split(",") if args.columns else list(records[0].keys())
+    print(render_table(records, columns))
+    return 0
+
+
+def cmd_find(args: argparse.Namespace) -> int:
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    records = []
+    for path in repos:
+        name = os.path.basename(path)
+        origin = git.get_origin_url(path)
+        if args.name and args.name not in name:
+            continue
+        if args.remote and (not origin or args.remote not in origin):
+            continue
+        records.append({"name": name, "path": path, "origin": origin})
+    columns = ["name", "path", "origin"]
+    print(render_table(records, columns))
+    return 0
+
+
+def cmd_duplicates(args: argparse.Namespace) -> int:
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    groups: Dict[str, List[str]] = {}
+    for path in repos:
+        origin = git.get_origin_url(path)
+        if not origin:
+            continue
+        groups.setdefault(origin, []).append(path)
+
+    records = []
+    for origin, paths in sorted(groups.items()):
+        if len(paths) < 2:
+            continue
+        records.append(
+            {
+                "origin": origin,
+                "paths": " | ".join(sorted(paths)),
+                "count": str(len(paths)),
+            }
+        )
+
+    columns = ["count", "origin", "paths"]
+    print(render_table(records, columns))
+    return 0
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    actions: List[Tuple[str, List[str]]] = []
+    if not (args.fetch or args.pull or args.push):
+        args.fetch = True
+    if args.fetch:
+        actions.append(("fetch", ["fetch", "--prune"]))
+    if args.pull:
+        actions.append(("pull", ["pull", "--ff-only"]))
+    if args.push:
+        actions.append(("push", ["push"]))
+
+    records = []
+    for path in repos:
+        name = os.path.basename(path)
+        if args.only_clean and not git.is_clean(path):
+            records.append({"name": name, "path": path, "result": "skip:dirty"})
+            continue
+        if args.only_upstream and not git.get_upstream(path):
+            records.append({"name": name, "path": path, "result": "skip:no-upstream"})
+            continue
+        statuses = []
+        for label, cmd in actions:
+            if args.dry_run:
+                statuses.append(f"{label}:dry-run")
+                continue
+            result = subprocess.run(
+                ["git", "-C", path, *cmd],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            statuses.append(f"{label}:{'ok' if result.returncode == 0 else 'fail'}")
+        records.append({"name": name, "path": path, "result": " ".join(statuses)})
+
+    columns = ["name", "result", "path"]
+    print(render_table(records, columns))
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    with open(args.input, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    records = payload.get("repos", [])
+    if not records:
+        print("No records.")
+        return 0
+    if args.format == "json":
+        output = {"root": payload.get("root"), "repos": records}
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as handle:
+                json.dump(output, handle, indent=2)
+        else:
+            json.dump(output, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        return 0
+    if args.format == "md":
+        columns = args.columns.split(",") if args.columns else list(records[0].keys())
+        lines = []
+        lines.append("| " + " | ".join(columns) + " |")
+        lines.append("| " + " | ".join(["---"] * len(columns)) + " |")
+        for record in records:
+            row = [str(record.get(col, "")) for col in columns]
+            lines.append("| " + " | ".join(row) + " |")
+        output = "\n".join(lines)
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as handle:
+                handle.write(output + "\n")
+        else:
+            print(output)
+        return 0
+
+    import csv
+
+    fields = args.columns.split(",") if args.columns else list(records[0].keys())
+    if args.output:
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        handle = open(args.output, "w", encoding="utf-8", newline="")
+        close_handle = True
+    else:
+        handle = sys.stdout
+        close_handle = False
+    writer = csv.DictWriter(handle, fieldnames=fields)
+    writer.writeheader()
+    for record in records:
+        writer.writerow({field: record.get(field, "") for field in fields})
+    if close_handle:
+        handle.close()
+    return 0
+
+
+def cmd_github_list(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    user = args.user or env.get("GITHUB_USER")
+    token = args.token or env.get("GITHUB_TOKEN")
+    if not user:
+        print("GitHub user is required (set GITHUB_USER or pass --user).", file=sys.stderr)
+        return 1
+    repos = github.fetch_repos(user, token, args.include_forks)
+    payload = {"user": user, "repos": repos}
+    if args.output:
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    else:
+        json.dump(payload, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_github_clone(args: argparse.Namespace) -> int:
+    with open(args.input, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    repos = payload.get("repos", [])
+    os.makedirs(args.root, exist_ok=True)
+    for repo in repos:
+        name = repo.get("name")
+        ssh_url = repo.get("ssh_url")
+        if not name or not ssh_url:
+            continue
+        dest = os.path.join(args.root, name)
+        if os.path.exists(dest):
+            continue
+        if args.dry_run:
+            print(f"[DRY RUN] git clone {ssh_url} {dest}")
+            continue
+        subprocess.run(["git", "clone", ssh_url, dest], check=False)
+    return 0
+
+
+def cmd_github_gists_list(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    user = args.user or env.get("GITHUB_USER")
+    token = args.token or env.get("GITHUB_TOKEN")
+    try:
+        gists = github.fetch_gists(user, token)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    payload = {"user": user, "gists": gists}
+    if args.output:
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    else:
+        json.dump(payload, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_github_gists_update(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    token = args.token or env.get("GITHUB_TOKEN")
+    if not token:
+        print("GitHub token is required to update gists.", file=sys.stderr)
+        return 1
+
+    files: Dict[str, str] = {}
+    for file_arg in args.file:
+        if "=" in file_arg:
+            name, path = file_arg.split("=", 1)
+        else:
+            path = file_arg
+            name = os.path.basename(path)
+        with open(path, "r", encoding="utf-8") as handle:
+            files[name] = handle.read()
+
+    delete_names = args.delete
+
+    if not files and not delete_names:
+        print("At least one --file or --delete is required.", file=sys.stderr)
+        return 1
+
+    if not args.force:
+        current = github.get_gist(args.gist_id, token)
+        existing = set((current.get("files") or {}).keys())
+        overlap = existing.intersection(files.keys())
+        delete_overlap = existing.intersection(delete_names)
+        if overlap or delete_overlap:
+            print(
+                "Refusing to overwrite/delete existing files without --force.",
+                file=sys.stderr,
+            )
+            return 1
+
+    update_files: Dict[str, Optional[str]] = {}
+    for name, content in files.items():
+        update_files[name] = content
+    for name in delete_names:
+        update_files[name] = None
+
+    github.update_gist(args.gist_id, token, update_files, args.description)
+    print("Gist updated.")
+    return 0
+
+
+def cmd_github_gists_create(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    token = args.token or env.get("GITHUB_TOKEN")
+    if not token:
+        print("GitHub token is required to create gists.", file=sys.stderr)
+        return 1
+
+    files: Dict[str, str] = {}
+    for file_arg in args.file:
+        if "=" in file_arg:
+            name, path = file_arg.split("=", 1)
+        else:
+            path = file_arg
+            name = os.path.basename(path)
+        with open(path, "r", encoding="utf-8") as handle:
+            files[name] = handle.read()
+
+    if not files:
+        print("At least one --file is required.", file=sys.stderr)
+        return 1
+
+    if args.private:
+        is_public = False
+    elif args.public:
+        is_public = True
+    else:
+        is_public = False
+    created = github.create_gist(token, files, args.description, is_public)
+    print(created.get("html_url", "Gist created."))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="lantern")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    repos = sub.add_parser("repos", help="list local repos")
+    repos.add_argument("--root", default=os.getcwd())
+    repos.add_argument("--max-depth", type=int, default=6)
+    repos.add_argument("--include-hidden", action="store_true")
+    repos.set_defaults(func=cmd_repos)
+
+    scan = sub.add_parser("scan", help="scan for git repos and write JSON")
+    scan.add_argument("--root", default=os.getcwd())
+    scan.add_argument("--output", default="data/repos.json")
+    scan.add_argument("--max-depth", type=int, default=6)
+    scan.add_argument("--include-hidden", action="store_true")
+    scan.add_argument("--fetch", action="store_true")
+    scan.set_defaults(func=cmd_scan)
+
+    status = sub.add_parser("status", help="scan for git repos and render a table")
+    status.add_argument("--root", default=os.getcwd())
+    status.add_argument("--max-depth", type=int, default=6)
+    status.add_argument("--include-hidden", action="store_true")
+    status.add_argument("--fetch", action="store_true")
+    status.set_defaults(func=cmd_status)
+
+    table = sub.add_parser("table", help="render a table from a JSON scan")
+    table.add_argument("--input", default="data/repos.json")
+    table.add_argument("--columns", default="")
+    table.set_defaults(func=cmd_table)
+
+    find = sub.add_parser("find", help="find repos by name or remote")
+    find.add_argument("--root", default=os.getcwd())
+    find.add_argument("--max-depth", type=int, default=6)
+    find.add_argument("--include-hidden", action="store_true")
+    find.add_argument("--name", default="")
+    find.add_argument("--remote", default="")
+    find.set_defaults(func=cmd_find)
+
+    dupes = sub.add_parser("duplicates", help="find repos with the same origin URL")
+    dupes.add_argument("--root", default=os.getcwd())
+    dupes.add_argument("--max-depth", type=int, default=6)
+    dupes.add_argument("--include-hidden", action="store_true")
+    dupes.set_defaults(func=cmd_duplicates)
+
+    sync = sub.add_parser("sync", help="fetch/pull/push across repos")
+    sync.add_argument("--root", default=os.getcwd())
+    sync.add_argument("--max-depth", type=int, default=6)
+    sync.add_argument("--include-hidden", action="store_true")
+    sync.add_argument("--fetch", action="store_true")
+    sync.add_argument("--pull", action="store_true")
+    sync.add_argument("--push", action="store_true")
+    sync.add_argument("--dry-run", action="store_true")
+    sync.add_argument("--only-clean", action="store_true")
+    sync.add_argument("--only-upstream", action="store_true")
+    sync.set_defaults(func=cmd_sync)
+
+    report = sub.add_parser("report", help="export scan results")
+    report.add_argument("--input", default="data/repos.json")
+    report.add_argument("--output", default="")
+    report.add_argument("--format", choices=["csv", "json", "md"], default="csv")
+    report.add_argument("--columns", default="")
+    report.set_defaults(func=cmd_report)
+
+    gh = sub.add_parser("github", help="GitHub repo utilities")
+    gh_sub = gh.add_subparsers(dest="github_command", required=True)
+
+    gh_list = gh_sub.add_parser("list", help="list GitHub repos to JSON")
+    gh_list.add_argument("--user", default="")
+    gh_list.add_argument("--token", default="")
+    gh_list.add_argument("--include-forks", action="store_true")
+    gh_list.add_argument("--output", default="data/github.json")
+    gh_list.set_defaults(func=cmd_github_list)
+
+    gh_clone = gh_sub.add_parser("clone", help="clone missing repos from JSON list")
+    gh_clone.add_argument("--input", default="data/github.json")
+    gh_clone.add_argument("--root", default=os.getcwd())
+    gh_clone.add_argument("--dry-run", action="store_true")
+    gh_clone.set_defaults(func=cmd_github_clone)
+
+    gh_gists = gh_sub.add_parser("gists", help="GitHub gists utilities")
+    gh_gists_sub = gh_gists.add_subparsers(dest="gists_command", required=True)
+
+    gh_gists_list = gh_gists_sub.add_parser("list", help="list gists to JSON")
+    gh_gists_list.add_argument("--user", default="")
+    gh_gists_list.add_argument("--token", default="")
+    gh_gists_list.add_argument("--output", default="data/gists.json")
+    gh_gists_list.set_defaults(func=cmd_github_gists_list)
+
+    gh_gists_update = gh_gists_sub.add_parser("update", help="update a gist")
+    gh_gists_update.add_argument("gist_id")
+    gh_gists_update.add_argument("--file", action="append", default=[])
+    gh_gists_update.add_argument("--delete", action="append", default=[])
+    gh_gists_update.add_argument("--description", default=None)
+    gh_gists_update.add_argument("--token", default="")
+    gh_gists_update.add_argument("--force", "-f", action="store_true")
+    gh_gists_update.set_defaults(func=cmd_github_gists_update)
+
+    gh_gists_create = gh_gists_sub.add_parser("create", help="create a gist")
+    gh_gists_create.add_argument("--file", action="append", default=[])
+    gh_gists_create.add_argument("--description", default=None)
+    vis = gh_gists_create.add_mutually_exclusive_group()
+    vis.add_argument("--public", action="store_true")
+    vis.add_argument("--private", action="store_true")
+    gh_gists_create.add_argument("--token", default="")
+    gh_gists_create.set_defaults(func=cmd_github_gists_create)
+
+    return parser
+
+
+def main() -> None:
+    load_dotenv()
+    parser = build_parser()
+    args = parser.parse_args()
+    raise SystemExit(args.func(args))

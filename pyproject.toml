@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-lantern"
+version = "0.1.0"
+description = "Local and GitHub repository visibility and status toolkit."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+  { name = "git-lantern contributors" }
+]
+dependencies = []
+
+[project.scripts]
+lantern = "lantern.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
