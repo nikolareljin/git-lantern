@@ -15,6 +15,48 @@ lantern --help
 
 Create `.env` from `.env.example` if you want GitHub API access.
 
+## Scripts
+
+```bash
+./scripts/build.sh
+./scripts/test.sh
+./scripts/lint.sh
+./scripts/local_ci.sh
+./scripts/bump_version.sh patch
+./scripts/update_submodules.sh
+./scripts/generate_man.sh
+./scripts/packaging_init.sh
+./scripts/release.sh
+./scripts/release.sh --no-tag
+./scripts/release.sh --tag-prefix v
+```
+
+## Makefile shortcuts
+
+```bash
+make build
+make test
+make lint
+make ci
+make bump
+make submodules
+make man
+make packaging
+make release
+```
+
+## CI workflows
+
+- `.github/workflows/ci.yml` uses ci-helpers Python CI.
+- Packaging workflows (Homebrew, deb, rpm, PPA) are wired to ci-helpers presets.
+- `.github/workflows/release.yml` builds dist tarballs and publishes a GitHub release.
+- `release.yml` supports tags like `1.2.3` or `v1.2.3` and can publish Homebrew when enabled.
+- `release.yml` auto-publishes Homebrew on tag pushes and attaches deb/rpm artifacts.
+- `.github/workflows/auto-tag.yml` tags release merges from `release/X.Y.Z` or `release/X.Y.Z-rcN` branches.
+- Release notes are generated via ci-helpers and updated on every publish; man pages are generated during release builds.
+- Update the Homebrew `homepage` and tap/release inputs before publishing.
+- PPA publishing requires `PPA_GPG_PRIVATE_KEY`, `PPA_GPG_PASSPHRASE`, and `PPA_LAUNCHPAD_SSH_KEY` secrets.
+
 ## Commands (initial)
 
 ```bash

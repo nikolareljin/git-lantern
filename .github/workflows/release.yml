@@ -1,0 +1,139 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag for the release (e.g. v0.1.0). Leave blank to use the ref."
+        required: false
+        default: ""
+      publish_homebrew:
+        description: "Publish Homebrew formula (requires tap token)."
+        required: false
+        default: "false"
+  push:
+    tags:
+      - "*.*.*"
+      - "*.*.*-rc*"
+      - "v*.*.*"
+      - "v*.*.*-rc*"
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    outputs:
+      release_notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Generate release notes
+        id: notes
+        uses: ./.github/ci-helpers/.github/actions/release-notes
+
+  build-release:
+    needs: notes
+    uses: ./.github/ci-helpers/.github/workflows/release-build.yml
+    with:
+      working_directory: "."
+      python_version: "3.11"
+      build_command: "./scripts/update_submodules.sh && ./scripts/generate_man.sh && ./scripts/release.sh --no-tag"
+      artifact_paths: "dist/*.tar.gz"
+      upload_artifact: true
+      release_tag: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
+      release_name: "lantern ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}"
+      release_notes: ${{ needs.notes.outputs.release_notes }}
+
+  homebrew:
+    if: ${{ github.event_name == 'push' || inputs.publish_homebrew == 'true' }}
+    needs: build-release
+    uses: ./.github/ci-helpers/.github/workflows/homebrew-package.yml
+    with:
+      working_directory: "."
+      prebuild_command: "./scripts/generate_man.sh"
+      name: "lantern"
+      desc: "Repository visibility toolkit"
+      homepage: "https://github.com/OWNER/git-lantern"
+      license: "MIT"
+      entrypoint: "lantern"
+      man_path: "man/lantern.1"
+      dist_dir: "dist"
+      exclude_paths: ".git,.github,dist,venv,__pycache__"
+      publish: "true"
+      release_repo: "OWNER/git-lantern"
+      tap_repo: "OWNER/homebrew-tap"
+      tap_branch: "main"
+      tap_dir: "Formula"
+    secrets:
+      tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  deb:
+    if: ${{ github.event_name == 'push' }}
+    uses: ./.github/ci-helpers/.github/workflows/deb-build.yml
+    with:
+      working_directory: "."
+      prebuild_command: "./scripts/generate_man.sh"
+      build_command: "./scripts/build.sh"
+      artifact_name: "deb-packages"
+      artifact_glob: "dist/*.deb"
+
+  rpm:
+    if: ${{ github.event_name == 'push' }}
+    uses: ./.github/ci-helpers/.github/workflows/rpm-build.yml
+    with:
+      working_directory: "."
+      prebuild_command: "./scripts/generate_man.sh"
+      build_command: "./scripts/build.sh"
+      artifact_name: "rpm-packages"
+      artifact_glob: "dist/*.rpm"
+
+  publish-packages:
+    if: ${{ github.event_name == 'push' }}
+    needs:
+      - build-release
+      - deb
+      - rpm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages
+          path: dist
+
+      - name: Download rpm artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm-packages
+          path: dist
+
+      - name: Publish deb/rpm assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/*.deb
+            dist/*.rpm
+          update_existing: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ppa:
+    if: ${{ github.event_name == 'push' }}
+    uses: ./.github/ci-helpers/.github/workflows/ppa-deb.yml
+    with:
+      working_directory: "."
+      prebuild_command: "./scripts/generate_man.sh"
+      build_command: "./scripts/build.sh"
+      ppa_target: "ppa:OWNER/lantern"
+      signing_key_id: "YOUR_KEY_ID"
+      deb_fullname: "Your Name"
+      deb_email: "you@example.com"
+    secrets:
+      gpg_private_key: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+      gpg_passphrase: ${{ secrets.PPA_GPG_PASSPHRASE }}
+      launchpad_ssh_private_key: ${{ secrets.PPA_LAUNCHPAD_SSH_KEY }}

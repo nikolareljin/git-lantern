@@ -1,0 +1,17 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  python:
+    uses: ./.github/ci-helpers/.github/workflows/python.yml
+    with:
+      working_directory: "."
+      lint_command: "./scripts/lint.sh"
+      test_command: "./scripts/test.sh"
+      build_command: "./scripts/build.sh"

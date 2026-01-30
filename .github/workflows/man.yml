@@ -1,0 +1,24 @@
+name: man-pages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  man:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate man page
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/generate_man.sh
+
+      - name: Upload man pages
+        uses: actions/upload-artifact@v4
+        with:
+          name: man-pages
+          path: man/*.1

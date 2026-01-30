@@ -1,0 +1,12 @@
+name: rpm
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rpm:
+    uses: ./.github/ci-helpers/.github/workflows/rpm-build.yml
+    with:
+      working_directory: "."
+      prebuild_command: "./scripts/generate_man.sh"
+      build_command: "./scripts/build.sh"
