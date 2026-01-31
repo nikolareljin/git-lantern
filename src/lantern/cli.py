@@ -323,6 +323,33 @@ def cmd_github_list(args: argparse.Namespace) -> int:
 def cmd_github_clone(args: argparse.Namespace) -> int:
     with open(args.input, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    if args.server:
+        config = lantern_config.load_config()
+        server = lantern_config.get_server(config, args.server)
+        expected = server.get("name", "")
+        expected_provider = server.get("provider", "")
+        expected_base = (server.get("base_url") or "").rstrip("/")
+        payload_server = payload.get("server", "")
+        payload_provider = payload.get("provider", "")
+        payload_base = (payload.get("base_url") or "").rstrip("/")
+        if payload_server and expected and payload_server != expected:
+            print(
+                f"Input server '{payload_server}' does not match requested '{expected}'.",
+                file=sys.stderr,
+            )
+            return 1
+        if payload_provider and expected_provider and payload_provider != expected_provider:
+            print(
+                f"Input provider '{payload_provider}' does not match requested '{expected_provider}'.",
+                file=sys.stderr,
+            )
+            return 1
+        if payload_base and expected_base and payload_base != expected_base:
+            print(
+                f"Input base_url '{payload_base}' does not match requested '{expected_base}'.",
+                file=sys.stderr,
+            )
+            return 1
     repos = payload.get("repos", [])
     os.makedirs(args.root, exist_ok=True)
     for repo in repos:
@@ -333,6 +360,9 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         dest = os.path.join(args.root, name)
         if os.path.exists(dest):
             continue
+        parent = os.path.dirname(dest)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         if args.dry_run:
             print(f"[DRY RUN] git clone {ssh_url} {dest}")
             continue
@@ -345,13 +375,14 @@ def cmd_github_gists_list(args: argparse.Namespace) -> int:
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
     provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
     if provider != "github":
         print("Gists are only supported for GitHub servers.", file=sys.stderr)
         return 1
     user = args.user or env.get("GITHUB_USER") or server.get("user")
     token = args.token or env.get("GITHUB_TOKEN") or server.get("token")
     try:
-        gists = github.fetch_gists(user, token)
+        gists = github.fetch_gists(user, token, base_url)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -373,6 +404,7 @@ def cmd_github_gists_update(args: argparse.Namespace) -> int:
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
     provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
     if provider != "github":
         print("Gists are only supported for GitHub servers.", file=sys.stderr)
         return 1
@@ -398,7 +430,7 @@ def cmd_github_gists_update(args: argparse.Namespace) -> int:
         return 1
 
     if not args.force:
-        current = github.get_gist(args.gist_id, token)
+        current = github.get_gist(args.gist_id, token, base_url)
         existing = set((current.get("files") or {}).keys())
         overlap = existing.intersection(files.keys())
         delete_overlap = existing.intersection(delete_names)
@@ -415,7 +447,7 @@ def cmd_github_gists_update(args: argparse.Namespace) -> int:
     for name in delete_names:
         update_files[name] = None
 
-    github.update_gist(args.gist_id, token, update_files, args.description)
+    github.update_gist(args.gist_id, token, update_files, args.description, base_url)
     print("Gist updated.")
     return 0
 
@@ -425,6 +457,7 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
     provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
     if provider != "github":
         print("Gists are only supported for GitHub servers.", file=sys.stderr)
         return 1
@@ -453,7 +486,7 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
         is_public = True
     else:
         is_public = False
-    created = github.create_gist(token, files, args.description, is_public)
+    created = github.create_gist(token, files, args.description, is_public, base_url)
     print(created.get("html_url", "Gist created."))
     return 0
 
