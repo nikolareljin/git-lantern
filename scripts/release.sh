@@ -31,8 +31,11 @@ if [[ -z "$version" ]]; then
 fi
 
 if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
-  echo "Working tree is dirty; commit or stash before release." >&2
-  exit 1
+  if [[ "${RELEASE_ALLOW_DIRTY:-}" != "1" ]]; then
+    echo "Working tree is dirty; commit or stash before release." >&2
+    echo "Set RELEASE_ALLOW_DIRTY=1 to override." >&2
+    exit 1
+  fi
 fi
 
 mkdir -p "$DIST_DIR"

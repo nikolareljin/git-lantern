@@ -3,5 +3,27 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-python -m pip install ruff
+PYTHON_BIN="${PYTHON_BIN:-}"
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  else
+    echo "python (or python3) is required but was not found on PATH." >&2
+    exit 1
+  fi
+fi
+
+PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+case "$PYTHON_VERSION" in
+  3.*) ;;
+  *)
+    echo "Python 3 is required; found ${PYTHON_VERSION} via ${PYTHON_BIN}." >&2
+    exit 1
+    ;;
+esac
+
+"$PYTHON_BIN" -m pip install ruff
 ruff check "$ROOT_DIR"

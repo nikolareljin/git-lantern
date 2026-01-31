@@ -21,3 +21,5 @@ coverage/
 .coverage
 node_modules/
 *.code-workspace
+TODO.txt
+
