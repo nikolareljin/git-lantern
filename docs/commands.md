@@ -11,6 +11,61 @@ This document explains every `lantern ...` command, the data it produces, and ho
 - **Tables**: Output from `lantern table`, `lantern status`, etc. is a fixed-width text table.
 - **JSON scans**: `lantern scan` stores the full repository records to JSON for later `table` or `report` usage.
 
+## Server configuration
+
+Lantern can read a `config.json` file to manage multiple git servers (GitHub, GitLab, Bitbucket, or self-hosted instances).
+
+**Config file location**:
+- Checks (first match wins):
+  - `GIT_LANTERN_CONFIG=/path/to/config.json` (explicit override)
+  - `~/.git-lantern/config.json`
+  - `~/.config/git-lantern/config.json`
+  - `/etc/git-lantern/config.json`
+  - `/usr/local/etc/git-lantern/config.json`
+
+**Active server selection**:
+- Use `--server NAME` on `lantern github ...` commands to select a server for that command.
+- Or set `LANTERN_SERVER=NAME` to choose a default for the session.
+
+**Example config**:
+```json
+{
+  "default_server": "github.com",
+  "servers": {
+    "github.com": {
+      "provider": "github",
+      "base_url": "https://api.github.com",
+      "USER": "my-user",
+      "TOKEN": "ghp_xxx"
+    },
+    "gitlab.com": {
+      "provider": "gitlab",
+      "base_url": "https://gitlab.com/api/v4",
+      "USER": "my-user",
+      "TOKEN": "glpat_xxx"
+    },
+    "bitbucket.org": {
+      "provider": "bitbucket",
+      "base_url": "https://api.bitbucket.org/2.0",
+      "USER": "my-user",
+      "TOKEN": "bb-token",
+      "auth": { "type": "bearer" }
+    },
+    "10.0.0.22": {
+      "provider": "gitlab",
+      "base_url": "https://10.0.0.22/api/v4",
+      "USER": "my-user",
+      "TOKEN": "glpat_xxx"
+    }
+  }
+}
+```
+
+**List configured servers**:
+```bash
+lantern servers
+```
+
 ## Local repository commands
 
 ### `lantern repos`
@@ -175,29 +230,44 @@ lantern report --input data/repos.json --format md --output data/repos.md
 lantern report --input data/repos.json --format json
 ```
 
-## GitHub commands
+## Git server commands (`lantern github ...`)
 
-The GitHub commands use environment variables from `.env` (or `--user`/`--token`).
+The `lantern github` command group can target GitHub, GitLab, or Bitbucket using `--server` and the config file.
+It still supports `.env` fallbacks and will use the current directory if `--root` is not set.
 
-- `GITHUB_USER`: GitHub username used for listing repos or gists.
-- `GITHUB_TOKEN`: Personal access token for authenticated API access.
+Environment fallbacks:
+- `GITHUB_USER`, `GITHUB_TOKEN`
+- `GITLAB_USER`, `GITLAB_TOKEN`
+- `BITBUCKET_USER`, `BITBUCKET_TOKEN`
+- `LANTERN_SERVER` (for default server selection)
+
+**Precedence**:
+- CLI flags (`--user`, `--token`, `--server`)
+- `.env` values (loaded from the current directory)
+- `config.json` values
 
 ### `lantern github list`
 
-**Purpose**: List GitHub repositories and write to JSON.
+**Purpose**: List repositories from the selected git server and write to JSON.
 
 **What it does**:
-- Uses `--user` or `GITHUB_USER` to scope repos.
-- If `--token`/`GITHUB_TOKEN` is set, it uses the authenticated endpoint and can include private repos owned by the user.
+- Uses `--server` to select a provider (defaults to `default_server`, which defaults to `github.com`).
+- Uses `--user` (or config/env defaults) to scope repos.
+- If `--token` is set, it uses the authenticated endpoint and can include private repos owned by the user.
 - If `--include-forks` is not set, forked repos are excluded.
 - Writes JSON to `--output` (default `data/github.json`) or stdout.
 
 **Output fields per repo**:
 - `name`, `private`, `default_branch`, `ssh_url`, `clone_url`, `html_url`.
 
+**Output metadata**:
+- `server`, `provider`, `base_url`, `user`.
+
 **Example**:
 ```bash
-lantern github list --user my-user --output data/github.json
+lantern github list --server github --user my-user --output data/github.json
+lantern github list --server gitlab --output data/gitlab.json
+lantern github list --server bitbucket --output data/bitbucket.json
 ```
 
 ### `lantern github clone`
@@ -217,9 +287,10 @@ lantern github clone --input data/github.json --root ~/workspace
 
 ### `lantern github gists list`
 
-**Purpose**: List gists and write to JSON.
+**Purpose**: List gists and write to JSON (GitHub only).
 
 **What it does**:
+- Uses `--server` to select a GitHub server.
 - Uses `--user` or `GITHUB_USER` for public gists, or uses a token to list the authenticated user's gists.
 - Writes JSON to `--output` (default `data/gists.json`) or stdout.
 
@@ -233,7 +304,7 @@ lantern github gists list --user my-user --output data/gists.json
 
 ### `lantern github gists update`
 
-**Purpose**: Update or delete files in an existing gist.
+**Purpose**: Update or delete files in an existing gist (GitHub only).
 
 **What it does**:
 - Requires a GitHub token (`--token` or `GITHUB_TOKEN`).
@@ -251,7 +322,7 @@ lantern github gists update GIST_ID --delete old.txt --force
 
 ### `lantern github gists create`
 
-**Purpose**: Create a new gist.
+**Purpose**: Create a new gist (GitHub only).
 
 **What it does**:
 - Requires a GitHub token (`--token` or `GITHUB_TOKEN`).

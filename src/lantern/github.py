@@ -60,7 +60,15 @@ def fetch_repos(user: str, token: Optional[str], include_forks: bool) -> List[Di
 
 def load_env() -> Dict[str, str]:
     env = {}
-    for key in ("GITHUB_USER", "GITHUB_TOKEN"):
+    for key in (
+        "GITHUB_USER",
+        "GITHUB_TOKEN",
+        "GITLAB_USER",
+        "GITLAB_TOKEN",
+        "BITBUCKET_USER",
+        "BITBUCKET_TOKEN",
+        "LANTERN_SERVER",
+    ):
         value = os.environ.get(key, "")
         if value:
             env[key] = value

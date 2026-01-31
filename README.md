@@ -15,7 +15,7 @@ lantern --help
 
 ## Environment
 
-Create `.env` from `.env.example` if you want GitHub API access.
+Create `.env` from `.env.example` if you want API access. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` and see `docs/commands.md` for the format.
 
 ## Scripts
 
