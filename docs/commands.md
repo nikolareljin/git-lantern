@@ -4,7 +4,7 @@ This document explains every `lantern ...` command, the data it produces, and ho
 
 ## Common concepts
 
-- **Workspace root**: A directory that contains multiple Git repositories. Most commands accept `--root` (defaults to the current working directory).
+- **Workspace root**: A directory that contains multiple Git repositories. Most commands accept `--root`. If you do not pass it, Lantern assumes the current working directory and starts scanning from there.
 - **Repository discovery**: Lantern considers any directory with a `.git` folder to be a repo.
 - **Depth**: `--max-depth` limits how deep Lantern traverses from `--root` (default: 6).
 - **Hidden directories**: By default, directories starting with `.` are skipped. Use `--include-hidden` to include them.

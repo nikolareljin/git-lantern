@@ -64,6 +64,7 @@ make release
 See [docs/commands.md](docs/commands.md) for the full command reference and detailed explanations of each `lantern ...` command.
 
 ```bash
+lantern repos
 lantern scan --root /path/to/workspace --output data/repos.json
 lantern status --root /path/to/workspace
 lantern table --input data/repos.json
