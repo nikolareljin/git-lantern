@@ -15,7 +15,16 @@ lantern --help
 
 ## Environment
 
-Create `.env` from `.env.example` if you want GitHub API access.
+Create `.env` from `.env.example` if you want API access. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` and see `docs/commands.md` for the format.
+
+## Shell completion
+
+Lantern ships bash completion via argcomplete.
+
+```bash
+pip install -e .
+source completions/lantern.bash
+```
 
 ## Scripts
 
@@ -24,6 +33,7 @@ Create `.env` from `.env.example` if you want GitHub API access.
 ./scripts/test.sh
 ./scripts/lint.sh
 ./scripts/local_ci.sh
+./scripts/install_git_hooks.sh
 ./scripts/bump_version.sh patch
 ./scripts/update_submodules.sh
 ./scripts/generate_man.sh
@@ -47,6 +57,21 @@ make packaging
 make release
 ```
 
+## Git hooks
+
+Install the pre-commit hook to run local CI before commits:
+
+```bash
+./scripts/install_git_hooks.sh
+```
+
+Skip or speed up:
+
+```bash
+SKIP_LANTERN_PRECOMMIT=1 git commit -m "..."
+LANTERN_PRECOMMIT_FAST=1 git commit -m "..."
+```
+
 ## CI workflows
 
 - `.github/workflows/ci.yml` uses ci-helpers Python CI.
@@ -64,6 +89,7 @@ make release
 See [docs/commands.md](docs/commands.md) for the full command reference and detailed explanations of each `lantern ...` command.
 
 ```bash
+lantern repos
 lantern scan --root /path/to/workspace --output data/repos.json
 lantern status --root /path/to/workspace
 lantern table --input data/repos.json
@@ -74,14 +100,14 @@ lantern sync --root /path/to/workspace --fetch
 lantern sync --root /path/to/workspace --pull --only-clean --only-upstream
 lantern report --input data/repos.json --output data/repos.csv
 lantern report --input data/repos.json --output data/repos.md --format md
-lantern github list --user USERNAME --output data/github.json
-lantern github clone --input data/github.json --root /path/to/workspace
-lantern github gists list --user USERNAME --output data/gists.json
-lantern github gists update GIST_ID --file ./notes.txt --force
-lantern github gists update GIST_ID --file readme.md=./README.md
-lantern github gists update GIST_ID --delete old.txt --force
-lantern github gists create --file ./notes.txt --description "Notes" --public
-lantern github gists create --file ./notes.txt --description "Notes" --private
+lantern forge list --user USERNAME --output data/github.json
+lantern forge clone --input data/github.json --root /path/to/workspace
+lantern forge gists list --user USERNAME --output data/gists.json
+lantern forge gists update GIST_ID --file ./notes.txt --force
+lantern forge gists update GIST_ID --file readme.md=./README.md
+lantern forge gists update GIST_ID --delete old.txt --force
+lantern forge gists create --file ./notes.txt --description "Notes" --public
+lantern forge gists create --file ./notes.txt --description "Notes" --private
 ```
 
 ## Notes

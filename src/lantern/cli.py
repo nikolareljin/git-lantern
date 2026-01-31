@@ -5,6 +5,13 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
+try:
+    import argcomplete
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    argcomplete = None
+
+from . import config as lantern_config
+from . import forge
 from . import git
 from . import github
 from .table import render_table
@@ -267,15 +274,40 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_servers(args: argparse.Namespace) -> int:
+    config = lantern_config.load_config()
+    records = lantern_config.list_servers(config)
+    if not records:
+        print("No servers configured.")
+        return 0
+    columns = ["name", "provider", "base_url", "user"]
+    print(render_table(records, columns))
+    return 0
+
+
 def cmd_github_list(args: argparse.Namespace) -> int:
     env = github.load_env()
-    user = args.user or env.get("GITHUB_USER")
-    token = args.token or env.get("GITHUB_TOKEN")
-    if not user:
-        print("GitHub user is required (set GITHUB_USER or pass --user).", file=sys.stderr)
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    env_user_key = f"{provider.upper()}_USER"
+    env_token_key = f"{provider.upper()}_TOKEN"
+    user = args.user or env.get(env_user_key) or server.get("user")
+    token = args.token or env.get(env_token_key) or server.get("token")
+    auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+    try:
+        repos = forge.fetch_repos(provider, user, token, args.include_forks, base_url, auth)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
-    repos = github.fetch_repos(user, token, args.include_forks)
-    payload = {"user": user, "repos": repos}
+    payload = {
+        "server": server.get("name", provider),
+        "provider": provider,
+        "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
+        "user": user,
+        "repos": repos,
+    }
     if args.output:
         output_dir = os.path.dirname(args.output)
         if output_dir:
@@ -291,6 +323,33 @@ def cmd_github_list(args: argparse.Namespace) -> int:
 def cmd_github_clone(args: argparse.Namespace) -> int:
     with open(args.input, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
+    if args.server:
+        config = lantern_config.load_config()
+        server = lantern_config.get_server(config, args.server)
+        expected = server.get("name", "")
+        expected_provider = server.get("provider", "")
+        expected_base = (server.get("base_url") or "").rstrip("/")
+        payload_server = payload.get("server", "")
+        payload_provider = payload.get("provider", "")
+        payload_base = (payload.get("base_url") or "").rstrip("/")
+        if payload_server and expected and payload_server != expected:
+            print(
+                f"Input server '{payload_server}' does not match requested '{expected}'.",
+                file=sys.stderr,
+            )
+            return 1
+        if payload_provider and expected_provider and payload_provider != expected_provider:
+            print(
+                f"Input provider '{payload_provider}' does not match requested '{expected_provider}'.",
+                file=sys.stderr,
+            )
+            return 1
+        if payload_base and expected_base and payload_base != expected_base:
+            print(
+                f"Input base_url '{payload_base}' does not match requested '{expected_base}'.",
+                file=sys.stderr,
+            )
+            return 1
     repos = payload.get("repos", [])
     os.makedirs(args.root, exist_ok=True)
     for repo in repos:
@@ -301,6 +360,9 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         dest = os.path.join(args.root, name)
         if os.path.exists(dest):
             continue
+        parent = os.path.dirname(dest)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         if args.dry_run:
             print(f"[DRY RUN] git clone {ssh_url} {dest}")
             continue
@@ -310,10 +372,17 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
 
 def cmd_github_gists_list(args: argparse.Namespace) -> int:
     env = github.load_env()
-    user = args.user or env.get("GITHUB_USER")
-    token = args.token or env.get("GITHUB_TOKEN")
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    if provider != "github":
+        print("Gists are only supported for GitHub servers.", file=sys.stderr)
+        return 1
+    user = args.user or env.get("GITHUB_USER") or server.get("user")
+    token = args.token or env.get("GITHUB_TOKEN") or server.get("token")
     try:
-        gists = github.fetch_gists(user, token)
+        gists = github.fetch_gists(user, token, base_url)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -332,7 +401,14 @@ def cmd_github_gists_list(args: argparse.Namespace) -> int:
 
 def cmd_github_gists_update(args: argparse.Namespace) -> int:
     env = github.load_env()
-    token = args.token or env.get("GITHUB_TOKEN")
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    if provider != "github":
+        print("Gists are only supported for GitHub servers.", file=sys.stderr)
+        return 1
+    token = args.token or env.get("GITHUB_TOKEN") or server.get("token")
     if not token:
         print("GitHub token is required to update gists.", file=sys.stderr)
         return 1
@@ -354,7 +430,7 @@ def cmd_github_gists_update(args: argparse.Namespace) -> int:
         return 1
 
     if not args.force:
-        current = github.get_gist(args.gist_id, token)
+        current = github.get_gist(args.gist_id, token, base_url)
         existing = set((current.get("files") or {}).keys())
         overlap = existing.intersection(files.keys())
         delete_overlap = existing.intersection(delete_names)
@@ -371,14 +447,21 @@ def cmd_github_gists_update(args: argparse.Namespace) -> int:
     for name in delete_names:
         update_files[name] = None
 
-    github.update_gist(args.gist_id, token, update_files, args.description)
+    github.update_gist(args.gist_id, token, update_files, args.description, base_url)
     print("Gist updated.")
     return 0
 
 
 def cmd_github_gists_create(args: argparse.Namespace) -> int:
     env = github.load_env()
-    token = args.token or env.get("GITHUB_TOKEN")
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    if provider != "github":
+        print("Gists are only supported for GitHub servers.", file=sys.stderr)
+        return 1
+    token = args.token or env.get("GITHUB_TOKEN") or server.get("token")
     if not token:
         print("GitHub token is required to create gists.", file=sys.stderr)
         return 1
@@ -403,7 +486,7 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
         is_public = True
     else:
         is_public = False
-    created = github.create_gist(token, files, args.description, is_public)
+    created = github.create_gist(token, files, args.description, is_public, base_url)
     print(created.get("html_url", "Gist created."))
     return 0
 
@@ -411,6 +494,9 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantern")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    servers = sub.add_parser("servers", help="list configured git servers")
+    servers.set_defaults(func=cmd_servers)
 
     repos = sub.add_parser("repos", help="list local repos")
     repos.add_argument("--root", default=os.getcwd())
@@ -471,48 +557,87 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--columns", default="")
     report.set_defaults(func=cmd_report)
 
-    gh = sub.add_parser("github", help="GitHub repo utilities")
-    gh_sub = gh.add_subparsers(dest="github_command", required=True)
+    forge = sub.add_parser("forge", help="git server utilities")
+    forge_sub = forge.add_subparsers(dest="forge_command", required=True)
 
-    gh_list = gh_sub.add_parser("list", help="list GitHub repos to JSON")
+    gh_list = forge_sub.add_parser("list", help="list repos to JSON")
+    gh_list.add_argument("--server", default="")
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
     gh_list.add_argument("--include-forks", action="store_true")
     gh_list.add_argument("--output", default="data/github.json")
     gh_list.set_defaults(func=cmd_github_list)
 
-    gh_clone = gh_sub.add_parser("clone", help="clone missing repos from JSON list")
+    gh_clone = forge_sub.add_parser("clone", help="clone missing repos from JSON list")
+    gh_clone.add_argument("--server", default="")
     gh_clone.add_argument("--input", default="data/github.json")
     gh_clone.add_argument("--root", default=os.getcwd())
     gh_clone.add_argument("--dry-run", action="store_true")
     gh_clone.set_defaults(func=cmd_github_clone)
 
-    gh_gists = gh_sub.add_parser("gists", help="GitHub gists utilities")
+    gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")
     gh_gists_sub = gh_gists.add_subparsers(dest="gists_command", required=True)
+    gh_gist = forge_sub.add_parser("gist", help="GitHub gists utilities")
+    gh_gist_sub = gh_gist.add_subparsers(dest="gists_command", required=True)
+    gh_snippets = forge_sub.add_parser("snippets", help="GitHub snippets utilities")
+    gh_snippets_sub = gh_snippets.add_subparsers(dest="gists_command", required=True)
+    gh_snippet = forge_sub.add_parser("snippet", help="GitHub snippets utilities")
+    gh_snippet_sub = gh_snippet.add_subparsers(dest="gists_command", required=True)
 
     gh_gists_list = gh_gists_sub.add_parser("list", help="list gists to JSON")
-    gh_gists_list.add_argument("--user", default="")
-    gh_gists_list.add_argument("--token", default="")
-    gh_gists_list.add_argument("--output", default="data/gists.json")
-    gh_gists_list.set_defaults(func=cmd_github_gists_list)
+    gh_gist_list = gh_gist_sub.add_parser("list", help="list gists to JSON")
+    gh_snippets_list = gh_snippets_sub.add_parser("list", help="list snippets to JSON")
+    gh_snippet_list = gh_snippet_sub.add_parser("list", help="list snippets to JSON")
+    for parser_item in (
+        gh_gists_list,
+        gh_gist_list,
+        gh_snippets_list,
+        gh_snippet_list,
+    ):
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--user", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--output", default="data/gists.json")
+        parser_item.set_defaults(func=cmd_github_gists_list)
 
     gh_gists_update = gh_gists_sub.add_parser("update", help="update a gist")
-    gh_gists_update.add_argument("gist_id")
-    gh_gists_update.add_argument("--file", action="append", default=[])
-    gh_gists_update.add_argument("--delete", action="append", default=[])
-    gh_gists_update.add_argument("--description", default=None)
-    gh_gists_update.add_argument("--token", default="")
-    gh_gists_update.add_argument("--force", "-f", action="store_true")
-    gh_gists_update.set_defaults(func=cmd_github_gists_update)
+    gh_gist_update = gh_gist_sub.add_parser("update", help="update a gist")
+    gh_snippets_update = gh_snippets_sub.add_parser("update", help="update a snippet")
+    gh_snippet_update = gh_snippet_sub.add_parser("update", help="update a snippet")
+    for parser_item in (
+        gh_gists_update,
+        gh_gist_update,
+        gh_snippets_update,
+        gh_snippet_update,
+    ):
+        parser_item.add_argument("gist_id")
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--delete", action="append", default=[])
+        parser_item.add_argument("--description", default=None)
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--force", "-f", action="store_true")
+        parser_item.set_defaults(func=cmd_github_gists_update)
 
     gh_gists_create = gh_gists_sub.add_parser("create", help="create a gist")
-    gh_gists_create.add_argument("--file", action="append", default=[])
-    gh_gists_create.add_argument("--description", default=None)
-    vis = gh_gists_create.add_mutually_exclusive_group()
-    vis.add_argument("--public", action="store_true")
-    vis.add_argument("--private", action="store_true")
-    gh_gists_create.add_argument("--token", default="")
-    gh_gists_create.set_defaults(func=cmd_github_gists_create)
+    gh_gist_create = gh_gist_sub.add_parser("create", help="create a gist")
+    gh_snippets_create = gh_snippets_sub.add_parser("create", help="create a snippet")
+    gh_snippet_create = gh_snippet_sub.add_parser("create", help="create a snippet")
+    for parser_item in (
+        gh_gists_create,
+        gh_gist_create,
+        gh_snippets_create,
+        gh_snippet_create,
+    ):
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--description", default=None)
+        vis = parser_item.add_mutually_exclusive_group()
+        vis.add_argument("--public", action="store_true")
+        vis.add_argument("--private", action="store_true")
+        parser_item.add_argument("--token", default="")
+        parser_item.set_defaults(func=cmd_github_gists_create)
+
 
     return parser
 
@@ -520,5 +645,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     load_dotenv()
     parser = build_parser()
+    if argcomplete:
+        argcomplete.autocomplete(parser)
     args = parser.parse_args()
     raise SystemExit(args.func(args))
