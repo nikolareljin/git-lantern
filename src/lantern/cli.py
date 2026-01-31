@@ -5,6 +5,11 @@ import subprocess
 import sys
 from typing import Dict, List, Tuple
 
+try:
+    import argcomplete
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    argcomplete = None
+
 from . import config as lantern_config
 from . import forge
 from . import git
@@ -607,5 +612,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     load_dotenv()
     parser = build_parser()
+    if argcomplete:
+        argcomplete.autocomplete(parser)
     args = parser.parse_args()
     raise SystemExit(args.func(args))

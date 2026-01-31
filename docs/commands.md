@@ -11,6 +11,13 @@ This document explains every `lantern ...` command, the data it produces, and ho
 - **Tables**: Output from `lantern table`, `lantern status`, etc. is a fixed-width text table.
 - **JSON scans**: `lantern scan` stores the full repository records to JSON for later `table` or `report` usage.
 
+## Shell completion
+
+```bash
+pip install -e .
+source completions/lantern.bash
+```
+
 ## Server configuration
 
 Lantern can read a `config.json` file to manage multiple git servers (GitHub, GitLab, Bitbucket, or self-hosted instances).
