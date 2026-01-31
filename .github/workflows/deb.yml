@@ -5,7 +5,7 @@ on:
 
 jobs:
   deb:
-    uses: nikolareljin/ci-helpers/.github/workflows/deb-build.yml@production
+    uses: nikolareljin/ci-helpers/.github/workflows/deb-build.yml@0.6.0
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"
