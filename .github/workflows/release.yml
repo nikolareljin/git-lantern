@@ -35,7 +35,7 @@ jobs:
 
   build-release:
     needs: notes
-    uses: ./.github/ci-helpers/.github/workflows/release-build.yml
+    uses: ./.github/workflows/release-build.yml
     with:
       working_directory: "."
       python_version: "3.11"
@@ -49,7 +49,7 @@ jobs:
   homebrew:
     if: ${{ github.event_name == 'push' || inputs.publish_homebrew == 'true' }}
     needs: build-release
-    uses: ./.github/ci-helpers/.github/workflows/homebrew-package.yml
+    uses: ./.github/workflows/homebrew-package.yml
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"
@@ -71,7 +71,7 @@ jobs:
 
   deb:
     if: ${{ github.event_name == 'push' }}
-    uses: ./.github/ci-helpers/.github/workflows/deb-build.yml
+    uses: ./.github/workflows/deb-build.yml
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"
@@ -81,7 +81,7 @@ jobs:
 
   rpm:
     if: ${{ github.event_name == 'push' }}
-    uses: ./.github/ci-helpers/.github/workflows/rpm-build.yml
+    uses: ./.github/workflows/rpm-build.yml
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"
@@ -124,7 +124,7 @@ jobs:
 
   ppa:
     if: ${{ github.event_name == 'push' }}
-    uses: ./.github/ci-helpers/.github/workflows/ppa-deb.yml
+    uses: ./.github/workflows/ppa-deb.yml
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"

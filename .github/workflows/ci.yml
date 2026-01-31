@@ -9,7 +9,7 @@ on:
 
 jobs:
   python:
-    uses: ./.github/ci-helpers/.github/workflows/python.yml
+    uses: ./.github/workflows/python.yml
     with:
       working_directory: "."
       lint_command: "./scripts/lint.sh"
