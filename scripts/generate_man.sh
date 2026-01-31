@@ -28,12 +28,6 @@ if [[ -n "$PYTHON_BIN" ]]; then
   esac
 fi
 
-if command -v lantern >/dev/null 2>&1; then
-  help2man -N -n "repository visibility toolkit" -o "$MAN_DIR/lantern.1" lantern
-  echo "Man page generated via help2man."
-  exit 0
-fi
-
 if [[ -n "$PYTHON_BIN" ]]; then
   wrapper="$(mktemp)"
   cat >"$wrapper" <<EOF
@@ -43,11 +37,24 @@ if [[ "\${1:-}" == "--version" ]]; then
   cat "$ROOT_DIR/VERSION"
   exit 0
 fi
+if command -v lantern >/dev/null 2>&1; then
+  exec lantern "\$@"
+fi
 PYTHONPATH="$ROOT_DIR/src\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PYTHON_BIN" -m lantern "\$@"
 EOF
   chmod +x "$wrapper"
   trap 'rm -f "$wrapper"' EXIT
-  help2man -N -n "repository visibility toolkit" -o "$MAN_DIR/lantern.1" "$wrapper"
+  help2man --no-discard-stderr -N -n "repository visibility toolkit" \
+    --version-string "$(cat "$ROOT_DIR/VERSION")" \
+    -o "$MAN_DIR/lantern.1" "$wrapper"
+  echo "Man page generated via help2man."
+  exit 0
+fi
+
+if command -v lantern >/dev/null 2>&1; then
+  help2man --no-discard-stderr -N -n "repository visibility toolkit" \
+    --version-string "$(cat "$ROOT_DIR/VERSION")" \
+    -o "$MAN_DIR/lantern.1" lantern
   echo "Man page generated via help2man."
   exit 0
 fi
