@@ -57,6 +57,16 @@ make packaging
 make release
 ```
 
+## Local testing
+
+```bash
+make lint
+make test
+make ci
+```
+
+If your system only provides `python3`, export `PYTHON_BIN=python3` before running the scripts.
+
 ## Git hooks
 
 Install the pre-commit hook to run local CI before commits:
