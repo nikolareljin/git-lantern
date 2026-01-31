@@ -8,4 +8,4 @@ on:
 
 jobs:
   tag:
-    uses: ./.github/ci-helpers/.github/workflows/auto-tag-release.yml
+    uses: nikolareljin/ci-helpers/.github/workflows/auto-tag-release.yml@production
