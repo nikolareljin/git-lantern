@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 def run_git(repo_path: str, args: list) -> str:
