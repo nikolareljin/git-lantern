@@ -14,19 +14,29 @@ def _request(url: str, token: Optional[str]) -> List[Dict]:
     return json.loads(data)
 
 
-def fetch_repos(user: str, token: Optional[str], include_forks: bool) -> List[Dict]:
+def _base_url(base_url: Optional[str]) -> str:
+    return (base_url or "https://api.github.com").rstrip("/")
+
+
+def fetch_repos(
+    user: str,
+    token: Optional[str],
+    include_forks: bool,
+    base_url: Optional[str] = None,
+) -> List[Dict]:
     per_page = 100
     page = 1
     repos: List[Dict] = []
+    api_base = _base_url(base_url)
 
     if token:
-        base_url = "https://api.github.com/user/repos"
+        url_base = f"{api_base}/user/repos"
         params = {
             "affiliation": "owner",
             "per_page": str(per_page),
         }
     else:
-        base_url = f"https://api.github.com/users/{user}/repos"
+        url_base = f"{api_base}/users/{user}/repos"
         params = {
             "type": "owner",
             "per_page": str(per_page),
@@ -34,7 +44,7 @@ def fetch_repos(user: str, token: Optional[str], include_forks: bool) -> List[Di
 
     while True:
         params["page"] = str(page)
-        url = f"{base_url}?{urllib.parse.urlencode(params)}"
+        url = f"{url_base}?{urllib.parse.urlencode(params)}"
         data = _request(url, token)
         if not data:
             break
@@ -75,23 +85,28 @@ def load_env() -> Dict[str, str]:
     return env
 
 
-def fetch_gists(user: Optional[str], token: Optional[str]) -> List[Dict]:
+def fetch_gists(
+    user: Optional[str],
+    token: Optional[str],
+    base_url: Optional[str] = None,
+) -> List[Dict]:
     per_page = 100
     page = 1
     gists: List[Dict] = []
+    api_base = _base_url(base_url)
 
     if token and not user:
-        base_url = "https://api.github.com/gists"
+        url_base = f"{api_base}/gists"
         params = {"per_page": str(per_page)}
     else:
         if not user:
             raise ValueError("GitHub user is required without a token.")
-        base_url = f"https://api.github.com/users/{user}/gists"
+        url_base = f"{api_base}/users/{user}/gists"
         params = {"per_page": str(per_page)}
 
     while True:
         params["page"] = str(page)
-        url = f"{base_url}?{urllib.parse.urlencode(params)}"
+        url = f"{url_base}?{urllib.parse.urlencode(params)}"
         data = _request(url, token)
         if not data:
             break
@@ -111,8 +126,8 @@ def fetch_gists(user: Optional[str], token: Optional[str]) -> List[Dict]:
     return gists
 
 
-def get_gist(gist_id: str, token: Optional[str]) -> Dict:
-    url = f"https://api.github.com/gists/{gist_id}"
+def get_gist(gist_id: str, token: Optional[str], base_url: Optional[str] = None) -> Dict:
+    url = f"{_base_url(base_url)}/gists/{gist_id}"
     data = _request(url, token)
     return data
 
@@ -122,6 +137,7 @@ def update_gist(
     token: str,
     files: Dict[str, Optional[str]],
     description: Optional[str],
+    base_url: Optional[str] = None,
 ) -> Dict:
     file_payload: Dict[str, Dict] = {}
     for name, content in files.items():
@@ -134,7 +150,7 @@ def update_gist(
         payload["description"] = description
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        f"https://api.github.com/gists/{gist_id}",
+        f"{_base_url(base_url)}/gists/{gist_id}",
         data=body,
         method="PATCH",
         headers={"Content-Type": "application/json"},
@@ -150,6 +166,7 @@ def create_gist(
     files: Dict[str, str],
     description: Optional[str],
     public: bool,
+    base_url: Optional[str] = None,
 ) -> Dict:
     payload = {
         "public": public,
@@ -159,7 +176,7 @@ def create_gist(
         payload["description"] = description
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.github.com/gists",
+        f"{_base_url(base_url)}/gists",
         data=body,
         method="POST",
         headers={"Content-Type": "application/json"},

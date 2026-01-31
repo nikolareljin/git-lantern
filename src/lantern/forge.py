@@ -4,6 +4,7 @@ import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional, Tuple
 
+from . import github
 
 DEFAULT_BASE_URLS = {
     "github": "https://api.github.com",
@@ -54,57 +55,14 @@ def fetch_repos(
 ) -> List[Dict]:
     provider = (provider or "github").lower()
     if provider == "github":
-        return _fetch_github_repos(user, token, include_forks, base_url)
+        if not user:
+            raise ValueError("User is required for GitHub.")
+        return github.fetch_repos(user, token, include_forks, base_url)
     if provider == "gitlab":
         return _fetch_gitlab_repos(user, token, include_forks, base_url, auth)
     if provider == "bitbucket":
         return _fetch_bitbucket_repos(user, token, include_forks, base_url, auth)
     raise ValueError(f"Unsupported provider: {provider}")
-
-
-def _fetch_github_repos(
-    user: Optional[str],
-    token: Optional[str],
-    include_forks: bool,
-    base_url: str,
-) -> List[Dict]:
-    if not user:
-        raise ValueError("User is required for GitHub.")
-    per_page = 100
-    page = 1
-    repos: List[Dict] = []
-    base_url = _base_url("github", base_url)
-
-    if token:
-        url_base = f"{base_url.rstrip('/')}/user/repos"
-        params = {"affiliation": "owner", "per_page": str(per_page)}
-    else:
-        url_base = f"{base_url.rstrip('/')}/users/{user}/repos"
-        params = {"type": "owner", "per_page": str(per_page)}
-
-    while True:
-        params["page"] = str(page)
-        url = f"{url_base}?{urllib.parse.urlencode(params)}"
-        data, _headers = _request(url, _auth_headers("github", user, token, None))
-        if not data:
-            break
-        for repo in data:
-            if user and repo.get("owner", {}).get("login") != user:
-                continue
-            if not include_forks and repo.get("fork"):
-                continue
-            repos.append(
-                {
-                    "name": repo.get("name"),
-                    "private": bool(repo.get("private")),
-                    "default_branch": repo.get("default_branch"),
-                    "ssh_url": repo.get("ssh_url"),
-                    "clone_url": repo.get("clone_url"),
-                    "html_url": repo.get("html_url"),
-                }
-            )
-        page += 1
-    return repos
 
 
 def _fetch_gitlab_repos(
@@ -141,7 +99,7 @@ def _fetch_gitlab_repos(
                 continue
             repos.append(
                 {
-                    "name": repo.get("path"),
+                    "name": repo.get("path_with_namespace") or repo.get("path"),
                     "private": repo.get("visibility") != "public",
                     "default_branch": repo.get("default_branch"),
                     "ssh_url": repo.get("ssh_url_to_repo"),
