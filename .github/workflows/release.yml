@@ -18,6 +18,9 @@ on:
       - "v*.*.*"
       - "v*.*.*-rc*"
 
+permissions:
+  contents: write
+
 jobs:
   notes:
     runs-on: ubuntu-latest
