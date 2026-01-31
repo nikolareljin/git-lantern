@@ -2,12 +2,24 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-}"
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  else
+    echo "python (or python3) is required but was not found on PATH." >&2
+    exit 1
+  fi
+fi
 
 if [[ -d "$ROOT_DIR/tests" ]]; then
-  python -m pip install pytest
-  python -m pytest "$ROOT_DIR/tests"
+  "$PYTHON_BIN" -m pip install pytest
+  "$PYTHON_BIN" -m pytest "$ROOT_DIR/tests"
   exit 0
 fi
 
-python -m compileall "$ROOT_DIR/src"
+"$PYTHON_BIN" -m compileall "$ROOT_DIR/src"
 echo "No tests found; compiled sources."
