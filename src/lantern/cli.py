@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     import argcomplete
