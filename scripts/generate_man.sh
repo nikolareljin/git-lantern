@@ -6,8 +6,48 @@ MAN_DIR="$ROOT_DIR/man"
 
 mkdir -p "$MAN_DIR"
 
-if command -v help2man >/dev/null 2>&1 && command -v lantern >/dev/null 2>&1; then
+if ! command -v help2man >/dev/null 2>&1; then
+  echo "help2man not available; keeping existing man/lantern.1"
+  exit 0
+fi
+
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  if command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  fi
+fi
+
+if [[ -n "$PYTHON_BIN" ]]; then
+  PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  case "$PYTHON_VERSION" in
+    3.*) ;;
+    *) PYTHON_BIN="";;
+  esac
+fi
+
+if command -v lantern >/dev/null 2>&1; then
   help2man -N -n "repository visibility toolkit" -o "$MAN_DIR/lantern.1" lantern
+  echo "Man page generated via help2man."
+  exit 0
+fi
+
+if [[ -n "$PYTHON_BIN" ]]; then
+  wrapper="$(mktemp)"
+  cat >"$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "--version" ]]; then
+  cat "$ROOT_DIR/VERSION"
+  exit 0
+fi
+PYTHONPATH="$ROOT_DIR/src\${PYTHONPATH:+:\$PYTHONPATH}" exec "$PYTHON_BIN" -m lantern "\$@"
+EOF
+  chmod +x "$wrapper"
+  trap 'rm -f "$wrapper"' EXIT
+  help2man -N -n "repository visibility toolkit" -o "$MAN_DIR/lantern.1" "$wrapper"
   echo "Man page generated via help2man."
   exit 0
 fi
