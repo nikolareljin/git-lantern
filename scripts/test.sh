@@ -15,6 +15,15 @@ if [[ -z "$PYTHON_BIN" ]]; then
   fi
 fi
 
+PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+case "$PYTHON_VERSION" in
+  3.*) ;;
+  *)
+    echo "Python 3 is required; found ${PYTHON_VERSION} via ${PYTHON_BIN}." >&2
+    exit 1
+    ;;
+esac
+
 if [[ -d "$ROOT_DIR/tests" ]]; then
   "$PYTHON_BIN" -m pip install pytest
   "$PYTHON_BIN" -m pytest "$ROOT_DIR/tests"
