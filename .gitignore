@@ -23,4 +23,5 @@ node_modules/
 *.code-workspace
 *.egg-info/
 src/git_lantern.egg-info/
+man/lantern.1
 TODO.txt
