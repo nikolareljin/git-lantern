@@ -5,7 +5,7 @@ on:
 
 jobs:
   rpm:
-    uses: nikolareljin/ci-helpers/.github/workflows/rpm-build.yml@0.6.0
+    uses: nikolareljin/ci-helpers/.github/workflows/rpm-build.yml@production
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"

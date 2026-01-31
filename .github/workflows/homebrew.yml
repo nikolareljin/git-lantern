@@ -5,7 +5,7 @@ on:
 
 jobs:
   brew:
-    uses: nikolareljin/ci-helpers/.github/workflows/homebrew-package.yml@0.6.0
+    uses: nikolareljin/ci-helpers/.github/workflows/homebrew-package.yml@production
     with:
       working_directory: "."
       name: "lantern"
