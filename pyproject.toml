@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [
   { name = "git-lantern contributors" }
 ]
-dependencies = []
+dependencies = ["argcomplete>=3.0.0"]
 
 [project.scripts]
 lantern = "lantern.cli:main"
