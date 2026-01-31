@@ -40,7 +40,7 @@ fi
 
 mkdir -p "$DIST_DIR"
 
-if [[ ! -x "$ROOT_DIR/scripts/script-helpers/scripts/build_brew_tarball.sh" ]]; then
+if [[ ! -f "$ROOT_DIR/scripts/script-helpers/scripts/build_brew_tarball.sh" ]]; then
   echo "script-helpers not initialized. Run ./scripts/update_submodules.sh" >&2
   exit 1
 fi
