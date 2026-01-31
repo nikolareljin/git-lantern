@@ -24,7 +24,7 @@ Lantern can read a `config.json` file to manage multiple git servers (GitHub, Gi
   - `/usr/local/etc/git-lantern/config.json`
 
 **Active server selection**:
-- Use `--server NAME` on `lantern github ...` commands to select a server for that command.
+- Use `--server NAME` on `lantern forge ...` commands to select a server for that command.
 - Or set `LANTERN_SERVER=NAME` to choose a default for the session.
 
 **Example config**:
@@ -230,9 +230,9 @@ lantern report --input data/repos.json --format md --output data/repos.md
 lantern report --input data/repos.json --format json
 ```
 
-## Git server commands (`lantern github ...`)
+## Git server commands (`lantern forge ...`)
 
-The `lantern github` command group can target GitHub, GitLab, or Bitbucket using `--server` and the config file.
+The `lantern forge` command group can target GitHub, GitLab, or Bitbucket using `--server` and the config file.
 It still supports `.env` fallbacks and will use the current directory if `--root` is not set.
 
 Environment fallbacks:
@@ -246,7 +246,7 @@ Environment fallbacks:
 - `.env` values (loaded from the current directory)
 - `config.json` values
 
-### `lantern github list`
+### `lantern forge list`
 
 **Purpose**: List repositories from the selected git server and write to JSON.
 
@@ -265,14 +265,14 @@ Environment fallbacks:
 
 **Example**:
 ```bash
-lantern github list --server github --user my-user --output data/github.json
-lantern github list --server gitlab --output data/gitlab.json
-lantern github list --server bitbucket --output data/bitbucket.json
+lantern forge list --server github.com --user my-user --output data/github.json
+lantern forge list --server gitlab.com --output data/gitlab.json
+lantern forge list --server bitbucket.org --output data/bitbucket.json
 ```
 
-### `lantern github clone`
+### `lantern forge clone`
 
-**Purpose**: Clone repos from a GitHub list JSON.
+**Purpose**: Clone repos from a git server list JSON.
 
 **What it does**:
 - Reads `--input` (default `data/github.json`).
@@ -282,12 +282,12 @@ lantern github list --server bitbucket --output data/bitbucket.json
 
 **Example**:
 ```bash
-lantern github clone --input data/github.json --root ~/workspace
+lantern forge clone --input data/github.json --root ~/workspace
 ```
 
-### `lantern github gists list`
+### `lantern forge gists list` / `lantern forge snippets list`
 
-**Purpose**: List gists and write to JSON (GitHub only).
+**Purpose**: List gists/snippets and write to JSON (GitHub only).
 
 **What it does**:
 - Uses `--server` to select a GitHub server.
@@ -299,12 +299,12 @@ lantern github clone --input data/github.json --root ~/workspace
 
 **Example**:
 ```bash
-lantern github gists list --user my-user --output data/gists.json
+lantern forge gists list --user my-user --output data/gists.json
 ```
 
-### `lantern github gists update`
+### `lantern forge gists update` / `lantern forge snippets update`
 
-**Purpose**: Update or delete files in an existing gist (GitHub only).
+**Purpose**: Update or delete files in an existing gist/snippet (GitHub only).
 
 **What it does**:
 - Requires a GitHub token (`--token` or `GITHUB_TOKEN`).
@@ -315,14 +315,14 @@ lantern github gists list --user my-user --output data/gists.json
 
 **Examples**:
 ```bash
-lantern github gists update GIST_ID --file ./notes.txt --force
-lantern github gists update GIST_ID --file readme.md=./README.md
-lantern github gists update GIST_ID --delete old.txt --force
+lantern forge gists update GIST_ID --file ./notes.txt --force
+lantern forge gists update GIST_ID --file readme.md=./README.md
+lantern forge gists update GIST_ID --delete old.txt --force
 ```
 
-### `lantern github gists create`
+### `lantern forge gists create` / `lantern forge snippets create`
 
-**Purpose**: Create a new gist (GitHub only).
+**Purpose**: Create a new gist/snippet (GitHub only).
 
 **What it does**:
 - Requires a GitHub token (`--token` or `GITHUB_TOKEN`).
@@ -332,6 +332,6 @@ lantern github gists update GIST_ID --delete old.txt --force
 
 **Examples**:
 ```bash
-lantern github gists create --file ./notes.txt --description "Notes" --public
-lantern github gists create --file ./notes.txt --description "Notes" --private
+lantern forge gists create --file ./notes.txt --description "Notes" --public
+lantern forge gists create --file ./notes.txt --description "Notes" --private
 ```

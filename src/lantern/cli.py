@@ -519,10 +519,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--columns", default="")
     report.set_defaults(func=cmd_report)
 
-    gh = sub.add_parser("github", help="GitHub repo utilities")
-    gh_sub = gh.add_subparsers(dest="github_command", required=True)
+    forge = sub.add_parser("forge", help="git server utilities")
+    forge_sub = forge.add_subparsers(dest="forge_command", required=True)
 
-    gh_list = gh_sub.add_parser("list", help="list GitHub repos to JSON")
+    gh_list = forge_sub.add_parser("list", help="list repos to JSON")
     gh_list.add_argument("--server", default="")
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
@@ -530,42 +530,76 @@ def build_parser() -> argparse.ArgumentParser:
     gh_list.add_argument("--output", default="data/github.json")
     gh_list.set_defaults(func=cmd_github_list)
 
-    gh_clone = gh_sub.add_parser("clone", help="clone missing repos from JSON list")
+    gh_clone = forge_sub.add_parser("clone", help="clone missing repos from JSON list")
     gh_clone.add_argument("--server", default="")
     gh_clone.add_argument("--input", default="data/github.json")
     gh_clone.add_argument("--root", default=os.getcwd())
     gh_clone.add_argument("--dry-run", action="store_true")
     gh_clone.set_defaults(func=cmd_github_clone)
 
-    gh_gists = gh_sub.add_parser("gists", help="GitHub gists utilities")
+    gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")
     gh_gists_sub = gh_gists.add_subparsers(dest="gists_command", required=True)
+    gh_gist = forge_sub.add_parser("gist", help="GitHub gists utilities")
+    gh_gist_sub = gh_gist.add_subparsers(dest="gists_command", required=True)
+    gh_snippets = forge_sub.add_parser("snippets", help="GitHub snippets utilities")
+    gh_snippets_sub = gh_snippets.add_subparsers(dest="gists_command", required=True)
+    gh_snippet = forge_sub.add_parser("snippet", help="GitHub snippets utilities")
+    gh_snippet_sub = gh_snippet.add_subparsers(dest="gists_command", required=True)
 
     gh_gists_list = gh_gists_sub.add_parser("list", help="list gists to JSON")
-    gh_gists_list.add_argument("--server", default="")
-    gh_gists_list.add_argument("--user", default="")
-    gh_gists_list.add_argument("--token", default="")
-    gh_gists_list.add_argument("--output", default="data/gists.json")
-    gh_gists_list.set_defaults(func=cmd_github_gists_list)
+    gh_gist_list = gh_gist_sub.add_parser("list", help="list gists to JSON")
+    gh_snippets_list = gh_snippets_sub.add_parser("list", help="list snippets to JSON")
+    gh_snippet_list = gh_snippet_sub.add_parser("list", help="list snippets to JSON")
+    for parser_item in (
+        gh_gists_list,
+        gh_gist_list,
+        gh_snippets_list,
+        gh_snippet_list,
+    ):
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--user", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--output", default="data/gists.json")
+        parser_item.set_defaults(func=cmd_github_gists_list)
 
     gh_gists_update = gh_gists_sub.add_parser("update", help="update a gist")
-    gh_gists_update.add_argument("gist_id")
-    gh_gists_update.add_argument("--server", default="")
-    gh_gists_update.add_argument("--file", action="append", default=[])
-    gh_gists_update.add_argument("--delete", action="append", default=[])
-    gh_gists_update.add_argument("--description", default=None)
-    gh_gists_update.add_argument("--token", default="")
-    gh_gists_update.add_argument("--force", "-f", action="store_true")
-    gh_gists_update.set_defaults(func=cmd_github_gists_update)
+    gh_gist_update = gh_gist_sub.add_parser("update", help="update a gist")
+    gh_snippets_update = gh_snippets_sub.add_parser("update", help="update a snippet")
+    gh_snippet_update = gh_snippet_sub.add_parser("update", help="update a snippet")
+    for parser_item in (
+        gh_gists_update,
+        gh_gist_update,
+        gh_snippets_update,
+        gh_snippet_update,
+    ):
+        parser_item.add_argument("gist_id")
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--delete", action="append", default=[])
+        parser_item.add_argument("--description", default=None)
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--force", "-f", action="store_true")
+        parser_item.set_defaults(func=cmd_github_gists_update)
 
     gh_gists_create = gh_gists_sub.add_parser("create", help="create a gist")
-    gh_gists_create.add_argument("--server", default="")
-    gh_gists_create.add_argument("--file", action="append", default=[])
-    gh_gists_create.add_argument("--description", default=None)
-    vis = gh_gists_create.add_mutually_exclusive_group()
-    vis.add_argument("--public", action="store_true")
-    vis.add_argument("--private", action="store_true")
-    gh_gists_create.add_argument("--token", default="")
-    gh_gists_create.set_defaults(func=cmd_github_gists_create)
+    gh_gist_create = gh_gist_sub.add_parser("create", help="create a gist")
+    gh_snippets_create = gh_snippets_sub.add_parser("create", help="create a snippet")
+    gh_snippet_create = gh_snippet_sub.add_parser("create", help="create a snippet")
+    for parser_item in (
+        gh_gists_create,
+        gh_gist_create,
+        gh_snippets_create,
+        gh_snippet_create,
+    ):
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--description", default=None)
+        vis = parser_item.add_mutually_exclusive_group()
+        vis.add_argument("--public", action="store_true")
+        vis.add_argument("--private", action="store_true")
+        parser_item.add_argument("--token", default="")
+        parser_item.set_defaults(func=cmd_github_gists_create)
+
 
     return parser
 

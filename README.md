@@ -75,14 +75,14 @@ lantern sync --root /path/to/workspace --fetch
 lantern sync --root /path/to/workspace --pull --only-clean --only-upstream
 lantern report --input data/repos.json --output data/repos.csv
 lantern report --input data/repos.json --output data/repos.md --format md
-lantern github list --user USERNAME --output data/github.json
-lantern github clone --input data/github.json --root /path/to/workspace
-lantern github gists list --user USERNAME --output data/gists.json
-lantern github gists update GIST_ID --file ./notes.txt --force
-lantern github gists update GIST_ID --file readme.md=./README.md
-lantern github gists update GIST_ID --delete old.txt --force
-lantern github gists create --file ./notes.txt --description "Notes" --public
-lantern github gists create --file ./notes.txt --description "Notes" --private
+lantern forge list --user USERNAME --output data/github.json
+lantern forge clone --input data/github.json --root /path/to/workspace
+lantern forge gists list --user USERNAME --output data/gists.json
+lantern forge gists update GIST_ID --file ./notes.txt --force
+lantern forge gists update GIST_ID --file readme.md=./README.md
+lantern forge gists update GIST_ID --delete old.txt --force
+lantern forge gists create --file ./notes.txt --description "Notes" --public
+lantern forge gists create --file ./notes.txt --description "Notes" --private
 ```
 
 ## Notes
