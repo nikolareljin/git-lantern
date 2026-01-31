@@ -217,7 +217,12 @@ def cmd_report(args: argparse.Namespace) -> int:
         print("No records.")
         return 0
     if args.format == "json":
-        output = {"root": payload.get("root"), "repos": records}
+        if args.columns:
+            fields = args.columns.split(",")
+            filtered = [{field: record.get(field) for field in fields} for record in records]
+        else:
+            filtered = records
+        output = {"root": payload.get("root"), "repos": filtered}
         if args.output:
             with open(args.output, "w", encoding="utf-8") as handle:
                 json.dump(output, handle, indent=2)
