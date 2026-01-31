@@ -5,7 +5,7 @@ on:
 
 jobs:
   ppa:
-    uses: ./.github/workflows/ppa-deb.yml
+    uses: nikolareljin/ci-helpers/.github/workflows/ppa-deb.yml@production
     with:
       working_directory: "."
       prebuild_command: "./scripts/generate_man.sh"
