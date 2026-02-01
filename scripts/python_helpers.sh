@@ -2,7 +2,7 @@
 set -euo pipefail
 
 python_version() {
-  "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+  "$1" -c 'import sys; v = sys.version_info; print("{}.{}".format(v[0], v[1]))' 2>/dev/null || return 1
 }
 
 python_has_min_version() {
@@ -10,7 +10,10 @@ python_has_min_version() {
   local min_major="$2"
   local min_minor="$3"
   local version
-  version="$(python_version "$bin")"
+  version="$(python_version "$bin")" || return 1
+  if ! [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    return 1
+  fi
   local major="${version%%.*}"
   local minor="${version#*.}"
   if [[ "$major" -gt "$min_major" ]]; then
