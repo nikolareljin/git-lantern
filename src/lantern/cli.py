@@ -164,7 +164,38 @@ def cmd_table(args: argparse.Namespace) -> int:
     if not records:
         print("No records.")
         return 0
-    columns = args.columns.split(",") if args.columns else list(records[0].keys())
+    for record in records:
+        if not all(
+            key in record for key in ("up_ahead", "up_behind", "main_ahead", "main_behind")
+        ):
+            continue
+        up_ahead = record.get("up_ahead")
+        up_behind = record.get("up_behind")
+        main_ahead = record.get("main_ahead")
+        main_behind = record.get("main_behind")
+        if up_ahead == 0 and up_behind == 0:
+            up_value = "≡"
+        else:
+            up_value = f"{up_ahead}↑/{up_behind}↓"
+        if main_ahead == 0 and main_behind == 0:
+            main_value = "≡"
+        else:
+            main_value = f"{main_ahead}↑/{main_behind}↓"
+        if up_ahead == main_ahead and up_behind == main_behind:
+            up_value = "≡"
+            main_value = "≡"
+        record["up"] = up_value
+        record["main"] = main_value
+    if args.columns:
+        columns = args.columns.split(",")
+    else:
+        if all(
+            key in records[0]
+            for key in ("name", "branch", "upstream", "up", "main_ref", "main")
+        ):
+            columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
+        else:
+            columns = list(records[0].keys())
     print(render_table(records, columns))
     return 0
 
