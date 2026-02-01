@@ -8,7 +8,11 @@ MAN_DIR="$ROOT_DIR/man"
 mkdir -p "$MAN_DIR"
 
 if ! command -v help2man >/dev/null 2>&1; then
-  echo "help2man not available; keeping existing man/lantern.1"
+  if [[ -f "$MAN_DIR/lantern.1" ]]; then
+    echo "help2man not available; keeping existing man/lantern.1"
+  else
+    echo "help2man not available; skipping man page generation"
+  fi
   exit 0
 fi
 

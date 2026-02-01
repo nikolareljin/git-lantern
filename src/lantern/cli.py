@@ -127,7 +127,6 @@ def add_divergence_fields(record: Dict[str, str]) -> Dict[str, str]:
         and up_ahead == main_ahead
         and up_behind == main_behind
     ):
-        up_value = "≡"
         main_value = "≡"
 
     record["up"] = up_value
