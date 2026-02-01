@@ -65,7 +65,7 @@ make test
 make ci
 ```
 
-If your system only provides `python3`, export `PYTHON_BIN=python3` before running the scripts.
+The scripts automatically detect a suitable `python3` (3.8+). You can optionally set `PYTHON_BIN` to point to a specific Python 3.8+ interpreter before running the scripts.
 
 ## Git hooks
 
