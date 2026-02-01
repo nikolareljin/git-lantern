@@ -31,8 +31,10 @@ python_can_run() {
     return 1
   fi
   if [[ "$bin" == */* ]]; then
-    [[ -x "$bin" ]]
-    return $?
+    if [[ -x "$bin" ]]; then
+      return 0
+    fi
+    return 1
   fi
   command -v "$bin" >/dev/null 2>&1
 }

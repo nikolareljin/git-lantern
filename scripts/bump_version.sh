@@ -20,7 +20,8 @@ input="$1"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
 if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
-  echo "Python 3.8+ is required but was not found on PATH." >&2
+  echo "Failed to locate a usable Python 3.8+ interpreter." >&2
+  echo "Ensure Python 3.8+ is installed and on your PATH, or set PYTHON_BIN to a valid Python 3.8+ executable." >&2
   exit 1
 fi
 
