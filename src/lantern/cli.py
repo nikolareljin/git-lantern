@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, MutableMapping, Optional, Tuple
 
 try:
     import argcomplete
@@ -110,7 +110,7 @@ def _format_divergence(ahead: Optional[int], behind: Optional[int]) -> str:
     return f"{ahead_str}↑/{behind_str}↓"
 
 
-def add_divergence_fields(record: Dict[str, str]) -> Dict[str, str]:
+def add_divergence_fields(record: MutableMapping[str, object]) -> MutableMapping[str, object]:
     up_ahead = _to_int_or_none(record.get("up_ahead"))
     up_behind = _to_int_or_none(record.get("up_behind"))
     main_ahead = _to_int_or_none(record.get("main_ahead"))
