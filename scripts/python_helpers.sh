@@ -69,3 +69,21 @@ resolve_python3() {
 
   pick_python3
 }
+
+ensure_venv() {
+  local python_bin="$1"
+  local venv_dir="$2"
+
+  if [[ -z "$python_bin" || -z "$venv_dir" ]]; then
+    return 1
+  fi
+
+  if [[ ! -x "$venv_dir/bin/python" ]]; then
+    if ! "$python_bin" -m venv "$venv_dir"; then
+      echo "Failed to create virtualenv at $venv_dir. Ensure python3-venv is installed." >&2
+      return 1
+    fi
+  fi
+
+  echo "$venv_dir/bin/python"
+}
