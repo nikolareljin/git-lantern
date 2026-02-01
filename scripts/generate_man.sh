@@ -12,19 +12,36 @@ if ! command -v help2man >/dev/null 2>&1; then
 fi
 
 PYTHON_BIN="${PYTHON_BIN:-}"
-if [[ -z "$PYTHON_BIN" ]]; then
-  if command -v python >/dev/null 2>&1; then
-    PYTHON_BIN="python"
-  elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-  fi
-fi
 
-if [[ -n "$PYTHON_BIN" ]]; then
-  PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+python_version() {
+  "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+}
+
+pick_python() {
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      version="$(python_version "$candidate")"
+      case "$version" in
+        3.*) echo "$candidate"; return 0 ;;
+      esac
+    fi
+  done
+  return 1
+}
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  PYTHON_BIN="$(pick_python || true)"
+else
+  PYTHON_VERSION="$(python_version "$PYTHON_BIN")"
   case "$PYTHON_VERSION" in
     3.*) ;;
-    *) PYTHON_BIN="";;
+    *)
+      if command -v python3 >/dev/null 2>&1; then
+        PYTHON_BIN="python3"
+      else
+        PYTHON_BIN=""
+      fi
+      ;;
   esac
 fi
 
