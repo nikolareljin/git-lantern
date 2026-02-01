@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/python_helpers.sh"
 MAN_DIR="$ROOT_DIR/man"
 
 mkdir -p "$MAN_DIR"
@@ -12,38 +13,7 @@ if ! command -v help2man >/dev/null 2>&1; then
 fi
 
 PYTHON_BIN="${PYTHON_BIN:-}"
-
-python_version() {
-  "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
-}
-
-pick_python() {
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      version="$(python_version "$candidate")"
-      case "$version" in
-        3.*) echo "$candidate"; return 0 ;;
-      esac
-    fi
-  done
-  return 1
-}
-
-if [[ -z "$PYTHON_BIN" ]]; then
-  PYTHON_BIN="$(pick_python || true)"
-else
-  PYTHON_VERSION="$(python_version "$PYTHON_BIN")"
-  case "$PYTHON_VERSION" in
-    3.*) ;;
-    *)
-      if command -v python3 >/dev/null 2>&1; then
-        PYTHON_BIN="python3"
-      else
-        PYTHON_BIN=""
-      fi
-      ;;
-  esac
-fi
+PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN" || true)"
 
 if [[ -n "$PYTHON_BIN" ]]; then
   wrapper="$(mktemp)"
