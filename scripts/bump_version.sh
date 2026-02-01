@@ -20,7 +20,7 @@ input="$1"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
 if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
-  echo "python3 is required but was not found on PATH." >&2
+  echo "Python 3.8+ is required but was not found on PATH." >&2
   exit 1
 fi
 

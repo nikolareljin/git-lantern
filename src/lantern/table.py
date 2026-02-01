@@ -17,11 +17,17 @@ def _truncate(value: str, width: int) -> str:
 
 
 def _fit_widths(columns: List[str], widths: Dict[str, int], max_width: int) -> Dict[str, int]:
-    total = sum(widths[col] for col in columns) + (2 * (len(columns) - 1))
+    def total_width(values: Dict[str, int]) -> int:
+        active = [width for width in values.values() if width > 0]
+        if not active:
+            return 0
+        return sum(active) + (2 * (len(active) - 1))
+
+    total = total_width(widths)
     if total <= max_width:
         return widths
 
-    min_widths = {col: max(len(col), 4) for col in columns}
+    min_widths = {col: max(len(col), 1) for col in columns}
     reducible = {col for col in columns if widths[col] > min_widths[col]}
 
     while total > max_width and reducible:
@@ -35,6 +41,14 @@ def _fit_widths(columns: List[str], widths: Dict[str, int], max_width: int) -> D
                 reducible.discard(col)
         if not reducible:
             break
+    if total > max_width:
+        for col in columns:
+            widths[col] = 1
+        total = total_width(widths)
+        remaining = list(columns)
+        while total > max_width and remaining:
+            widths[remaining.pop()] = 0
+            total = total_width(widths)
     return widths
 
 
@@ -51,14 +65,19 @@ def render_table(records: List[Dict[str, str]], columns: List[str]) -> str:
     widths = _fit_widths(columns, widths, term_width)
 
     lines = []
-    header = "  ".join(_truncate(col, widths[col]).ljust(widths[col]) for col in columns)
+    header = "  ".join(
+        _truncate(col, widths[col]).ljust(widths[col])
+        for col in columns
+        if widths[col] > 0
+    )
     lines.append(header)
-    lines.append("  ".join("-" * widths[col] for col in columns))
+    lines.append("  ".join("-" * widths[col] for col in columns if widths[col] > 0))
 
     for record in records:
         row = "  ".join(
             _truncate(_string(record.get(col)), widths[col]).ljust(widths[col])
             for col in columns
+            if widths[col] > 0
         )
         lines.append(row)
 

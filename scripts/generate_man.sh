@@ -46,4 +46,8 @@ if command -v lantern >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "help2man or lantern command not available; keeping existing man/lantern.1"
+if [[ -f "$MAN_DIR/lantern.1" ]]; then
+  echo "help2man or lantern not available; keeping existing man/lantern.1"
+else
+  echo "help2man or lantern not available; skipping man page generation"
+fi

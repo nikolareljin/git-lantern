@@ -89,6 +89,52 @@ def build_repo_record(path: str, fetch: bool) -> Dict[str, str]:
     }
 
 
+def _to_int_or_none(value) -> Optional[int]:
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_divergence(ahead: Optional[int], behind: Optional[int]) -> str:
+    if ahead is None and behind is None:
+        return "-"
+    if ahead == 0 and behind == 0:
+        return "≡"
+    ahead_str = "-" if ahead is None else str(ahead)
+    behind_str = "-" if behind is None else str(behind)
+    return f"{ahead_str}↑/{behind_str}↓"
+
+
+def add_divergence_fields(record: Dict[str, str]) -> Dict[str, str]:
+    up_ahead = _to_int_or_none(record.get("up_ahead"))
+    up_behind = _to_int_or_none(record.get("up_behind"))
+    main_ahead = _to_int_or_none(record.get("main_ahead"))
+    main_behind = _to_int_or_none(record.get("main_behind"))
+
+    up_value = _format_divergence(up_ahead, up_behind)
+    main_value = _format_divergence(main_ahead, main_behind)
+
+    if (
+        up_ahead is not None
+        and up_behind is not None
+        and main_ahead is not None
+        and main_behind is not None
+        and up_ahead == main_ahead
+        and up_behind == main_behind
+    ):
+        up_value = "≡"
+        main_value = "≡"
+
+    record["up"] = up_value
+    record["main"] = main_value
+    return record
+
+
 def cmd_repos(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
     records = []
@@ -127,24 +173,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     records = []
     for path in repos:
         record = build_repo_record(path, args.fetch)
-        up_ahead = record.get("up_ahead")
-        up_behind = record.get("up_behind")
-        main_ahead = record.get("main_ahead")
-        main_behind = record.get("main_behind")
-        if up_ahead == 0 and up_behind == 0:
-            up_value = "≡"
-        else:
-            up_value = f"{up_ahead}↑/{up_behind}↓"
-        if main_ahead == 0 and main_behind == 0:
-            main_value = "≡"
-        else:
-            main_value = f"{main_ahead}↑/{main_behind}↓"
-        if up_ahead == main_ahead and up_behind == main_behind:
-            up_value = "≡"
-            main_value = "≡"
-        record["up"] = up_value
-        record["main"] = main_value
-        records.append(record)
+        records.append(add_divergence_fields(record))
     columns = [
         "name",
         "branch",
@@ -169,23 +198,7 @@ def cmd_table(args: argparse.Namespace) -> int:
             key in record for key in ("up_ahead", "up_behind", "main_ahead", "main_behind")
         ):
             continue
-        up_ahead = record.get("up_ahead")
-        up_behind = record.get("up_behind")
-        main_ahead = record.get("main_ahead")
-        main_behind = record.get("main_behind")
-        if up_ahead == 0 and up_behind == 0:
-            up_value = "≡"
-        else:
-            up_value = f"{up_ahead}↑/{up_behind}↓"
-        if main_ahead == 0 and main_behind == 0:
-            main_value = "≡"
-        else:
-            main_value = f"{main_ahead}↑/{main_behind}↓"
-        if up_ahead == main_ahead and up_behind == main_behind:
-            up_value = "≡"
-            main_value = "≡"
-        record["up"] = up_value
-        record["main"] = main_value
+        add_divergence_fields(record)
     if args.columns:
         columns = args.columns.split(",")
     else:
