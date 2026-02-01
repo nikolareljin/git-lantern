@@ -20,7 +20,8 @@ PYTHON_BIN="${PYTHON_BIN:-}"
 PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN" || true)"
 
 if [[ -n "$PYTHON_BIN" ]]; then
-  wrapper="$(mktemp)"
+  tmp_dir="${TMPDIR:-/tmp}"
+  wrapper="$(mktemp "$tmp_dir/lantern.XXXXXX")"
   cat >"$wrapper" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
