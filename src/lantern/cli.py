@@ -37,12 +37,30 @@ def repo_depth(root: str, path: str) -> int:
     return rel.count(os.sep) + 1
 
 
+def _is_git_repo_root(path: str) -> bool:
+    git_dir = os.path.join(path, ".git")
+    if os.path.isdir(git_dir):
+        return True
+    if os.path.isfile(git_dir):
+        try:
+            with open(git_dir, "r", encoding="utf-8") as handle:
+                first = handle.readline().strip()
+        except OSError:
+            return False
+        if first.lower().startswith("gitdir:"):
+            gitdir = first.split(":", 1)[1].strip()
+            if ".git/modules/" in gitdir.replace("\\", "/"):
+                return False
+            return True
+    return False
+
+
 def find_repos(root: str, max_depth: int, include_hidden: bool) -> List[str]:
     matches = []
     for current, dirs, files in os.walk(root):
         if not include_hidden:
             dirs[:] = [d for d in dirs if not d.startswith(".")]
-        if ".git" in dirs:
+        if _is_git_repo_root(current):
             matches.append(current)
             dirs[:] = []
             continue
@@ -106,16 +124,34 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
-    records = [build_repo_record(path, args.fetch) for path in repos]
+    records = []
+    for path in repos:
+        record = build_repo_record(path, args.fetch)
+        up_ahead = record.get("up_ahead")
+        up_behind = record.get("up_behind")
+        main_ahead = record.get("main_ahead")
+        main_behind = record.get("main_behind")
+        if up_ahead == 0 and up_behind == 0:
+            up_value = "≡"
+        else:
+            up_value = f"{up_ahead}↑/{up_behind}↓"
+        if main_ahead == 0 and main_behind == 0:
+            main_value = "≡"
+        else:
+            main_value = f"{main_ahead}↑/{main_behind}↓"
+        if up_ahead == main_ahead and up_behind == main_behind:
+            up_value = "≡"
+            main_value = "≡"
+        record["up"] = up_value
+        record["main"] = main_value
+        records.append(record)
     columns = [
         "name",
         "branch",
         "upstream",
-        "up_ahead",
-        "up_behind",
+        "up",
         "main_ref",
-        "main_ahead",
-        "main_behind",
+        "main",
     ]
     print(render_table(records, columns))
     return 0
