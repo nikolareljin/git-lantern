@@ -17,4 +17,4 @@ if ! PYTHON_BIN="$(ensure_venv "$PYTHON_BIN" "$VENV_DIR")"; then
 fi
 
 "$PYTHON_BIN" -m pip install ruff
-ruff check "$ROOT_DIR"
+"$PYTHON_BIN" -m ruff check "$ROOT_DIR"
