@@ -364,6 +364,24 @@ def cmd_servers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _format_list_value(value: object) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
+def _render_list_table(records: List[Dict[str, object]], columns: List[str]) -> None:
+    if not records:
+        print("No records.")
+        return
+    display_records: List[Dict[str, str]] = []
+    for record in records:
+        display_records.append({col: _format_list_value(record.get(col)) for col in columns})
+    print(render_table(display_records, columns))
+
+
 def cmd_github_list(args: argparse.Namespace) -> int:
     env = github.load_env()
     config = lantern_config.load_config()
@@ -387,15 +405,16 @@ def cmd_github_list(args: argparse.Namespace) -> int:
         "user": user,
         "repos": repos,
     }
-    if args.output:
-        output_dir = os.path.dirname(args.output)
+    output_path = args.output or "data/github.json"
+    if output_path:
+        output_dir = os.path.dirname(output_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        with open(args.output, "w", encoding="utf-8") as handle:
+        with open(output_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
-    else:
-        json.dump(payload, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+    if args.output is None:
+        columns = ["name", "private", "default_branch", "ssh_url", "html_url"]
+        _render_list_table(repos, columns)
     return 0
 
 
@@ -466,15 +485,16 @@ def cmd_github_gists_list(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     payload = {"user": user, "gists": gists}
-    if args.output:
-        output_dir = os.path.dirname(args.output)
+    output_path = args.output or "data/gists.json"
+    if output_path:
+        output_dir = os.path.dirname(output_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        with open(args.output, "w", encoding="utf-8") as handle:
+        with open(output_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
-    else:
-        json.dump(payload, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+    if args.output is None:
+        columns = ["id", "description", "public", "files", "updated_at"]
+        _render_list_table(gists, columns)
     return 0
 
 
@@ -644,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
     gh_list.add_argument("--include-forks", action="store_true")
-    gh_list.add_argument("--output", default="data/github.json")
+    gh_list.add_argument("--output", default=None)
     gh_list.set_defaults(func=cmd_github_list)
 
     gh_clone = forge_sub.add_parser("clone", help="clone missing repos from JSON list")
@@ -676,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser_item.add_argument("--server", default="")
         parser_item.add_argument("--user", default="")
         parser_item.add_argument("--token", default="")
-        parser_item.add_argument("--output", default="data/gists.json")
+        parser_item.add_argument("--output", default=None)
         parser_item.set_defaults(func=cmd_github_gists_list)
 
     gh_gists_update = gh_gists_sub.add_parser("update", help="update a gist")
