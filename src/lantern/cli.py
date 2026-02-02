@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
 from typing import Dict, List, MutableMapping, Optional, Tuple
 
 try:
@@ -498,6 +499,254 @@ def cmd_github_gists_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_github_gists_clone(args: argparse.Namespace) -> int:
+    gist_id = args.gist_id
+    if args.input and os.path.isfile(args.input):
+        with open(args.input, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        gists = payload.get("gists", [])
+        if gists and not any(gist.get("id") == gist_id for gist in gists):
+            print(
+                f"Gist id not found in input list: {gist_id}",
+                file=sys.stderr,
+            )
+            return 1
+
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    if provider != "github":
+        print("Gists are only supported for GitHub servers.", file=sys.stderr)
+        return 1
+    token = args.token or env.get("GITHUB_TOKEN") or server.get("token")
+
+    gist_detail = github.get_gist(gist_id, token, base_url)
+    files = gist_detail.get("files") or {}
+    if not files:
+        print("Gist has no files.", file=sys.stderr)
+        return 1
+
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
+    requested = args.file
+    if requested:
+        names = requested
+    else:
+        names = list(files.keys())
+        if len(names) > 1:
+            print("Gist has multiple files; use --file to select.", file=sys.stderr)
+            return 1
+
+    for name in names:
+        info = files.get(name)
+        if not info:
+            print(f"File not found in gist: {name}", file=sys.stderr)
+            return 1
+        raw_url = info.get("raw_url")
+        if not raw_url:
+            print(f"Missing raw_url for file: {name}", file=sys.stderr)
+            return 1
+        content = github.download_gist_file(raw_url, token)
+        dest = os.path.join(output_dir, name)
+        if os.path.exists(dest) and not args.force:
+            print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+            return 1
+        with open(dest, "wb") as handle:
+            handle.write(content)
+        print(f"Wrote {dest}")
+    return 0
+
+
+def cmd_forge_snippets_list(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    env_user_key = f"{provider.upper()}_USER"
+    env_token_key = f"{provider.upper()}_TOKEN"
+    user = args.user or env.get(env_user_key) or server.get("user")
+    token = args.token or env.get(env_token_key) or server.get("token")
+    auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+    try:
+        snippets = forge.fetch_snippets(provider, user, token, base_url, auth)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "server": server.get("name", provider),
+        "provider": provider,
+        "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
+        "user": user,
+        "snippets": snippets,
+    }
+    output_path = args.output or "data/snippets.json"
+    if output_path:
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    if args.output is None:
+        display_rows: List[Dict[str, object]] = []
+        for snippet in snippets:
+            row = dict(snippet)
+            if provider == "github":
+                row["visibility"] = "public" if row.get("public") else "secret"
+                row["title"] = row.get("title") or ""
+                row["description"] = row.get("description") or ""
+            display_rows.append(row)
+        columns = ["id", "title", "description", "visibility", "files", "updated_at"]
+        _render_list_table(display_rows, columns)
+    return 0
+
+
+def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    env_user_key = f"{provider.upper()}_USER"
+    env_token_key = f"{provider.upper()}_TOKEN"
+    user = args.user or env.get(env_user_key) or server.get("user")
+    token = args.token or env.get(env_token_key) or server.get("token")
+    auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+
+    snippet_id = args.snippet_id
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
+    if args.input and os.path.isfile(args.input):
+        with open(args.input, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        listed = payload.get("snippets", [])
+        if listed and not any(item.get("id") == snippet_id for item in listed):
+            print(f"Snippet id not found in input list: {snippet_id}", file=sys.stderr)
+            return 1
+
+    if provider == "github":
+        gist_detail = github.get_gist(snippet_id, token, base_url)
+        files = gist_detail.get("files") or {}
+        if not files:
+            print("Snippet has no files.", file=sys.stderr)
+            return 1
+        requested = args.file
+        if requested:
+            names = requested
+        else:
+            names = list(files.keys())
+            if len(names) > 1:
+                print("Snippet has multiple files; use --file to select.", file=sys.stderr)
+                return 1
+        for name in names:
+            info = files.get(name)
+            if not info:
+                print(f"File not found in snippet: {name}", file=sys.stderr)
+                return 1
+            raw_url = info.get("raw_url")
+            if not raw_url:
+                print(f"Missing raw_url for file: {name}", file=sys.stderr)
+                return 1
+            content = github.download_gist_file(raw_url, token)
+            dest = os.path.join(output_dir, name)
+            if os.path.exists(dest) and not args.force:
+                print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+                return 1
+            with open(dest, "wb") as handle:
+                handle.write(content)
+            print(f"Wrote {dest}")
+        return 0
+
+    if provider == "gitlab":
+        if not token:
+            print("Token is required for GitLab snippets.", file=sys.stderr)
+            return 1
+        detail = forge.get_gitlab_snippet(str(snippet_id), token, base_url, auth)
+        files: List[Dict[str, str]] = []
+        if isinstance(detail.get("files"), list):
+            files = detail.get("files")  # type: ignore[assignment]
+        else:
+            file_name = detail.get("file_name")
+            raw_url = detail.get("raw_url")
+            if file_name and raw_url:
+                files = [{"path": file_name, "raw_url": raw_url}]
+        if not files:
+            print("Snippet has no files.", file=sys.stderr)
+            return 1
+        requested = args.file
+        if requested:
+            names = requested
+        else:
+            names = [item.get("path") or item.get("file_name") or "" for item in files]
+            names = [name for name in names if name]
+            if len(names) > 1:
+                print("Snippet has multiple files; use --file to select.", file=sys.stderr)
+                return 1
+        for name in names:
+            match = next(
+                (
+                    item
+                    for item in files
+                    if item.get("path") == name or item.get("file_name") == name
+                ),
+                None,
+            )
+            if not match:
+                print(f"File not found in snippet: {name}", file=sys.stderr)
+                return 1
+            raw_url = match.get("raw_url")
+            if not raw_url:
+                print(f"Missing raw_url for file: {name}", file=sys.stderr)
+                return 1
+            headers = forge._auth_headers("gitlab", user, token, auth)
+            content = forge.download_with_headers(raw_url, headers)
+            dest = os.path.join(output_dir, name)
+            if os.path.exists(dest) and not args.force:
+                print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+                return 1
+            with open(dest, "wb") as handle:
+                handle.write(content)
+            print(f"Wrote {dest}")
+        return 0
+
+    if provider == "bitbucket":
+        if not user:
+            print("Workspace is required for Bitbucket snippets.", file=sys.stderr)
+            return 1
+        detail = forge.get_bitbucket_snippet(user, str(snippet_id), token, base_url, auth)
+        files_map = detail.get("files")
+        file_names: List[str] = []
+        if isinstance(files_map, dict):
+            file_names = list(files_map.keys())
+        if not file_names and not args.file:
+            print("Snippet has no file list; use --file to select.", file=sys.stderr)
+            return 1
+        names = args.file or file_names
+        base_api = (base_url or forge.DEFAULT_BASE_URLS.get(provider, "")).rstrip("/")
+        headers = forge._auth_headers("bitbucket", user, token, auth)
+        for name in names:
+            raw_url = (
+                f"{base_api}/snippets/{urllib.parse.quote(user)}"
+                f"/{urllib.parse.quote(str(snippet_id))}/files/{urllib.parse.quote(name)}"
+            )
+            content = forge.download_with_headers(raw_url, headers)
+            dest = os.path.join(output_dir, name)
+            if os.path.exists(dest) and not args.force:
+                print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+                return 1
+            with open(dest, "wb") as handle:
+                handle.write(content)
+            print(f"Wrote {dest}")
+        return 0
+
+    print(f"Unsupported provider: {provider}", file=sys.stderr)
+    return 1
+
 def cmd_github_gists_update(args: argparse.Namespace) -> int:
     env = github.load_env()
     config = lantern_config.load_config()
@@ -690,6 +939,13 @@ def build_parser() -> argparse.ArgumentParser:
     for parser_item in (
         gh_gists_list,
         gh_gist_list,
+    ):
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--user", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--output", default=None)
+        parser_item.set_defaults(func=cmd_github_gists_list)
+    for parser_item in (
         gh_snippets_list,
         gh_snippet_list,
     ):
@@ -697,8 +953,37 @@ def build_parser() -> argparse.ArgumentParser:
         parser_item.add_argument("--user", default="")
         parser_item.add_argument("--token", default="")
         parser_item.add_argument("--output", default=None)
-        parser_item.set_defaults(func=cmd_github_gists_list)
+        parser_item.set_defaults(func=cmd_forge_snippets_list)
 
+    gh_gists_clone = gh_gists_sub.add_parser("clone", help="download gist files")
+    gh_gist_clone = gh_gist_sub.add_parser("clone", help="download gist files")
+    gh_snippets_clone = gh_snippets_sub.add_parser("clone", help="download snippet files")
+    gh_snippet_clone = gh_snippet_sub.add_parser("clone", help="download snippet files")
+    for parser_item in (
+        gh_gists_clone,
+        gh_gist_clone,
+    ):
+        parser_item.add_argument("gist_id", help="gist id from list output")
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--input", default="data/gists.json")
+        parser_item.add_argument("--output-dir", default=".")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--force", action="store_true")
+        parser_item.set_defaults(func=cmd_github_gists_clone)
+    for parser_item in (
+        gh_snippets_clone,
+        gh_snippet_clone,
+    ):
+        parser_item.add_argument("snippet_id", help="snippet id from list output")
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--user", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--input", default="data/snippets.json")
+        parser_item.add_argument("--output-dir", default=".")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--force", action="store_true")
+        parser_item.set_defaults(func=cmd_forge_snippets_clone)
     gh_gists_update = gh_gists_sub.add_parser("update", help="update a gist")
     gh_gist_update = gh_gist_sub.add_parser("update", help="update a gist")
     gh_snippets_update = gh_snippets_sub.add_parser("update", help="update a snippet")
