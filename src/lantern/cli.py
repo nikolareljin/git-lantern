@@ -365,6 +365,65 @@ def cmd_servers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _normalize_servers(value: object) -> Dict[str, Dict]:
+    if not isinstance(value, dict):
+        return {}
+    servers: Dict[str, Dict] = {}
+    for name, server in value.items():
+        if isinstance(server, dict):
+            servers[str(name)] = dict(server)
+    return servers
+
+
+def cmd_config_export(args: argparse.Namespace) -> int:
+    config = lantern_config.load_config()
+    payload = {
+        "default_server": config.get("default_server", ""),
+        "servers": _normalize_servers(config.get("servers", {})),
+    }
+    output_path = args.output or "git-lantern-servers.json"
+    if output_path == "-":
+        json.dump(payload, sys.stdout, indent=2)
+        print()
+        return 0
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+    print(f"Wrote {output_path}")
+    return 0
+
+
+def cmd_config_import(args: argparse.Namespace) -> int:
+    with open(args.input, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    incoming_servers = _normalize_servers(payload.get("servers", {}))
+    incoming_default = payload.get("default_server", "")
+    if args.replace:
+        merged = {"servers": incoming_servers}
+    else:
+        merged = lantern_config.load_config()
+        current_servers = _normalize_servers(merged.get("servers", {}))
+        current_servers.update(incoming_servers)
+        merged["servers"] = current_servers
+    if incoming_default:
+        merged["default_server"] = incoming_default
+    output_path = args.output or lantern_config.config_path()
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(merged, handle, indent=2)
+    print(f"Updated {output_path}")
+    return 0
+
+
+def cmd_config_path(_: argparse.Namespace) -> int:
+    print(lantern_config.config_path())
+    return 0
+
+
 def _format_list_value(value: object) -> str:
     if value is None:
         return "-"
@@ -845,6 +904,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     servers = sub.add_parser("servers", help="list configured git servers")
     servers.set_defaults(func=cmd_servers)
+
+    config = sub.add_parser("config", help="import/export server configuration")
+    config_sub = config.add_subparsers(dest="config_command", required=True)
+
+    config_export = config_sub.add_parser("export", help="export server config to JSON")
+    config_export.add_argument("--output", default="git-lantern-servers.json")
+    config_export.set_defaults(func=cmd_config_export)
+
+    config_import = config_sub.add_parser("import", help="import server config from JSON")
+    config_import.add_argument("--input", default="git-lantern-servers.json")
+    config_import.add_argument("--output", default="")
+    config_import.add_argument("--replace", action="store_true")
+    config_import.set_defaults(func=cmd_config_import)
+
+    config_path = config_sub.add_parser("path", help="print active config path")
+    config_path.set_defaults(func=cmd_config_path)
 
     repos = sub.add_parser("repos", help="list local repos")
     repos.add_argument("--root", default=os.getcwd())

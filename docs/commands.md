@@ -2,6 +2,8 @@
 
 This document explains every `lantern ...` command, the data it produces, and how to interpret it.
 
+For step-by-step workflows, see `docs/use-cases.md`.
+
 ## Common concepts
 
 - **Workspace root**: A directory that contains multiple Git repositories. Most commands accept `--root`. If you do not pass it, Lantern assumes the current working directory and starts scanning from there.
@@ -71,6 +73,23 @@ Lantern can read a `config.json` file to manage multiple git servers (GitHub, Gi
 **List configured servers**:
 ```bash
 lantern servers
+```
+
+**Export server config**:
+```bash
+lantern config export --output git-lantern-servers.json
+lantern config export --output -  # stdout
+```
+
+**Import server config**:
+```bash
+lantern config import --input git-lantern-servers.json
+lantern config import --input git-lantern-servers.json --replace
+```
+
+**Show active config path**:
+```bash
+lantern config path
 ```
 
 ## Local repository commands
