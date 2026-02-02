@@ -1,6 +1,3 @@
 [submodule "scripts/script-helpers"]
 	path = scripts/script-helpers
-	url = /home/dragana/Projects/script-helpers
-[submodule ".github/ci-helpers"]
-	path = .github/ci-helpers
-	url = /home/dragana/Projects/ci-helpers
+	url = https://github.com/nikolareljin/script-helpers.git
