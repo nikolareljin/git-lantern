@@ -27,7 +27,7 @@ def _fit_widths(columns: List[str], widths: Dict[str, int], max_width: int) -> D
     if total <= max_width:
         return widths
 
-    min_widths = {col: max(len(col), 1) for col in columns}
+    min_widths = {col: 1 for col in columns}
     reducible = {col for col in columns if widths[col] > min_widths[col]}
 
     while total > max_width and reducible:

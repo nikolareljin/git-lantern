@@ -7,7 +7,7 @@ Local and GitHub repository visibility toolkit. The CLI is `lantern`.
 ## Quick start
 
 ```bash
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 pip install -e .
 lantern --help

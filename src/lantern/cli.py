@@ -120,16 +120,6 @@ def add_divergence_fields(record: MutableMapping[str, object]) -> MutableMapping
     up_value = _format_divergence(up_ahead, up_behind)
     main_value = _format_divergence(main_ahead, main_behind)
 
-    if (
-        up_ahead is not None
-        and up_behind is not None
-        and main_ahead is not None
-        and main_behind is not None
-        and up_ahead == main_ahead
-        and up_behind == main_behind
-    ):
-        main_value = "≡"
-
     record["up"] = up_value
     record["main"] = main_value
     return record
