@@ -433,6 +433,21 @@ def _render_list_table(records: List[Dict[str, object]], columns: List[str]) -> 
     print(render_table(display_records, columns))
 
 
+def _safe_output_path(output_dir: str, name: str) -> Optional[str]:
+    normalized = os.path.normpath(name)
+    if os.path.isabs(normalized) or normalized in (".", "..") or normalized.startswith(".." + os.sep):
+        return None
+    abs_output_dir = os.path.abspath(output_dir)
+    dest = os.path.join(output_dir, normalized)
+    abs_dest = os.path.abspath(dest)
+    if os.path.commonpath([abs_output_dir, abs_dest]) != abs_output_dir:
+        return None
+    dest_dir = os.path.dirname(abs_dest)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+    return abs_dest
+
+
 def cmd_github_list(args: argparse.Namespace) -> int:
     env = github.load_env()
     config = lantern_config.load_config()
@@ -645,8 +660,11 @@ def cmd_github_gists_clone(args: argparse.Namespace) -> int:
         if not raw_url:
             print(f"Missing raw_url for file: {name}", file=sys.stderr)
             return 1
-        content = github.download_gist_file(raw_url, token)
-        dest = os.path.join(output_dir, name)
+        content = github.download_gist_file(raw_url, token, base_url)
+        dest = _safe_output_path(output_dir, name)
+        if not dest:
+            print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+            return 1
         if os.path.exists(dest) and not args.force:
             print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
             return 1
@@ -752,8 +770,11 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
             if not raw_url:
                 print(f"Missing raw_url for file: {name}", file=sys.stderr)
                 return 1
-            content = github.download_gist_file(raw_url, token)
-            dest = os.path.join(output_dir, name)
+            content = github.download_gist_file(raw_url, token, base_url)
+            dest = _safe_output_path(output_dir, name)
+            if not dest:
+                print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+                return 1
             if os.path.exists(dest) and not args.force:
                 print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
                 return 1
@@ -804,8 +825,11 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
                 print(f"Missing raw_url for file: {name}", file=sys.stderr)
                 return 1
             headers = forge.auth_headers("gitlab", user, token, auth)
-            content = forge.download_with_headers(raw_url, headers)
-            dest = os.path.join(output_dir, name)
+            content = forge.download_with_headers(raw_url, headers, base_url)
+            dest = _safe_output_path(output_dir, name)
+            if not dest:
+                print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+                return 1
             if os.path.exists(dest) and not args.force:
                 print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
                 return 1
@@ -834,8 +858,11 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
                 f"{base_api}/snippets/{urllib.parse.quote(user)}"
                 f"/{urllib.parse.quote(str(snippet_id))}/files/{urllib.parse.quote(name)}"
             )
-            content = forge.download_with_headers(raw_url, headers)
-            dest = os.path.join(output_dir, name)
+            content = forge.download_with_headers(raw_url, headers, base_url)
+            dest = _safe_output_path(output_dir, name)
+            if not dest:
+                print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+                return 1
             if os.path.exists(dest) and not args.force:
                 print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
                 return 1

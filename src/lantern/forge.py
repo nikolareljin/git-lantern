@@ -273,7 +273,21 @@ def get_bitbucket_snippet(
     return data if isinstance(data, dict) else {}
 
 
-def download_with_headers(url: str, headers: Dict[str, str]) -> bytes:
-    req = urllib.request.Request(url, headers=headers)
+def _trusted_hosts_for(base_url: str) -> set:
+    trusted = {urllib.parse.urlparse(base).netloc for base in DEFAULT_BASE_URLS.values()}
+    if base_url:
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.netloc:
+            trusted.add(parsed.netloc)
+    return trusted
+
+
+def download_with_headers(url: str, headers: Dict[str, str], base_url: str = "") -> bytes:
+    parsed = urllib.parse.urlparse(url)
+    trusted_hosts = _trusted_hosts_for(base_url)
+    if parsed.scheme in ("http", "https") and parsed.netloc in trusted_hosts:
+        req = urllib.request.Request(url, headers=headers)
+    else:
+        req = urllib.request.Request(url)
     with urllib.request.urlopen(req, timeout=20) as resp:
         return resp.read()

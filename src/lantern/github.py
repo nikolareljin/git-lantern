@@ -14,9 +14,28 @@ def _request(url: str, token: Optional[str]) -> List[Dict]:
     return json.loads(data)
 
 
-def download_gist_file(raw_url: str, token: Optional[str]) -> bytes:
+def _is_trusted_github_host(host: str, base_url: Optional[str]) -> bool:
+    host = host.lower()
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    trusted_hosts = {
+        "github.com",
+        "api.github.com",
+        "gist.github.com",
+        "raw.githubusercontent.com",
+        "gist.githubusercontent.com",
+    }
+    if base_url:
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.netloc:
+            trusted_hosts.add(parsed.netloc.lower())
+    return host in trusted_hosts
+
+
+def download_gist_file(raw_url: str, token: Optional[str], base_url: Optional[str] = None) -> bytes:
     req = urllib.request.Request(raw_url)
-    if token:
+    parsed = urllib.parse.urlparse(raw_url)
+    if token and parsed.netloc and _is_trusted_github_host(parsed.netloc, base_url):
         req.add_header("Authorization", f"token {token}")
     with urllib.request.urlopen(req, timeout=20) as resp:
         return resp.read()
