@@ -20,7 +20,7 @@ def _request(url: str, headers: Dict[str, str]) -> Tuple[object, Dict[str, str]]
         return json.loads(data), dict(resp.headers)
 
 
-def _auth_headers(
+def auth_headers(
     provider: str,
     user: Optional[str],
     token: Optional[str],
@@ -95,7 +95,7 @@ def _fetch_gitlab_repos(
     page = 1
     repos: List[Dict] = []
     base_url = _base_url("gitlab", base_url).rstrip("/")
-    headers = _auth_headers("gitlab", user, token, auth)
+    headers = auth_headers("gitlab", user, token, auth)
 
     if token and not user:
         url_base = f"{base_url}/projects"
@@ -138,7 +138,7 @@ def _fetch_bitbucket_repos(
     if not user:
         raise ValueError("User is required for Bitbucket.")
     base_url = _base_url("bitbucket", base_url).rstrip("/")
-    headers = _auth_headers("bitbucket", user, token, auth)
+    headers = auth_headers("bitbucket", user, token, auth)
     url = f"{base_url}/repositories/{urllib.parse.quote(user)}?pagelen=100"
     repos: List[Dict] = []
 
@@ -253,7 +253,7 @@ def get_gitlab_snippet(
     auth: Optional[Dict[str, str]],
 ) -> Dict:
     base_url = _base_url("gitlab", base_url).rstrip("/")
-    headers = _auth_headers("gitlab", None, token, auth)
+    headers = auth_headers("gitlab", None, token, auth)
     url = f"{base_url}/snippets/{urllib.parse.quote(str(snippet_id))}"
     data, _headers = _request(url, headers)
     return data if isinstance(data, dict) else {}
@@ -267,7 +267,7 @@ def get_bitbucket_snippet(
     auth: Optional[Dict[str, str]],
 ) -> Dict:
     base_url = _base_url("bitbucket", base_url).rstrip("/")
-    headers = _auth_headers("bitbucket", workspace, token, auth)
+    headers = auth_headers("bitbucket", workspace, token, auth)
     url = f"{base_url}/snippets/{urllib.parse.quote(workspace)}/{urllib.parse.quote(str(snippet_id))}"
     data, _headers = _request(url, headers)
     return data if isinstance(data, dict) else {}

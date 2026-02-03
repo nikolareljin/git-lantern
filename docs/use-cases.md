@@ -136,7 +136,7 @@ lantern sync --root ~/workspace --pull --only-clean --only-upstream
 
 Lantern supports:
 - GitHub gists (via `lantern forge gists`).
-- GitLab/Bitbucket snippets (via `lantern forge snippets`).
+- GitHub/GitLab/Bitbucket snippets (via `lantern forge snippets`).
 
 ### List gists (GitHub)
 ```bash
@@ -162,26 +162,25 @@ lantern forge gists create --file ./notes.txt --description "Notes" --public
 lantern forge gists create --file ./notes.txt --description "Notes" --private
 ```
 
-### List snippets (GitLab/Bitbucket)
+### List snippets (GitHub/GitLab/Bitbucket)
 ```bash
+lantern forge snippets list --server github.com --output data/snippets.json
 lantern forge snippets list --server gitlab.com --output data/snippets.json
 lantern forge snippets list --server bitbucket.org --output data/snippets.json
 ```
 
-### Download snippet files (GitLab/Bitbucket)
+### Download snippet files (GitHub/GitLab/Bitbucket)
 ```bash
 lantern forge snippets clone SNIPPET_ID --input data/snippets.json --output-dir ./snippets
 lantern forge snippets clone SNIPPET_ID --file README.md --output-dir ./snippets
 ```
 
-### Update a snippet (GitLab/Bitbucket)
+### Update or create a snippet (GitHub only)
 ```bash
 lantern forge snippets update SNIPPET_ID --file ./notes.txt --force
 lantern forge snippets update SNIPPET_ID --delete old.txt --force
-```
-
-### Create a snippet (GitLab/Bitbucket)
-```bash
 lantern forge snippets create --file ./notes.txt --description "Notes" --public
 lantern forge snippets create --file ./notes.txt --description "Notes" --private
 ```
+
+GitLab/Bitbucket: list and clone only (create/update not yet implemented).

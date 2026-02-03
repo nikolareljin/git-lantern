@@ -456,13 +456,17 @@ def cmd_github_list(args: argparse.Namespace) -> int:
         "user": user,
         "repos": repos,
     }
-    output_path = args.output or "data/github.json"
-    if output_path:
-        output_dir = os.path.dirname(output_path)
+    if args.output:
+        if args.output == "-":
+            json.dump(payload, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+        output_dir = os.path.dirname(args.output)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as handle:
+        with open(args.output, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
+        return 0
     if args.output is None:
         columns = ["name", "private", "default_branch", "ssh_url", "html_url"]
         _render_list_table(repos, columns)
@@ -574,13 +578,17 @@ def cmd_github_gists_list(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     payload = {"user": user, "gists": gists}
-    output_path = args.output or "data/gists.json"
-    if output_path:
-        output_dir = os.path.dirname(output_path)
+    if args.output:
+        if args.output == "-":
+            json.dump(payload, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+        output_dir = os.path.dirname(args.output)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as handle:
+        with open(args.output, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
+        return 0
     if args.output is None:
         columns = ["id", "description", "public", "files", "updated_at"]
         _render_list_table(gists, columns)
@@ -672,13 +680,17 @@ def cmd_forge_snippets_list(args: argparse.Namespace) -> int:
         "user": user,
         "snippets": snippets,
     }
-    output_path = args.output or "data/snippets.json"
-    if output_path:
-        output_dir = os.path.dirname(output_path)
+    if args.output:
+        if args.output == "-":
+            json.dump(payload, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+        output_dir = os.path.dirname(args.output)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as handle:
+        with open(args.output, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
+        return 0
     if args.output is None:
         display_rows: List[Dict[str, object]] = []
         for snippet in snippets:
@@ -791,7 +803,7 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
             if not raw_url:
                 print(f"Missing raw_url for file: {name}", file=sys.stderr)
                 return 1
-            headers = forge._auth_headers("gitlab", user, token, auth)
+            headers = forge.auth_headers("gitlab", user, token, auth)
             content = forge.download_with_headers(raw_url, headers)
             dest = os.path.join(output_dir, name)
             if os.path.exists(dest) and not args.force:
@@ -816,7 +828,7 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
             return 1
         names = args.file or file_names
         base_api = (base_url or forge.DEFAULT_BASE_URLS.get(provider, "")).rstrip("/")
-        headers = forge._auth_headers("bitbucket", user, token, auth)
+        headers = forge.auth_headers("bitbucket", user, token, auth)
         for name in names:
             raw_url = (
                 f"{base_api}/snippets/{urllib.parse.quote(user)}"
