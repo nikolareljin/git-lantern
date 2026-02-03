@@ -18,10 +18,46 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! command -v sudo >/dev/null 2>&1; then
-  echo "sudo is required to install system-wide." >&2
-  exit 1
+dir_is_writable() {
+  local dir="$1"
+  while [[ ! -d "$dir" ]]; do
+    local parent
+    parent="$(dirname "$dir")"
+    if [[ "$parent" == "$dir" ]]; then
+      break
+    fi
+    dir="$parent"
+  done
+  [[ -w "$dir" ]]
+}
+
+need_sudo=false
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  if ! dir_is_writable "$INSTALL_ROOT"; then
+    need_sudo=true
+  fi
+  if ! dir_is_writable "$(dirname "$BIN_LINK")"; then
+    need_sudo=true
+  fi
 fi
+
+SUDO=""
+if $need_sudo; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required to install to the selected locations." >&2
+    echo "Either install sudo or choose writable --prefix/--bin-link paths." >&2
+    exit 1
+  fi
+  SUDO="sudo"
+fi
+
+run_cmd() {
+  if [[ -n "$SUDO" ]]; then
+    "$SUDO" "$@"
+  else
+    "$@"
+  fi
+}
 
 PYTHON_BIN="${PYTHON_BIN:-}"
 if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
@@ -30,22 +66,22 @@ if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
   exit 1
 fi
 
-sudo mkdir -p "$INSTALL_ROOT"
+run_cmd mkdir -p "$INSTALL_ROOT"
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-  if ! sudo "$PYTHON_BIN" -m venv "$VENV_DIR"; then
+  if ! run_cmd "$PYTHON_BIN" -m venv "$VENV_DIR"; then
     echo "Failed to create virtualenv at $VENV_DIR. Ensure python3-venv is installed." >&2
     exit 1
   fi
 fi
 
-sudo "$VENV_DIR/bin/python" -m pip install --upgrade pip
+run_cmd "$VENV_DIR/bin/python" -m pip install --upgrade pip
 if $DEV_EXTRAS; then
-  sudo "$VENV_DIR/bin/pip" install --upgrade "${ROOT_DIR}[dev]"
+  run_cmd "$VENV_DIR/bin/pip" install --upgrade "${ROOT_DIR}[dev]"
 else
-  sudo "$VENV_DIR/bin/pip" install --upgrade "$ROOT_DIR"
+  run_cmd "$VENV_DIR/bin/pip" install --upgrade "$ROOT_DIR"
 fi
 
-sudo ln -sf "$VENV_DIR/bin/lantern" "$BIN_LINK"
+run_cmd ln -sf "$VENV_DIR/bin/lantern" "$BIN_LINK"
 
 echo "Installed lantern to $BIN_LINK"
 echo "User config stays per-user at ~/.git-lantern/config.json or ~/.config/git-lantern/config.json"

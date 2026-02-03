@@ -285,7 +285,7 @@ def _trusted_hosts_for(base_url: str) -> set:
 def download_with_headers(url: str, headers: Dict[str, str], base_url: str = "") -> bytes:
     parsed = urllib.parse.urlparse(url)
     trusted_hosts = _trusted_hosts_for(base_url)
-    if parsed.scheme in ("http", "https") and parsed.netloc in trusted_hosts:
+    if parsed.scheme == "https" and parsed.netloc in trusted_hosts:
         req = urllib.request.Request(url, headers=headers)
     else:
         req = urllib.request.Request(url)

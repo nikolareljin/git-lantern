@@ -33,7 +33,7 @@ Commands (jump to detailed guides):
 - `lantern forge list` -> `docs/use-cases.md#list-repos-from-a-server`
 - `lantern forge clone` -> `docs/use-cases.md#clone-missing-repos-to-a-workspace`
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`
-- `lantern forge snippets ...` -> `docs/use-cases.md#list-snippets-gitlabbitbucket`
+- `lantern forge snippets ...` -> `docs/use-cases.md#list-snippets-githubgitlabbitbucket`
 - `lantern config export/import/path` -> `docs/use-cases.md#server-config-github-gitlab-bitbucket`
 
 Quick examples:
