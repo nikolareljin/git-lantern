@@ -14,6 +14,14 @@ def _request(url: str, token: Optional[str]) -> List[Dict]:
     return json.loads(data)
 
 
+def download_gist_file(raw_url: str, token: Optional[str]) -> bytes:
+    req = urllib.request.Request(raw_url)
+    if token:
+        req.add_header("Authorization", f"token {token}")
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.read()
+
+
 def _base_url(base_url: Optional[str]) -> str:
     return (base_url or "https://api.github.com").rstrip("/")
 
