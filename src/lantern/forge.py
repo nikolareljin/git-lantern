@@ -182,7 +182,7 @@ def _fetch_gitlab_snippets(
     page = 1
     snippets: List[Dict] = []
     base_url = _base_url("gitlab", base_url).rstrip("/")
-    headers = _auth_headers("gitlab", user, token, auth)
+    headers = auth_headers("gitlab", user, token, auth)
 
     while True:
         params = {"per_page": str(per_page), "page": str(page)}
