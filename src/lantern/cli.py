@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -500,6 +501,44 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             return 1
     repos = payload.get("repos", [])
     os.makedirs(args.root, exist_ok=True)
+    if args.tui:
+        if not shutil.which("dialog"):
+            print("dialog is required for --tui.", file=sys.stderr)
+            return 1
+        checklist_items = []
+        for repo in repos:
+            name = repo.get("name")
+            if not name:
+                continue
+            dest = os.path.join(args.root, name)
+            status = "on" if os.path.exists(dest) else "off"
+            label = "cloned" if status == "on" else "missing"
+            checklist_items.extend([name, label, status])
+        if not checklist_items:
+            print("No repositories available to clone.", file=sys.stderr)
+            return 1
+        dialog_cmd = [
+            "dialog",
+            "--stdout",
+            "--separate-output",
+            "--title",
+            "Forge Clone",
+            "--checklist",
+            "Select repos to clone (existing repos are pre-checked).",
+            "25",
+            "120",
+            "18",
+            *checklist_items,
+        ]
+        result = subprocess.run(dialog_cmd, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("No repositories selected.")
+            return 0
+        selected = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        if not selected:
+            print("No repositories selected.")
+            return 0
+        repos = [repo for repo in repos if repo.get("name") in set(selected)]
     for repo in repos:
         name = repo.get("name")
         ssh_url = repo.get("ssh_url")
@@ -986,6 +1025,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--input", default="data/github.json")
     gh_clone.add_argument("--root", default=os.getcwd())
     gh_clone.add_argument("--dry-run", action="store_true")
+    gh_clone.add_argument("--tui", action="store_true")
     gh_clone.set_defaults(func=cmd_github_clone)
 
     gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")
