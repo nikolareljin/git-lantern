@@ -149,7 +149,7 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 **Output columns**:
 - `name`, `branch`, `upstream`, `up`, `main_ref`, `main`.
 - `up` and `main` are shown as `N↑/M↓` for ahead/behind counts.
-- `≡` means no divergence (`0↑/0↓`). The `main` column may show `≡` when it matches the upstream divergence.
+- `≡` means no divergence (`0↑/0↓`) and is shown only when both ahead and behind counts are zero.
 
 **Example**:
 ```bash
