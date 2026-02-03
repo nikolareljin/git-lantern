@@ -78,8 +78,36 @@ ensure_venv() {
     return 1
   fi
 
+  safe_to_remove_venv() {
+    local target="$1"
+    if [[ -z "$target" ]]; then
+      return 1
+    fi
+    local resolved
+    resolved="$(cd "$target" 2>/dev/null && pwd -P)" || return 1
+    local home_dir=""
+    if [[ -n "${HOME:-}" ]]; then
+      home_dir="$(cd "$HOME" 2>/dev/null && pwd -P)" || home_dir=""
+    fi
+    if [[ "$resolved" == "/" || "$resolved" == "." || "$resolved" == "/home" || "$resolved" == "/Users" ]]; then
+      return 1
+    fi
+    if [[ -n "$home_dir" && "$resolved" == "$home_dir" ]]; then
+      return 1
+    fi
+    if [[ ! -f "$resolved/pyvenv.cfg" ]]; then
+      return 1
+    fi
+    return 0
+  }
+
   if [[ -x "$venv_dir/bin/python" ]]; then
     if ! python_has_min_version "$venv_dir/bin/python" 3 8; then
+      if ! safe_to_remove_venv "$venv_dir"; then
+        echo "Refusing to remove unsafe virtualenv path: $venv_dir" >&2
+        echo "Set VENV_DIR to a dedicated virtualenv directory and retry." >&2
+        return 1
+      fi
       echo "Existing virtualenv at $venv_dir uses Python < 3.8; recreating." >&2
       rm -rf "$venv_dir"
     fi

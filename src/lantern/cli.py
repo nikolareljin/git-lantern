@@ -366,12 +366,47 @@ def _normalize_servers(value: object) -> Dict[str, Dict]:
     return servers
 
 
+def _redact_server_secrets(servers: Dict[str, Dict]) -> Dict[str, Dict]:
+    redacted: Dict[str, Dict] = {}
+    for name, server in servers.items():
+        cleaned = dict(server)
+        cleaned.pop("token", None)
+        cleaned.pop("TOKEN", None)
+        redacted[name] = cleaned
+    return redacted
+
+
+def _has_server_secrets(servers: Dict[str, Dict]) -> bool:
+    for server in servers.values():
+        if "token" in server or "TOKEN" in server:
+            return True
+    return False
+
+
+def _write_json_secure(path: str, payload: Dict) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def cmd_config_export(args: argparse.Namespace) -> int:
     config = lantern_config.load_config()
+    servers = _normalize_servers(config.get("servers", {}))
+    includes_secrets = args.include_secrets
+    had_secrets = _has_server_secrets(servers)
+    if not includes_secrets:
+        servers = _redact_server_secrets(servers)
     payload = {
         "default_server": config.get("default_server", ""),
-        "servers": _normalize_servers(config.get("servers", {})),
+        "servers": servers,
     }
+    if had_secrets and not includes_secrets:
+        print("Redacted secrets from export. Use --include-secrets to include tokens.", file=sys.stderr)
     output_path = args.output or "git-lantern-servers.json"
     if output_path == "-":
         json.dump(payload, sys.stdout, indent=2)
@@ -380,8 +415,11 @@ def cmd_config_export(args: argparse.Namespace) -> int:
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
+    if includes_secrets:
+        _write_json_secure(output_path, payload)
+    else:
+        with open(output_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
     print(f"Wrote {output_path}")
     return 0
 
@@ -404,8 +442,7 @@ def cmd_config_import(args: argparse.Namespace) -> int:
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump(merged, handle, indent=2)
+    _write_json_secure(output_path, merged)
     print(f"Updated {output_path}")
     return 0
 
@@ -984,6 +1021,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_export = config_sub.add_parser("export", help="export server config to JSON")
     config_export.add_argument("--output", default="git-lantern-servers.json")
+    config_export.add_argument(
+        "--include-secrets",
+        action="store_true",
+        help="include tokens in export (writes file with restricted permissions)",
+    )
     config_export.set_defaults(func=cmd_config_export)
 
     config_import = config_sub.add_parser("import", help="import server config from JSON")
