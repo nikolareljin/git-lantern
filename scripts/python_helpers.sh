@@ -78,6 +78,13 @@ ensure_venv() {
     return 1
   fi
 
+  if [[ -x "$venv_dir/bin/python" ]]; then
+    if ! python_has_min_version "$venv_dir/bin/python" 3 8; then
+      echo "Existing virtualenv at $venv_dir uses Python < 3.8; recreating." >&2
+      rm -rf "$venv_dir"
+    fi
+  fi
+
   if [[ ! -x "$venv_dir/bin/python" ]]; then
     if ! "$python_bin" -m venv "$venv_dir"; then
       echo "Failed to create virtualenv at $venv_dir. Ensure python3-venv is installed." >&2
