@@ -219,7 +219,7 @@ def _fetch_bitbucket_snippets(
     if not user:
         raise ValueError("Workspace is required for Bitbucket snippets.")
     base_url = _base_url("bitbucket", base_url).rstrip("/")
-    headers = _auth_headers("bitbucket", user, token, auth)
+    headers = auth_headers("bitbucket", user, token, auth)
     url = f"{base_url}/snippets/{urllib.parse.quote(user)}?role=owner&pagelen=100"
     snippets: List[Dict] = []
 
