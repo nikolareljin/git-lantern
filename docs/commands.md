@@ -147,7 +147,9 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 - Prints a table with the most relevant status columns.
 
 **Output columns**:
-- `name`, `branch`, `upstream`, `up_ahead`, `up_behind`, `main_ref`, `main_ahead`, `main_behind`.
+- `name`, `branch`, `upstream`, `up`, `main_ref`, `main`.
+- `up` and `main` are shown as `N↑/M↓` for ahead/behind counts.
+- `≡` means no divergence (`0↑/0↓`). The `main` column may show `≡` when it matches the upstream divergence.
 
 **Example**:
 ```bash
@@ -165,7 +167,7 @@ lantern status --root ~/workspace
 
 **What it shows**:
 - The scan fields from `lantern scan` (see the list above), formatted as a fixed-width table.
-- This is useful for reformatting or sharing the scan data without re-scanning.
+- When `up_ahead`/`up_behind` and `main_ahead`/`main_behind` are present, it renders consolidated `up` and `main` columns as `N↑/M↓` (or `≡` when clean).
 
 **Example**:
 ```bash
