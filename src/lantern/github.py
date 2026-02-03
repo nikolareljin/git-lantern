@@ -27,8 +27,8 @@ def _is_trusted_github_host(host: str, base_url: Optional[str]) -> bool:
     }
     if base_url:
         parsed = urllib.parse.urlparse(base_url)
-        if parsed.netloc:
-            trusted_hosts.add(parsed.netloc.lower())
+        if parsed.hostname:
+            trusted_hosts.add(parsed.hostname.lower())
     return host in trusted_hosts
 
 

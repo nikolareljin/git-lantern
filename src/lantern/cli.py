@@ -435,12 +435,18 @@ def _render_list_table(records: List[Dict[str, object]], columns: List[str]) -> 
 
 def _safe_output_path(output_dir: str, name: str) -> Optional[str]:
     normalized = os.path.normpath(name)
+    drive, _ = os.path.splitdrive(normalized)
+    if drive:
+        return None
     if os.path.isabs(normalized) or normalized in (".", "..") or normalized.startswith(".." + os.sep):
         return None
     abs_output_dir = os.path.abspath(output_dir)
-    dest = os.path.join(output_dir, normalized)
+    dest = os.path.join(abs_output_dir, normalized)
     abs_dest = os.path.abspath(dest)
-    if os.path.commonpath([abs_output_dir, abs_dest]) != abs_output_dir:
+    try:
+        if os.path.commonpath([abs_output_dir, abs_dest]) != abs_output_dir:
+            return None
+    except ValueError:
         return None
     dest_dir = os.path.dirname(abs_dest)
     if dest_dir:

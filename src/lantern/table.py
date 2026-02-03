@@ -31,12 +31,21 @@ def _fit_widths(columns: List[str], widths: Dict[str, int], max_width: int) -> D
     reducible = {col for col in columns if widths[col] > min_widths[col]}
 
     while total > max_width and reducible:
+        excess = total - max_width
+        per_col = max(1, excess // len(reducible))
         for col in sorted(reducible, key=lambda c: widths[c], reverse=True):
-            if total <= max_width:
+            if excess <= 0:
                 break
-            if widths[col] > min_widths[col]:
-                widths[col] -= 1
-                total -= 1
+            possible = widths[col] - min_widths[col]
+            if possible <= 0:
+                reducible.discard(col)
+                continue
+            delta = min(per_col, possible, excess)
+            if delta <= 0:
+                continue
+            widths[col] -= delta
+            total -= delta
+            excess -= delta
             if widths[col] <= min_widths[col]:
                 reducible.discard(col)
         if not reducible:
