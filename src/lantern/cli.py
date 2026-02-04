@@ -405,6 +405,7 @@ def _write_json_secure(path: str, payload: Dict) -> None:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except OSError:
+            # Best-effort cleanup of temporary file; ignore failures deleting tmp_path.
             pass
 
 
