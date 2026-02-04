@@ -33,14 +33,13 @@ def _is_trusted_github_host(host: str, base_url: Optional[str]) -> bool:
 
 
 def download_gist_file(raw_url: str, token: Optional[str], base_url: Optional[str] = None) -> bytes:
-    req = urllib.request.Request(raw_url)
     parsed = urllib.parse.urlparse(raw_url)
-    if (
-        token
-        and parsed.scheme == "https"
-        and parsed.netloc
-        and _is_trusted_github_host(parsed.netloc, base_url)
-    ):
+    if parsed.scheme != "https":
+        raise ValueError(f"Refusing to download non-HTTPS URL: {raw_url}")
+    if not parsed.netloc or not _is_trusted_github_host(parsed.netloc, base_url):
+        raise ValueError(f"Refusing to download from untrusted host: {parsed.netloc}")
+    req = urllib.request.Request(raw_url)
+    if token:
         req.add_header("Authorization", f"token {token}")
     with urllib.request.urlopen(req, timeout=20) as resp:
         return resp.read()

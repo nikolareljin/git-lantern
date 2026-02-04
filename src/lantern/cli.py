@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 from typing import Dict, List, MutableMapping, Optional, Tuple
 
@@ -384,14 +385,27 @@ def _has_server_secrets(servers: Dict[str, Dict]) -> bool:
 
 
 def _write_json_secure(path: str, payload: Dict) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(path, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
+    if os.path.islink(path):
+        raise OSError(f"Refusing to write to symlink path: {path}")
+    target_dir = os.path.dirname(path) or "."
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".lantern.", dir=target_dir)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        os.replace(tmp_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            # Best-effort permission tightening; ignore unsupported filesystems.
+            pass
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 def cmd_config_export(args: argparse.Namespace) -> int:
@@ -409,6 +423,12 @@ def cmd_config_export(args: argparse.Namespace) -> int:
         print("Redacted secrets from export. Use --include-secrets to include tokens.", file=sys.stderr)
     output_path = args.output or "git-lantern-servers.json"
     if output_path == "-":
+        if includes_secrets:
+            print(
+                "Refusing to write secrets to stdout. Use --output <path> or omit --include-secrets.",
+                file=sys.stderr,
+            )
+            return 1
         json.dump(payload, sys.stdout, indent=2)
         print()
         return 0
@@ -416,7 +436,11 @@ def cmd_config_export(args: argparse.Namespace) -> int:
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     if includes_secrets:
-        _write_json_secure(output_path, payload)
+        try:
+            _write_json_secure(output_path, payload)
+        except OSError as exc:
+            print(f"Failed to write secure config export: {exc}", file=sys.stderr)
+            return 1
     else:
         with open(output_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
@@ -442,7 +466,11 @@ def cmd_config_import(args: argparse.Namespace) -> int:
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-    _write_json_secure(output_path, merged)
+    try:
+        _write_json_secure(output_path, merged)
+    except OSError as exc:
+        print(f"Failed to write secure config: {exc}", file=sys.stderr)
+        return 1
     print(f"Updated {output_path}")
     return 0
 
@@ -492,6 +520,12 @@ def _safe_output_path(output_dir: str, name: str) -> Optional[str]:
 
 
 def cmd_github_list(args: argparse.Namespace) -> int:
+    if args.output == "":
+        print(
+            "Output path cannot be empty. Use --output - for stdout or omit --output to render a table.",
+            file=sys.stderr,
+        )
+        return 1
     env = github.load_env()
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
@@ -600,7 +634,8 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         if not selected:
             print("No repositories selected.")
             return 0
-        repos = [repo for repo in repos if repo.get("name") in set(selected)]
+        selected_set = set(selected)
+        repos = [repo for repo in repos if repo.get("name") in selected_set]
     for repo in repos:
         name = repo.get("name")
         ssh_url = repo.get("ssh_url")
@@ -620,6 +655,12 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
 
 
 def cmd_github_gists_list(args: argparse.Namespace) -> int:
+    if args.output == "":
+        print(
+            "Output path cannot be empty. Use --output - for stdout or omit --output to render a table.",
+            file=sys.stderr,
+        )
+        return 1
     env = github.load_env()
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
@@ -703,7 +744,11 @@ def cmd_github_gists_clone(args: argparse.Namespace) -> int:
         if not raw_url:
             print(f"Missing raw_url for file: {name}", file=sys.stderr)
             return 1
-        content = github.download_gist_file(raw_url, token, base_url)
+        try:
+            content = github.download_gist_file(raw_url, token, base_url)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         dest = _safe_output_path(output_dir, name)
         if not dest:
             print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
@@ -718,6 +763,12 @@ def cmd_github_gists_clone(args: argparse.Namespace) -> int:
 
 
 def cmd_forge_snippets_list(args: argparse.Namespace) -> int:
+    if args.output == "":
+        print(
+            "Output path cannot be empty. Use --output - for stdout or omit --output to render a table.",
+            file=sys.stderr,
+        )
+        return 1
     env = github.load_env()
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
@@ -813,7 +864,11 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
             if not raw_url:
                 print(f"Missing raw_url for file: {name}", file=sys.stderr)
                 return 1
-            content = github.download_gist_file(raw_url, token, base_url)
+            try:
+                content = github.download_gist_file(raw_url, token, base_url)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             dest = _safe_output_path(output_dir, name)
             if not dest:
                 print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
@@ -868,7 +923,11 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
                 print(f"Missing raw_url for file: {name}", file=sys.stderr)
                 return 1
             headers = forge.auth_headers("gitlab", user, token, auth)
-            content = forge.download_with_headers(raw_url, headers, base_url)
+            try:
+                content = forge.download_with_headers(raw_url, headers, base_url)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             dest = _safe_output_path(output_dir, name)
             if not dest:
                 print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
@@ -901,7 +960,11 @@ def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
                 f"{base_api}/snippets/{urllib.parse.quote(user)}"
                 f"/{urllib.parse.quote(str(snippet_id))}/files/{urllib.parse.quote(name)}"
             )
-            content = forge.download_with_headers(raw_url, headers, base_url)
+            try:
+                content = forge.download_with_headers(raw_url, headers, base_url)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             dest = _safe_output_path(output_dir, name)
             if not dest:
                 print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
@@ -1099,12 +1162,16 @@ def build_parser() -> argparse.ArgumentParser:
     forge = sub.add_parser("forge", help="git server utilities")
     forge_sub = forge.add_subparsers(dest="forge_command", required=True)
 
-    gh_list = forge_sub.add_parser("list", help="list repos to JSON")
+    gh_list = forge_sub.add_parser("list", help="list repos (table or JSON)")
     gh_list.add_argument("--server", default="")
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
     gh_list.add_argument("--include-forks", action="store_true")
-    gh_list.add_argument("--output", default=None)
+    gh_list.add_argument(
+        "--output",
+        default=None,
+        help="Output JSON file (use - for stdout). Omit to render a table.",
+    )
     gh_list.set_defaults(func=cmd_github_list)
 
     gh_clone = forge_sub.add_parser("clone", help="clone missing repos from JSON list")
