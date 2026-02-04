@@ -276,14 +276,15 @@ Environment fallbacks:
 
 ### `lantern forge list`
 
-**Purpose**: List repositories from the selected git server and write to JSON.
+**Purpose**: List repositories from the selected git server (JSON or table output).
 
 **What it does**:
 - Uses `--server` to select a provider (defaults to `default_server`, which defaults to `github.com`).
 - Uses `--user` (or config/env defaults) to scope repos.
 - If `--token` is set, it uses the authenticated endpoint and can include private repos owned by the user.
 - If `--include-forks` is not set, forked repos are excluded.
-- Writes JSON to `--output` (default `data/github.json`) or stdout.
+- Writes JSON to `--output` (or stdout with `--output -`).
+- If `--output` is omitted, prints a table instead of JSON.
 
 **Output fields per repo**:
 - `name`, `private`, `default_branch`, `ssh_url`, `clone_url`, `html_url`.
@@ -315,12 +316,13 @@ lantern forge clone --input data/github.json --root ~/workspace
 
 ### `lantern forge gists list` / `lantern forge snippets list`
 
-**Purpose**: List gists/snippets and write to JSON (GitHub only).
+**Purpose**: List gists (GitHub) or snippets (GitHub/GitLab/Bitbucket).
 
 **What it does**:
-- Uses `--server` to select a GitHub server.
-- Uses `--user` or `GITHUB_USER` for public gists, or uses a token to list the authenticated user's gists.
-- Writes JSON to `--output` (default `data/gists.json`) or stdout.
+- Uses `--server` to select a GitHub/GitLab/Bitbucket server.
+- Uses `--user` or `GITHUB_USER` for public GitHub gists, or a token to list the authenticated user's gists.
+- Writes JSON to `--output` (or stdout with `--output -`).
+- If `--output` is omitted, prints a table instead of JSON.
 
 **Output fields per gist**:
 - `id`, `description`, `public`, `files`, `html_url`, `updated_at`.

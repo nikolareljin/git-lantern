@@ -113,6 +113,7 @@ clone missing repos to a workspace. These are useful for keeping a multi-host
 workspace in sync.
 
 ### List repos from a server
+Omit `--output` to render a table instead of JSON.
 ```bash
 lantern forge list --server github.com --output data/github.json
 lantern forge list --server gitlab.com --output data/gitlab.json
@@ -139,6 +140,7 @@ Lantern supports:
 - GitHub/GitLab/Bitbucket snippets (via `lantern forge snippets`).
 
 ### List gists (GitHub)
+Omit `--output` to render a table instead of JSON.
 ```bash
 lantern forge gists list --server github.com --output data/gists.json
 ```
@@ -163,6 +165,7 @@ lantern forge gists create --file ./notes.txt --description "Notes" --private
 ```
 
 ### List snippets (GitHub/GitLab/Bitbucket)
+Omit `--output` to render a table instead of JSON.
 ```bash
 lantern forge snippets list --server github.com --output data/snippets.json
 lantern forge snippets list --server gitlab.com --output data/snippets.json
