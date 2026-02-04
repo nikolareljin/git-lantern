@@ -14,6 +14,37 @@ def _request(url: str, token: Optional[str]) -> List[Dict]:
     return json.loads(data)
 
 
+def _is_trusted_github_host(host: str, base_url: Optional[str]) -> bool:
+    host = host.lower()
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    trusted_hosts = {
+        "github.com",
+        "api.github.com",
+        "gist.github.com",
+        "raw.githubusercontent.com",
+        "gist.githubusercontent.com",
+    }
+    if base_url:
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.hostname:
+            trusted_hosts.add(parsed.hostname.lower())
+    return host in trusted_hosts
+
+
+def download_gist_file(raw_url: str, token: Optional[str], base_url: Optional[str] = None) -> bytes:
+    parsed = urllib.parse.urlparse(raw_url)
+    if parsed.scheme != "https":
+        raise ValueError(f"Refusing to download non-HTTPS URL: {raw_url}")
+    if not parsed.netloc or not _is_trusted_github_host(parsed.netloc, base_url):
+        raise ValueError(f"Refusing to download from untrusted host: {parsed.netloc}")
+    req = urllib.request.Request(raw_url)
+    if token:
+        req.add_header("Authorization", f"token {token}")
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.read()
+
+
 def _base_url(base_url: Optional[str]) -> str:
     return (base_url or "https://api.github.com").rstrip("/")
 

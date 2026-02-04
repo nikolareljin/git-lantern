@@ -1,9 +1,12 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
-from typing import Dict, List, Optional, Tuple
+import tempfile
+import urllib.parse
+from typing import Dict, List, MutableMapping, Optional, Tuple
 
 try:
     import argcomplete
@@ -37,12 +40,30 @@ def repo_depth(root: str, path: str) -> int:
     return rel.count(os.sep) + 1
 
 
+def _is_git_repo_root(path: str) -> bool:
+    git_dir = os.path.join(path, ".git")
+    if os.path.isdir(git_dir):
+        return True
+    if os.path.isfile(git_dir):
+        try:
+            with open(git_dir, "r", encoding="utf-8") as handle:
+                first = handle.readline().strip()
+        except OSError:
+            return False
+        if first.lower().startswith("gitdir:"):
+            gitdir = first.split(":", 1)[1].strip()
+            if ".git/modules/" in gitdir.replace("\\", "/"):
+                return False
+            return True
+    return False
+
+
 def find_repos(root: str, max_depth: int, include_hidden: bool) -> List[str]:
     matches = []
     for current, dirs, files in os.walk(root):
         if not include_hidden:
             dirs[:] = [d for d in dirs if not d.startswith(".")]
-        if ".git" in dirs:
+        if _is_git_repo_root(current):
             matches.append(current)
             dirs[:] = []
             continue
@@ -69,6 +90,41 @@ def build_repo_record(path: str, fetch: bool) -> Dict[str, str]:
         "default_refs": status.get("default_refs"),
         "origin": git.get_origin_url(path),
     }
+
+
+def _to_int_or_none(value) -> Optional[int]:
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_divergence(ahead: Optional[int], behind: Optional[int]) -> str:
+    if ahead is None and behind is None:
+        return "-"
+    if ahead == 0 and behind == 0:
+        return "≡"
+    ahead_str = "-" if ahead is None else str(ahead)
+    behind_str = "-" if behind is None else str(behind)
+    return f"{ahead_str}↑/{behind_str}↓"
+
+
+def add_divergence_fields(record: MutableMapping[str, object]) -> MutableMapping[str, object]:
+    up_ahead = _to_int_or_none(record.get("up_ahead"))
+    up_behind = _to_int_or_none(record.get("up_behind"))
+    main_ahead = _to_int_or_none(record.get("main_ahead"))
+    main_behind = _to_int_or_none(record.get("main_behind"))
+
+    up_value = _format_divergence(up_ahead, up_behind)
+    main_value = _format_divergence(main_ahead, main_behind)
+
+    record["up"] = up_value
+    record["main"] = main_value
+    return record
 
 
 def cmd_repos(args: argparse.Namespace) -> int:
@@ -106,16 +162,17 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
-    records = [build_repo_record(path, args.fetch) for path in repos]
+    records = []
+    for path in repos:
+        record = build_repo_record(path, args.fetch)
+        records.append(add_divergence_fields(record))
     columns = [
         "name",
         "branch",
         "upstream",
-        "up_ahead",
-        "up_behind",
+        "up",
         "main_ref",
-        "main_ahead",
-        "main_behind",
+        "main",
     ]
     print(render_table(records, columns))
     return 0
@@ -128,7 +185,22 @@ def cmd_table(args: argparse.Namespace) -> int:
     if not records:
         print("No records.")
         return 0
-    columns = args.columns.split(",") if args.columns else list(records[0].keys())
+    for record in records:
+        if not all(
+            key in record for key in ("up_ahead", "up_behind", "main_ahead", "main_behind")
+        ):
+            continue
+        add_divergence_fields(record)
+    if args.columns:
+        columns = args.columns.split(",")
+    else:
+        if all(
+            key in records[0]
+            for key in ("name", "branch", "upstream", "up", "main_ref", "main")
+        ):
+            columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
+        else:
+            columns = list(records[0].keys())
     print(render_table(records, columns))
     return 0
 
@@ -285,7 +357,182 @@ def cmd_servers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _normalize_servers(value: object) -> Dict[str, Dict]:
+    if not isinstance(value, dict):
+        return {}
+    servers: Dict[str, Dict] = {}
+    for name, server in value.items():
+        if isinstance(server, dict):
+            servers[str(name)] = dict(server)
+    return servers
+
+
+def _redact_server_secrets(servers: Dict[str, Dict]) -> Dict[str, Dict]:
+    redacted: Dict[str, Dict] = {}
+    for name, server in servers.items():
+        cleaned = dict(server)
+        cleaned.pop("token", None)
+        cleaned.pop("TOKEN", None)
+        redacted[name] = cleaned
+    return redacted
+
+
+def _has_server_secrets(servers: Dict[str, Dict]) -> bool:
+    for server in servers.values():
+        if "token" in server or "TOKEN" in server:
+            return True
+    return False
+
+
+def _write_json_secure(path: str, payload: Dict) -> None:
+    if os.path.islink(path):
+        raise OSError(f"Refusing to write to symlink path: {path}")
+    target_dir = os.path.dirname(path) or "."
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".lantern.", dir=target_dir)
+    try:
+        # Best-effort permission tightening on the temporary file; guard for platforms
+        # where os.fchmod is unavailable (e.g., Windows) or unsupported filesystems.
+        if hasattr(os, "fchmod"):
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        os.replace(tmp_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            # Best-effort permission tightening; ignore unsupported filesystems.
+            pass
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            # Best-effort cleanup of temporary file; ignore failures deleting tmp_path.
+            pass
+
+
+def cmd_config_export(args: argparse.Namespace) -> int:
+    config = lantern_config.load_config()
+    servers = _normalize_servers(config.get("servers", {}))
+    includes_secrets = args.include_secrets
+    had_secrets = _has_server_secrets(servers)
+    if not includes_secrets:
+        servers = _redact_server_secrets(servers)
+    payload = {
+        "default_server": config.get("default_server", ""),
+        "servers": servers,
+    }
+    if had_secrets and not includes_secrets:
+        print("Redacted secrets from export. Use --include-secrets to include tokens.", file=sys.stderr)
+    output_path = args.output or "git-lantern-servers.json"
+    if output_path == "-":
+        if includes_secrets:
+            print(
+                "Refusing to write secrets to stdout. Use --output <path> or omit --include-secrets.",
+                file=sys.stderr,
+            )
+            return 1
+        json.dump(payload, sys.stdout, indent=2)
+        print()
+        return 0
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    if includes_secrets:
+        try:
+            _write_json_secure(output_path, payload)
+        except OSError as exc:
+            print(f"Failed to write secure config export: {exc}", file=sys.stderr)
+            return 1
+    else:
+        with open(output_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    print(f"Wrote {output_path}")
+    return 0
+
+
+def cmd_config_import(args: argparse.Namespace) -> int:
+    with open(args.input, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    incoming_servers = _normalize_servers(payload.get("servers", {}))
+    incoming_default = payload.get("default_server", "")
+    if args.replace:
+        merged = {"servers": incoming_servers}
+    else:
+        merged = lantern_config.load_config()
+        current_servers = _normalize_servers(merged.get("servers", {}))
+        current_servers.update(incoming_servers)
+        merged["servers"] = current_servers
+    if incoming_default:
+        merged["default_server"] = incoming_default
+    output_path = args.output or lantern_config.config_path()
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    try:
+        _write_json_secure(output_path, merged)
+    except OSError as exc:
+        print(f"Failed to write secure config: {exc}", file=sys.stderr)
+        return 1
+    print(f"Updated {output_path}")
+    return 0
+
+
+def cmd_config_path(_: argparse.Namespace) -> int:
+    print(lantern_config.config_path())
+    return 0
+
+
+def _format_list_value(value: object) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
+def _render_list_table(records: List[Dict[str, object]], columns: List[str]) -> None:
+    if not records:
+        print("No records.")
+        return
+    display_records: List[Dict[str, str]] = []
+    for record in records:
+        display_records.append({col: _format_list_value(record.get(col)) for col in columns})
+    print(render_table(display_records, columns))
+
+
+def _safe_output_path(output_dir: str, name: str) -> Optional[str]:
+    normalized = os.path.normpath(name)
+    drive, _ = os.path.splitdrive(normalized)
+    if drive:
+        return None
+    if os.path.isabs(normalized) or normalized in (".", "..") or normalized.startswith(".." + os.sep):
+        return None
+    abs_output_dir = os.path.abspath(output_dir)
+    dest = os.path.join(abs_output_dir, normalized)
+    abs_dest = os.path.abspath(dest)
+    try:
+        if os.path.commonpath([abs_output_dir, abs_dest]) != abs_output_dir:
+            return None
+    except ValueError:
+        return None
+    dest_dir = os.path.dirname(abs_dest)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+    return abs_dest
+
+
 def cmd_github_list(args: argparse.Namespace) -> int:
+    if args.output == "":
+        print(
+            "Output path cannot be empty. Use --output - for stdout or omit --output to render a table.",
+            file=sys.stderr,
+        )
+        return 1
     env = github.load_env()
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
@@ -309,14 +556,19 @@ def cmd_github_list(args: argparse.Namespace) -> int:
         "repos": repos,
     }
     if args.output:
+        if args.output == "-":
+            json.dump(payload, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
         output_dir = os.path.dirname(args.output)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
         with open(args.output, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
-    else:
-        json.dump(payload, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        return 0
+    if args.output is None:
+        columns = ["name", "private", "default_branch", "ssh_url", "html_url"]
+        _render_list_table(repos, columns)
     return 0
 
 
@@ -352,6 +604,45 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             return 1
     repos = payload.get("repos", [])
     os.makedirs(args.root, exist_ok=True)
+    if args.tui:
+        if not shutil.which("dialog"):
+            print("dialog is required for --tui.", file=sys.stderr)
+            return 1
+        checklist_items = []
+        for repo in repos:
+            name = repo.get("name")
+            if not name:
+                continue
+            dest = os.path.join(args.root, name)
+            status = "on" if os.path.exists(dest) else "off"
+            label = "cloned" if status == "on" else "missing"
+            checklist_items.extend([name, label, status])
+        if not checklist_items:
+            print("No repositories available to clone.", file=sys.stderr)
+            return 1
+        dialog_cmd = [
+            "dialog",
+            "--stdout",
+            "--separate-output",
+            "--title",
+            "Forge Clone",
+            "--checklist",
+            "Select repos to clone (existing repos are pre-checked).",
+            "25",
+            "120",
+            "18",
+            *checklist_items,
+        ]
+        result = subprocess.run(dialog_cmd, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("No repositories selected.")
+            return 0
+        selected = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        if not selected:
+            print("No repositories selected.")
+            return 0
+        selected_set = set(selected)
+        repos = [repo for repo in repos if repo.get("name") in selected_set]
     for repo in repos:
         name = repo.get("name")
         ssh_url = repo.get("ssh_url")
@@ -371,6 +662,12 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
 
 
 def cmd_github_gists_list(args: argparse.Namespace) -> int:
+    if args.output == "":
+        print(
+            "Output path cannot be empty. Use --output - for stdout or omit --output to render a table.",
+            file=sys.stderr,
+        )
+        return 1
     env = github.load_env()
     config = lantern_config.load_config()
     server = lantern_config.get_server(config, args.server)
@@ -388,16 +685,307 @@ def cmd_github_gists_list(args: argparse.Namespace) -> int:
         return 1
     payload = {"user": user, "gists": gists}
     if args.output:
+        if args.output == "-":
+            json.dump(payload, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
         output_dir = os.path.dirname(args.output)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
         with open(args.output, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
-    else:
-        json.dump(payload, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        return 0
+    if args.output is None:
+        columns = ["id", "description", "public", "files", "updated_at"]
+        _render_list_table(gists, columns)
     return 0
 
+
+def cmd_github_gists_clone(args: argparse.Namespace) -> int:
+    gist_id = args.gist_id
+    if args.input and os.path.isfile(args.input):
+        with open(args.input, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        gists = payload.get("gists", [])
+        if gists and not any(gist.get("id") == gist_id for gist in gists):
+            print(
+                f"Gist id not found in input list: {gist_id}",
+                file=sys.stderr,
+            )
+            return 1
+
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    if provider != "github":
+        print("Gists are only supported for GitHub servers.", file=sys.stderr)
+        return 1
+    token = args.token or env.get("GITHUB_TOKEN") or server.get("token")
+
+    gist_detail = github.get_gist(gist_id, token, base_url)
+    files = gist_detail.get("files") or {}
+    if not files:
+        print("Gist has no files.", file=sys.stderr)
+        return 1
+
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
+    requested = args.file
+    if requested:
+        names = requested
+    else:
+        names = list(files.keys())
+        if len(names) > 1:
+            print("Gist has multiple files; use --file to select.", file=sys.stderr)
+            return 1
+
+    for name in names:
+        info = files.get(name)
+        if not info:
+            print(f"File not found in gist: {name}", file=sys.stderr)
+            return 1
+        raw_url = info.get("raw_url")
+        if not raw_url:
+            print(f"Missing raw_url for file: {name}", file=sys.stderr)
+            return 1
+        try:
+            content = github.download_gist_file(raw_url, token, base_url)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        dest = _safe_output_path(output_dir, name)
+        if not dest:
+            print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+            return 1
+        if os.path.exists(dest) and not args.force:
+            print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+            return 1
+        with open(dest, "wb") as handle:
+            handle.write(content)
+        print(f"Wrote {dest}")
+    return 0
+
+
+def cmd_forge_snippets_list(args: argparse.Namespace) -> int:
+    if args.output == "":
+        print(
+            "Output path cannot be empty. Use --output - for stdout or omit --output to render a table.",
+            file=sys.stderr,
+        )
+        return 1
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    env_user_key = f"{provider.upper()}_USER"
+    env_token_key = f"{provider.upper()}_TOKEN"
+    user = args.user or env.get(env_user_key) or server.get("user")
+    token = args.token or env.get(env_token_key) or server.get("token")
+    auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+    try:
+        snippets = forge.fetch_snippets(provider, user, token, base_url, auth)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    payload = {
+        "server": server.get("name", provider),
+        "provider": provider,
+        "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
+        "user": user,
+        "snippets": snippets,
+    }
+    if args.output:
+        if args.output == "-":
+            json.dump(payload, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            return 0
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        return 0
+    if args.output is None:
+        display_rows: List[Dict[str, object]] = []
+        for snippet in snippets:
+            row = dict(snippet)
+            if provider == "github":
+                row["visibility"] = "public" if row.get("public") else "secret"
+                row["title"] = row.get("title") or ""
+                row["description"] = row.get("description") or ""
+            display_rows.append(row)
+        columns = ["id", "title", "description", "visibility", "files", "updated_at"]
+        _render_list_table(display_rows, columns)
+    return 0
+
+
+def cmd_forge_snippets_clone(args: argparse.Namespace) -> int:
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = server.get("base_url", "")
+    env_user_key = f"{provider.upper()}_USER"
+    env_token_key = f"{provider.upper()}_TOKEN"
+    user = args.user or env.get(env_user_key) or server.get("user")
+    token = args.token or env.get(env_token_key) or server.get("token")
+    auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+
+    snippet_id = args.snippet_id
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
+    if args.input and os.path.isfile(args.input):
+        with open(args.input, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        listed = payload.get("snippets", [])
+        if listed and not any(item.get("id") == snippet_id for item in listed):
+            print(f"Snippet id not found in input list: {snippet_id}", file=sys.stderr)
+            return 1
+
+    if provider == "github":
+        gist_detail = github.get_gist(snippet_id, token, base_url)
+        files = gist_detail.get("files") or {}
+        if not files:
+            print("Snippet has no files.", file=sys.stderr)
+            return 1
+        requested = args.file
+        if requested:
+            names = requested
+        else:
+            names = list(files.keys())
+            if len(names) > 1:
+                print("Snippet has multiple files; use --file to select.", file=sys.stderr)
+                return 1
+        for name in names:
+            info = files.get(name)
+            if not info:
+                print(f"File not found in snippet: {name}", file=sys.stderr)
+                return 1
+            raw_url = info.get("raw_url")
+            if not raw_url:
+                print(f"Missing raw_url for file: {name}", file=sys.stderr)
+                return 1
+            try:
+                content = github.download_gist_file(raw_url, token, base_url)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            dest = _safe_output_path(output_dir, name)
+            if not dest:
+                print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+                return 1
+            if os.path.exists(dest) and not args.force:
+                print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+                return 1
+            with open(dest, "wb") as handle:
+                handle.write(content)
+            print(f"Wrote {dest}")
+        return 0
+
+    if provider == "gitlab":
+        if not token:
+            print("Token is required for GitLab snippets.", file=sys.stderr)
+            return 1
+        detail = forge.get_gitlab_snippet(str(snippet_id), token, base_url, auth)
+        files: List[Dict[str, str]] = []
+        if isinstance(detail.get("files"), list):
+            files = detail.get("files")  # type: ignore[assignment]
+        else:
+            file_name = detail.get("file_name")
+            raw_url = detail.get("raw_url")
+            if file_name and raw_url:
+                files = [{"path": file_name, "raw_url": raw_url}]
+        if not files:
+            print("Snippet has no files.", file=sys.stderr)
+            return 1
+        requested = args.file
+        if requested:
+            names = requested
+        else:
+            names = [item.get("path") or item.get("file_name") or "" for item in files]
+            names = [name for name in names if name]
+            if len(names) > 1:
+                print("Snippet has multiple files; use --file to select.", file=sys.stderr)
+                return 1
+        for name in names:
+            match = next(
+                (
+                    item
+                    for item in files
+                    if item.get("path") == name or item.get("file_name") == name
+                ),
+                None,
+            )
+            if not match:
+                print(f"File not found in snippet: {name}", file=sys.stderr)
+                return 1
+            raw_url = match.get("raw_url")
+            if not raw_url:
+                print(f"Missing raw_url for file: {name}", file=sys.stderr)
+                return 1
+            headers = forge.auth_headers("gitlab", user, token, auth)
+            try:
+                content = forge.download_with_headers(raw_url, headers, base_url)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            dest = _safe_output_path(output_dir, name)
+            if not dest:
+                print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+                return 1
+            if os.path.exists(dest) and not args.force:
+                print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+                return 1
+            with open(dest, "wb") as handle:
+                handle.write(content)
+            print(f"Wrote {dest}")
+        return 0
+
+    if provider == "bitbucket":
+        if not user:
+            print("Workspace is required for Bitbucket snippets.", file=sys.stderr)
+            return 1
+        detail = forge.get_bitbucket_snippet(user, str(snippet_id), token, base_url, auth)
+        files_map = detail.get("files")
+        file_names: List[str] = []
+        if isinstance(files_map, dict):
+            file_names = list(files_map.keys())
+        if not file_names and not args.file:
+            print("Snippet has no file list; use --file to select.", file=sys.stderr)
+            return 1
+        names = args.file or file_names
+        base_api = (base_url or forge.DEFAULT_BASE_URLS.get(provider, "")).rstrip("/")
+        headers = forge.auth_headers("bitbucket", user, token, auth)
+        for name in names:
+            raw_url = (
+                f"{base_api}/snippets/{urllib.parse.quote(user)}"
+                f"/{urllib.parse.quote(str(snippet_id))}/files/{urllib.parse.quote(name)}"
+            )
+            try:
+                content = forge.download_with_headers(raw_url, headers, base_url)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            dest = _safe_output_path(output_dir, name)
+            if not dest:
+                print(f"Refusing to write file with unsafe path: {name}", file=sys.stderr)
+                return 1
+            if os.path.exists(dest) and not args.force:
+                print(f"File exists: {dest} (use --force to overwrite)", file=sys.stderr)
+                return 1
+            with open(dest, "wb") as handle:
+                handle.write(content)
+            print(f"Wrote {dest}")
+        return 0
+
+    print(f"Unsupported provider: {provider}", file=sys.stderr)
+    return 1
 
 def cmd_github_gists_update(args: argparse.Namespace) -> int:
     env = github.load_env()
@@ -498,6 +1086,27 @@ def build_parser() -> argparse.ArgumentParser:
     servers = sub.add_parser("servers", help="list configured git servers")
     servers.set_defaults(func=cmd_servers)
 
+    config = sub.add_parser("config", help="import/export server configuration")
+    config_sub = config.add_subparsers(dest="config_command", required=True)
+
+    config_export = config_sub.add_parser("export", help="export server config to JSON")
+    config_export.add_argument("--output", default="git-lantern-servers.json")
+    config_export.add_argument(
+        "--include-secrets",
+        action="store_true",
+        help="include tokens in export (writes file with restricted permissions)",
+    )
+    config_export.set_defaults(func=cmd_config_export)
+
+    config_import = config_sub.add_parser("import", help="import server config from JSON")
+    config_import.add_argument("--input", default="git-lantern-servers.json")
+    config_import.add_argument("--output", default="")
+    config_import.add_argument("--replace", action="store_true")
+    config_import.set_defaults(func=cmd_config_import)
+
+    config_path = config_sub.add_parser("path", help="print active config path")
+    config_path.set_defaults(func=cmd_config_path)
+
     repos = sub.add_parser("repos", help="list local repos")
     repos.add_argument("--root", default=os.getcwd())
     repos.add_argument("--max-depth", type=int, default=6)
@@ -560,12 +1169,16 @@ def build_parser() -> argparse.ArgumentParser:
     forge = sub.add_parser("forge", help="git server utilities")
     forge_sub = forge.add_subparsers(dest="forge_command", required=True)
 
-    gh_list = forge_sub.add_parser("list", help="list repos to JSON")
+    gh_list = forge_sub.add_parser("list", help="list repos (table or JSON)")
     gh_list.add_argument("--server", default="")
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
     gh_list.add_argument("--include-forks", action="store_true")
-    gh_list.add_argument("--output", default="data/github.json")
+    gh_list.add_argument(
+        "--output",
+        default=None,
+        help="Output JSON file (use - for stdout). Omit to render a table.",
+    )
     gh_list.set_defaults(func=cmd_github_list)
 
     gh_clone = forge_sub.add_parser("clone", help="clone missing repos from JSON list")
@@ -573,6 +1186,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--input", default="data/github.json")
     gh_clone.add_argument("--root", default=os.getcwd())
     gh_clone.add_argument("--dry-run", action="store_true")
+    gh_clone.add_argument("--tui", action="store_true")
     gh_clone.set_defaults(func=cmd_github_clone)
 
     gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")
@@ -591,15 +1205,51 @@ def build_parser() -> argparse.ArgumentParser:
     for parser_item in (
         gh_gists_list,
         gh_gist_list,
+    ):
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--user", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--output", default=None)
+        parser_item.set_defaults(func=cmd_github_gists_list)
+    for parser_item in (
         gh_snippets_list,
         gh_snippet_list,
     ):
         parser_item.add_argument("--server", default="")
         parser_item.add_argument("--user", default="")
         parser_item.add_argument("--token", default="")
-        parser_item.add_argument("--output", default="data/gists.json")
-        parser_item.set_defaults(func=cmd_github_gists_list)
+        parser_item.add_argument("--output", default=None)
+        parser_item.set_defaults(func=cmd_forge_snippets_list)
 
+    gh_gists_clone = gh_gists_sub.add_parser("clone", help="download gist files")
+    gh_gist_clone = gh_gist_sub.add_parser("clone", help="download gist files")
+    gh_snippets_clone = gh_snippets_sub.add_parser("clone", help="download snippet files")
+    gh_snippet_clone = gh_snippet_sub.add_parser("clone", help="download snippet files")
+    for parser_item in (
+        gh_gists_clone,
+        gh_gist_clone,
+    ):
+        parser_item.add_argument("gist_id", help="gist id from list output")
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--input", default="data/gists.json")
+        parser_item.add_argument("--output-dir", default=".")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--force", action="store_true")
+        parser_item.set_defaults(func=cmd_github_gists_clone)
+    for parser_item in (
+        gh_snippets_clone,
+        gh_snippet_clone,
+    ):
+        parser_item.add_argument("snippet_id", help="snippet id from list output")
+        parser_item.add_argument("--server", default="")
+        parser_item.add_argument("--user", default="")
+        parser_item.add_argument("--token", default="")
+        parser_item.add_argument("--input", default="data/snippets.json")
+        parser_item.add_argument("--output-dir", default=".")
+        parser_item.add_argument("--file", action="append", default=[])
+        parser_item.add_argument("--force", action="store_true")
+        parser_item.set_defaults(func=cmd_forge_snippets_clone)
     gh_gists_update = gh_gists_sub.add_parser("update", help="update a gist")
     gh_gist_update = gh_gist_sub.add_parser("update", help="update a gist")
     gh_snippets_update = gh_snippets_sub.add_parser("update", help="update a snippet")

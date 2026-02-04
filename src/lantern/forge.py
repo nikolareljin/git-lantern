@@ -20,7 +20,7 @@ def _request(url: str, headers: Dict[str, str]) -> Tuple[object, Dict[str, str]]
         return json.loads(data), dict(resp.headers)
 
 
-def _auth_headers(
+def auth_headers(
     provider: str,
     user: Optional[str],
     token: Optional[str],
@@ -65,6 +65,23 @@ def fetch_repos(
     raise ValueError(f"Unsupported provider: {provider}")
 
 
+def fetch_snippets(
+    provider: str,
+    user: Optional[str],
+    token: Optional[str],
+    base_url: str,
+    auth: Optional[Dict[str, str]] = None,
+) -> List[Dict]:
+    provider = (provider or "github").lower()
+    if provider == "github":
+        return github.fetch_gists(user, token, base_url)
+    if provider == "gitlab":
+        return _fetch_gitlab_snippets(user, token, base_url, auth)
+    if provider == "bitbucket":
+        return _fetch_bitbucket_snippets(user, token, base_url, auth)
+    raise ValueError(f"Unsupported provider: {provider}")
+
+
 def _fetch_gitlab_repos(
     user: Optional[str],
     token: Optional[str],
@@ -78,7 +95,7 @@ def _fetch_gitlab_repos(
     page = 1
     repos: List[Dict] = []
     base_url = _base_url("gitlab", base_url).rstrip("/")
-    headers = _auth_headers("gitlab", user, token, auth)
+    headers = auth_headers("gitlab", user, token, auth)
 
     if token and not user:
         url_base = f"{base_url}/projects"
@@ -121,7 +138,7 @@ def _fetch_bitbucket_repos(
     if not user:
         raise ValueError("User is required for Bitbucket.")
     base_url = _base_url("bitbucket", base_url).rstrip("/")
-    headers = _auth_headers("bitbucket", user, token, auth)
+    headers = auth_headers("bitbucket", user, token, auth)
     url = f"{base_url}/repositories/{urllib.parse.quote(user)}?pagelen=100"
     repos: List[Dict] = []
 
@@ -151,3 +168,127 @@ def _fetch_bitbucket_repos(
             )
         url = data.get("next") if isinstance(data, dict) else None
     return repos
+
+
+def _fetch_gitlab_snippets(
+    user: Optional[str],
+    token: Optional[str],
+    base_url: str,
+    auth: Optional[Dict[str, str]],
+) -> List[Dict]:
+    if not token:
+        raise ValueError("Token is required for GitLab snippets.")
+    per_page = 100
+    page = 1
+    snippets: List[Dict] = []
+    base_url = _base_url("gitlab", base_url).rstrip("/")
+    headers = auth_headers("gitlab", user, token, auth)
+
+    while True:
+        params = {"per_page": str(per_page), "page": str(page)}
+        url = f"{base_url}/snippets?{urllib.parse.urlencode(params)}"
+        data, _headers = _request(url, headers)
+        if not data:
+            break
+        for snippet in data:
+            file_name = snippet.get("file_name") or ""
+            files = [file_name] if file_name else []
+            snippets.append(
+                {
+                    "id": snippet.get("id"),
+                    "title": snippet.get("title") or "",
+                    "description": snippet.get("description") or "",
+                    "visibility": snippet.get("visibility") or "",
+                    "files": files,
+                    "raw_url": snippet.get("raw_url") or "",
+                    "html_url": snippet.get("web_url") or "",
+                    "updated_at": snippet.get("updated_at") or "",
+                    "created_at": snippet.get("created_at") or "",
+                }
+            )
+        page += 1
+    return snippets
+
+
+def _fetch_bitbucket_snippets(
+    user: Optional[str],
+    token: Optional[str],
+    base_url: str,
+    auth: Optional[Dict[str, str]],
+) -> List[Dict]:
+    if not user:
+        raise ValueError("Workspace is required for Bitbucket snippets.")
+    base_url = _base_url("bitbucket", base_url).rstrip("/")
+    headers = auth_headers("bitbucket", user, token, auth)
+    url = f"{base_url}/snippets/{urllib.parse.quote(user)}?role=owner&pagelen=100"
+    snippets: List[Dict] = []
+
+    while url:
+        data, _headers = _request(url, headers)
+        values = data.get("values", []) if isinstance(data, dict) else []
+        for snippet in values:
+            links = snippet.get("links", {}) or {}
+            html_url = (links.get("html") or {}).get("href", "")
+            snippets.append(
+                {
+                    "id": snippet.get("id"),
+                    "title": snippet.get("title") or "",
+                    "description": "",
+                    "visibility": "private" if snippet.get("is_private") else "public",
+                    "files": [],
+                    "html_url": html_url,
+                    "updated_at": snippet.get("updated_on") or "",
+                    "created_at": snippet.get("created_on") or "",
+                    "workspace": user,
+                }
+            )
+        url = data.get("next") if isinstance(data, dict) else None
+    return snippets
+
+
+def get_gitlab_snippet(
+    snippet_id: str,
+    token: str,
+    base_url: str,
+    auth: Optional[Dict[str, str]],
+) -> Dict:
+    base_url = _base_url("gitlab", base_url).rstrip("/")
+    headers = auth_headers("gitlab", None, token, auth)
+    url = f"{base_url}/snippets/{urllib.parse.quote(str(snippet_id))}"
+    data, _headers = _request(url, headers)
+    return data if isinstance(data, dict) else {}
+
+
+def get_bitbucket_snippet(
+    workspace: str,
+    snippet_id: str,
+    token: Optional[str],
+    base_url: str,
+    auth: Optional[Dict[str, str]],
+) -> Dict:
+    base_url = _base_url("bitbucket", base_url).rstrip("/")
+    headers = auth_headers("bitbucket", workspace, token, auth)
+    url = f"{base_url}/snippets/{urllib.parse.quote(workspace)}/{urllib.parse.quote(str(snippet_id))}"
+    data, _headers = _request(url, headers)
+    return data if isinstance(data, dict) else {}
+
+
+def _trusted_hosts_for(base_url: str) -> set:
+    trusted = {urllib.parse.urlparse(base).netloc for base in DEFAULT_BASE_URLS.values()}
+    if base_url:
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.netloc:
+            trusted.add(parsed.netloc)
+    return trusted
+
+
+def download_with_headers(url: str, headers: Dict[str, str], base_url: str = "") -> bytes:
+    parsed = urllib.parse.urlparse(url)
+    trusted_hosts = _trusted_hosts_for(base_url)
+    if parsed.scheme != "https":
+        raise ValueError(f"Refusing to download non-HTTPS URL: {url!r}")
+    if not parsed.netloc or parsed.netloc not in trusted_hosts:
+        raise ValueError(f"Refusing to download from untrusted host: {parsed.netloc}")
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.read()

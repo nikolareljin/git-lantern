@@ -2,6 +2,8 @@
 
 This document explains every `lantern ...` command, the data it produces, and how to interpret it.
 
+For step-by-step workflows, see `docs/use-cases.md`.
+
 ## Common concepts
 
 - **Workspace root**: A directory that contains multiple Git repositories. Most commands accept `--root`. If you do not pass it, Lantern assumes the current working directory and starts scanning from there.
@@ -73,6 +75,23 @@ Lantern can read a `config.json` file to manage multiple git servers (GitHub, Gi
 lantern servers
 ```
 
+**Export server config**:
+```bash
+lantern config export --output git-lantern-servers.json
+lantern config export --output -  # stdout
+```
+
+**Import server config**:
+```bash
+lantern config import --input git-lantern-servers.json
+lantern config import --input git-lantern-servers.json --replace
+```
+
+**Show active config path**:
+```bash
+lantern config path
+```
+
 ## Local repository commands
 
 ### `lantern repos`
@@ -128,7 +147,9 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 - Prints a table with the most relevant status columns.
 
 **Output columns**:
-- `name`, `branch`, `upstream`, `up_ahead`, `up_behind`, `main_ref`, `main_ahead`, `main_behind`.
+- `name`, `branch`, `upstream`, `up`, `main_ref`, `main`.
+- `up` and `main` are shown as `N↑/M↓` for ahead/behind counts.
+- `≡` means no divergence (`0↑/0↓`) and is shown only when both ahead and behind counts are zero.
 
 **Example**:
 ```bash
@@ -146,7 +167,7 @@ lantern status --root ~/workspace
 
 **What it shows**:
 - The scan fields from `lantern scan` (see the list above), formatted as a fixed-width table.
-- This is useful for reformatting or sharing the scan data without re-scanning.
+- When `up_ahead`/`up_behind` and `main_ahead`/`main_behind` are present, it renders consolidated `up` and `main` columns as `N↑/M↓` (or `≡` when clean).
 
 **Example**:
 ```bash
@@ -255,14 +276,15 @@ Environment fallbacks:
 
 ### `lantern forge list`
 
-**Purpose**: List repositories from the selected git server and write to JSON.
+**Purpose**: List repositories from the selected git server (JSON or table output).
 
 **What it does**:
 - Uses `--server` to select a provider (defaults to `default_server`, which defaults to `github.com`).
 - Uses `--user` (or config/env defaults) to scope repos.
 - If `--token` is set, it uses the authenticated endpoint and can include private repos owned by the user.
 - If `--include-forks` is not set, forked repos are excluded.
-- Writes JSON to `--output` (default `data/github.json`) or stdout.
+- Writes JSON to `--output` (or stdout with `--output -`).
+- If `--output` is omitted, prints a table instead of JSON.
 
 **Output fields per repo**:
 - `name`, `private`, `default_branch`, `ssh_url`, `clone_url`, `html_url`.
@@ -294,12 +316,13 @@ lantern forge clone --input data/github.json --root ~/workspace
 
 ### `lantern forge gists list` / `lantern forge snippets list`
 
-**Purpose**: List gists/snippets and write to JSON (GitHub only).
+**Purpose**: List gists (GitHub) or snippets (GitHub/GitLab/Bitbucket).
 
 **What it does**:
-- Uses `--server` to select a GitHub server.
-- Uses `--user` or `GITHUB_USER` for public gists, or uses a token to list the authenticated user's gists.
-- Writes JSON to `--output` (default `data/gists.json`) or stdout.
+- Uses `--server` to select a GitHub/GitLab/Bitbucket server.
+- Uses `--user` or `GITHUB_USER` for public GitHub gists, or a token to list the authenticated user's gists.
+- Writes JSON to `--output` (or stdout with `--output -`).
+- If `--output` is omitted, prints a table instead of JSON.
 
 **Output fields per gist**:
 - `id`, `description`, `public`, `files`, `html_url`, `updated_at`.
