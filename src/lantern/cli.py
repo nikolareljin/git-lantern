@@ -391,7 +391,13 @@ def _write_json_secure(path: str, payload: Dict) -> None:
     os.makedirs(target_dir, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(prefix=".lantern.", dir=target_dir)
     try:
-        os.fchmod(fd, 0o600)
+        # Best-effort permission tightening on the temporary file; guard for platforms
+        # where os.fchmod is unavailable (e.g., Windows) or unsupported filesystems.
+        if hasattr(os, "fchmod"):
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
         os.replace(tmp_path, path)
