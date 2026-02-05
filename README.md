@@ -35,6 +35,8 @@ Commands (jump to detailed guides):
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`
 - `lantern forge snippets ...` -> `docs/use-cases.md#list-snippets-githubgitlabbitbucket`
 - `lantern config export/import/path` -> `docs/use-cases.md#server-config-github-gitlab-bitbucket`
+- `lantern config setup` - Interactive server configuration (TUI)
+- `lantern --tui` / `lantern -t` - Interactive TUI mode for all operations
 
 Quick examples:
 ```bash
@@ -55,6 +57,82 @@ lantern config export --output git-lantern-servers.json
 lantern config import --input git-lantern-servers.json
 lantern config path
 ```
+
+## Interactive TUI Mode
+
+Lantern includes an interactive TUI mode using the `dialog` CLI. This provides a menu-driven interface for all lantern operations without needing to remember command-line flags.
+
+### Quick Start
+
+```bash
+# Launch TUI mode
+lantern --tui
+lantern -t
+
+# Or just configure servers interactively
+lantern config setup
+```
+
+### TUI Main Menu
+
+```
+Git Lantern
+├── servers      - View configured Git servers
+├── config       - Server configuration (setup/export/import/path)
+├── settings     - Session settings (set root directory)
+├── repos        - List local repositories
+├── status       - Show repository status
+├── scan         - Scan repositories to JSON
+├── table        - Render table from JSON scan
+├── sync         - Sync repositories (fetch/pull/push)
+├── find         - Find repositories by name/remote
+├── duplicates   - Find duplicate repositories
+├── forge        - Git forge operations
+│   ├── list          - List remote repos (display in TUI)
+│   ├── list_file     - List remote repos (save to JSON)
+│   └── clone         - Clone repos from JSON list
+└── exit         - Exit (clears screen)
+```
+
+### Session Settings
+
+The TUI uses a **session-based root directory** that persists throughout your session:
+
+1. The current root is shown in the main menu
+2. Use **Settings > Change root directory** to change it
+3. All operations (repos, status, scan, sync, find, duplicates) use this root automatically
+4. No more repeated prompts for the directory on every operation
+
+### Server Configuration Wizard
+
+`lantern config setup` provides an interactive wizard for managing servers:
+
+- **Add servers** from presets (github.com, gitlab.com, bitbucket.org)
+- **Add custom servers** (self-hosted GitHub Enterprise, GitLab, Bitbucket)
+- **Edit servers** (change username, update token)
+- **Remove servers**
+- **Set default server**
+- Changes are saved only when you choose "Save and exit"
+
+### Installing dialog
+
+The TUI requires the `dialog` CLI tool:
+
+```bash
+# Debian/Ubuntu
+sudo apt install dialog
+
+# macOS
+brew install dialog
+
+# Fedora/RHEL
+sudo dnf install dialog
+
+# Arch Linux
+sudo pacman -S dialog
+```
+
+See `docs/use-cases.md#interactive-tui-mode` for detailed TUI workflows.
 
 ## Shell completion
 

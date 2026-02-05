@@ -20,6 +20,23 @@ from . import github
 from .table import render_table
 
 
+# Common server presets for TUI setup
+SERVER_PRESETS = {
+    "github.com": {
+        "provider": "github",
+        "base_url": "https://api.github.com",
+    },
+    "gitlab.com": {
+        "provider": "gitlab",
+        "base_url": "https://gitlab.com/api/v4",
+    },
+    "bitbucket.org": {
+        "provider": "bitbucket",
+        "base_url": "https://api.bitbucket.org/2.0",
+    },
+}
+
+
 def load_dotenv() -> None:
     path = os.environ.get("GIT_LANTERN_ENV", os.path.join(os.getcwd(), ".env"))
     if not os.path.isfile(path):
@@ -125,6 +142,619 @@ def add_divergence_fields(record: MutableMapping[str, object]) -> MutableMapping
     record["up"] = up_value
     record["main"] = main_value
     return record
+
+
+# --- TUI helpers ---
+
+
+def _dialog_available() -> bool:
+    """Check if dialog CLI is available."""
+    return shutil.which("dialog") is not None
+
+
+def _dialog_init() -> Tuple[int, int]:
+    """Get dialog dimensions based on terminal size."""
+    try:
+        cols = int(subprocess.run(
+            ["tput", "cols"], capture_output=True, text=True, check=True
+        ).stdout.strip())
+    except (subprocess.CalledProcessError, ValueError):
+        cols = 120
+    try:
+        lines = int(subprocess.run(
+            ["tput", "lines"], capture_output=True, text=True, check=True
+        ).stdout.strip())
+    except (subprocess.CalledProcessError, ValueError):
+        lines = 40
+    width = max(60, cols * 70 // 100)
+    height = max(20, lines * 70 // 100)
+    return height, width
+
+
+def _dialog_menu(
+    title: str,
+    text: str,
+    items: List[Tuple[str, str]],
+    height: int = 0,
+    width: int = 0,
+) -> Optional[str]:
+    """Show a dialog menu and return the selected item tag, or None if cancelled."""
+    if height == 0 or width == 0:
+        height, width = _dialog_init()
+    menu_height = min(len(items), height - 8)
+    cmd = [
+        "dialog", "--stdout", "--title", title, "--menu", text,
+        str(height), str(width), str(menu_height),
+    ]
+    for tag, description in items:
+        cmd.extend([tag, description])
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _dialog_inputbox(
+    title: str,
+    text: str,
+    default: str = "",
+    height: int = 10,
+    width: int = 60,
+) -> Optional[str]:
+    """Show a dialog input box and return the entered value, or None if cancelled."""
+    cmd = [
+        "dialog", "--stdout", "--title", title, "--inputbox", text,
+        str(height), str(width), default,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _dialog_passwordbox(
+    title: str,
+    text: str,
+    height: int = 10,
+    width: int = 60,
+) -> Optional[str]:
+    """Show a dialog password box and return the entered value, or None if cancelled."""
+    cmd = [
+        "dialog", "--stdout", "--title", title, "--passwordbox", text,
+        str(height), str(width),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _dialog_yesno(
+    title: str,
+    text: str,
+    height: int = 10,
+    width: int = 60,
+) -> bool:
+    """Show a dialog yes/no box and return True for yes, False for no."""
+    cmd = [
+        "dialog", "--title", title, "--yesno", text,
+        str(height), str(width),
+    ]
+    result = subprocess.run(cmd, check=False)
+    return result.returncode == 0
+
+
+def _dialog_msgbox(title: str, text: str, height: int = 10, width: int = 60) -> None:
+    """Show a dialog message box."""
+    cmd = ["dialog", "--title", title, "--msgbox", text, str(height), str(width)]
+    subprocess.run(cmd, check=False)
+
+
+def cmd_config_setup(args: argparse.Namespace) -> int:
+    """Interactive TUI for setting up server configuration."""
+    if not _dialog_available():
+        print("dialog is required for --tui / config setup.", file=sys.stderr)
+        print("Install it with: apt install dialog (Debian/Ubuntu) or brew install dialog (macOS)", file=sys.stderr)
+        return 1
+
+    height, width = _dialog_init()
+    config = lantern_config.load_config()
+    servers = config.get("servers", {}) if isinstance(config.get("servers"), dict) else {}
+
+    while True:
+        # Build menu items
+        menu_items: List[Tuple[str, str]] = [
+            ("add", "Add a new server"),
+        ]
+        if servers:
+            menu_items.append(("edit", "Edit existing server"))
+            menu_items.append(("remove", "Remove a server"))
+            menu_items.append(("default", "Set default server"))
+        menu_items.append(("save", "Save and exit"))
+        menu_items.append(("cancel", "Exit without saving"))
+
+        action = _dialog_menu(
+            "Server Configuration",
+            "Manage your Git servers.\n\nCurrently configured: " + (", ".join(servers.keys()) if servers else "none"),
+            menu_items,
+            height,
+            width,
+        )
+
+        if action is None or action == "cancel":
+            return 0
+
+        if action == "save":
+            config["servers"] = servers
+            output_path = lantern_config.config_path()
+            try:
+                _write_json_secure(output_path, config)
+            except OSError as exc:
+                _dialog_msgbox("Error", f"Failed to save config: {exc}")
+                return 1
+            _dialog_msgbox("Success", f"Configuration saved to:\n{output_path}")
+            return 0
+
+        if action == "add":
+            # Select preset or custom
+            preset_items: List[Tuple[str, str]] = []
+            for name, preset in SERVER_PRESETS.items():
+                status = "(configured)" if name in servers else ""
+                preset_items.append((name, f"{preset['provider']} {status}"))
+            preset_items.append(("custom", "Add custom server"))
+
+            server_choice = _dialog_menu(
+                "Add Server",
+                "Select a server to add:",
+                preset_items,
+                height,
+                width,
+            )
+            if not server_choice:
+                continue
+
+            if server_choice == "custom":
+                server_name = _dialog_inputbox("Server Name", "Enter the server hostname (e.g., gitlab.example.com):")
+                if not server_name:
+                    continue
+                provider = _dialog_menu(
+                    "Provider",
+                    f"Select the provider type for {server_name}:",
+                    [("github", "GitHub or GitHub Enterprise"),
+                     ("gitlab", "GitLab or GitLab self-hosted"),
+                     ("bitbucket", "Bitbucket or Bitbucket Server")],
+                )
+                if not provider:
+                    continue
+                base_url = _dialog_inputbox(
+                    "Base URL",
+                    f"Enter the API base URL for {server_name}:",
+                    forge.DEFAULT_BASE_URLS.get(provider, ""),
+                )
+                if base_url is None:
+                    continue
+                server_config = {"provider": provider}
+                if base_url:
+                    server_config["base_url"] = base_url
+            else:
+                server_name = server_choice
+                server_config = dict(SERVER_PRESETS[server_name])
+
+            # Get username
+            existing_user = servers.get(server_name, {}).get("user", "")
+            user = _dialog_inputbox(
+                "Username",
+                f"Enter your username for {server_name}:",
+                existing_user,
+            )
+            if user is None:
+                continue
+            if user:
+                server_config["user"] = user
+
+            # Optionally get token
+            if _dialog_yesno("Token", f"Do you want to add an API token for {server_name}?"):
+                token = _dialog_passwordbox("Token", f"Enter your API token for {server_name}:")
+                if token:
+                    server_config["token"] = token
+
+            servers[server_name] = server_config
+            _dialog_msgbox("Added", f"Server '{server_name}' has been added.\n\nRemember to save before exiting.")
+
+        elif action == "edit":
+            server_list = [(name, servers[name].get("provider", "unknown")) for name in servers]
+            server_to_edit = _dialog_menu("Edit Server", "Select a server to edit:", server_list, height, width)
+            if not server_to_edit:
+                continue
+
+            server_config = dict(servers[server_to_edit])
+
+            # Edit username
+            current_user = server_config.get("user", "")
+            new_user = _dialog_inputbox(
+                "Username",
+                f"Enter username for {server_to_edit}:",
+                current_user,
+            )
+            if new_user is not None:
+                if new_user:
+                    server_config["user"] = new_user
+                elif "user" in server_config:
+                    del server_config["user"]
+
+            # Edit token
+            has_token = bool(server_config.get("token"))
+            token_prompt = "Update token?" if has_token else "Add token?"
+            if _dialog_yesno("Token", f"{token_prompt} for {server_to_edit}?"):
+                new_token = _dialog_passwordbox("Token", f"Enter API token for {server_to_edit}:")
+                if new_token:
+                    server_config["token"] = new_token
+            elif has_token and _dialog_yesno("Remove Token", f"Remove existing token for {server_to_edit}?"):
+                del server_config["token"]
+
+            servers[server_to_edit] = server_config
+            _dialog_msgbox("Updated", f"Server '{server_to_edit}' has been updated.\n\nRemember to save before exiting.")
+
+        elif action == "remove":
+            server_list = [(name, servers[name].get("provider", "unknown")) for name in servers]
+            server_to_remove = _dialog_menu("Remove Server", "Select a server to remove:", server_list, height, width)
+            if not server_to_remove:
+                continue
+            if _dialog_yesno("Confirm", f"Are you sure you want to remove '{server_to_remove}'?"):
+                del servers[server_to_remove]
+                _dialog_msgbox("Removed", f"Server '{server_to_remove}' has been removed.\n\nRemember to save before exiting.")
+
+        elif action == "default":
+            server_list = [(name, servers[name].get("provider", "unknown")) for name in servers]
+            current_default = config.get("default_server", "")
+            default_server = _dialog_menu(
+                "Default Server",
+                f"Select the default server (current: {current_default or 'none'}):",
+                server_list,
+                height,
+                width,
+            )
+            if default_server:
+                config["default_server"] = default_server
+                _dialog_msgbox("Updated", f"Default server set to '{default_server}'.\n\nRemember to save before exiting.")
+
+
+def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int = 0) -> None:
+    """Display text in a scrollable dialog textbox using a temp file."""
+    if height == 0 or width == 0:
+        height, width = _dialog_init()
+    fd, tmp_path = tempfile.mkstemp(prefix=".lantern-tui.", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        cmd = ["dialog", "--title", title, "--textbox", tmp_path, str(height), str(width)]
+        subprocess.run(cmd, check=False)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def cmd_tui(args: argparse.Namespace) -> int:
+    """Main TUI interface for lantern."""
+    if not _dialog_available():
+        print("dialog is required for --tui mode.", file=sys.stderr)
+        print("Install it with: apt install dialog (Debian/Ubuntu) or brew install dialog (macOS)", file=sys.stderr)
+        return 1
+
+    height, width = _dialog_init()
+
+    # Session-level root directory (persists throughout the TUI session)
+    session_root = os.getcwd()
+
+    while True:
+        # Build menu with current root shown
+        menu_text = f"Select an operation:\n\nCurrent root: {session_root}"
+        menu_items: List[Tuple[str, str]] = [
+            ("servers", "List configured Git servers"),
+            ("config", "Server configuration"),
+            ("settings", "Session settings (root directory)"),
+            ("repos", "List local repositories"),
+            ("status", "Show repository status"),
+            ("scan", "Scan repositories to JSON"),
+            ("table", "Render table from JSON scan"),
+            ("sync", "Sync repositories (fetch/pull/push)"),
+            ("find", "Find repositories by name/remote"),
+            ("duplicates", "Find duplicate repositories"),
+            ("forge", "Git forge operations (list/clone)"),
+            ("exit", "Exit"),
+        ]
+
+        action = _dialog_menu(
+            "Git Lantern",
+            menu_text,
+            menu_items,
+            height,
+            width,
+        )
+
+        if action is None or action == "exit":
+            # Clear screen on exit
+            subprocess.run(["clear"], check=False)
+            return 0
+
+        if action == "settings":
+            settings_items: List[Tuple[str, str]] = [
+                ("root", f"Change root directory (current: {session_root})"),
+                ("back", "Back to main menu"),
+            ]
+            settings_action = _dialog_menu("Session Settings", "Configure session settings:", settings_items, height, width)
+
+            if settings_action == "root":
+                new_root = _dialog_inputbox("Root Directory", "Enter the root directory for repository operations:", session_root)
+                if new_root:
+                    if os.path.isdir(new_root):
+                        session_root = os.path.abspath(new_root)
+                        _dialog_msgbox("Settings", f"Root directory set to:\n{session_root}")
+                    else:
+                        _dialog_msgbox("Error", f"Directory not found: {new_root}")
+
+        elif action == "servers":
+            # Show servers in a message box
+            config = lantern_config.load_config()
+            records = lantern_config.list_servers(config)
+            if not records:
+                _dialog_msgbox("Servers", "No servers configured.\n\nUse 'config' > 'setup' to add servers.")
+            else:
+                lines = ["Configured servers:", ""]
+                for rec in records:
+                    lines.append(f"  {rec['name']} ({rec['provider']})")
+                    if rec.get('user'):
+                        lines.append(f"    User: {rec['user']}")
+                    if rec.get('base_url'):
+                        lines.append(f"    URL: {rec['base_url']}")
+                    lines.append("")
+                _dialog_msgbox("Servers", "\n".join(lines))
+
+        elif action == "config":
+            config_items: List[Tuple[str, str]] = [
+                ("setup", "Interactive server setup"),
+                ("path", "Show config file path"),
+                ("export", "Export config to JSON"),
+                ("import", "Import config from JSON"),
+                ("back", "Back to main menu"),
+            ]
+            config_action = _dialog_menu("Configuration", "Select an operation:", config_items, height, width)
+
+            if config_action == "setup":
+                # Create a namespace for the config setup command
+                setup_args = argparse.Namespace()
+                cmd_config_setup(setup_args)
+            elif config_action == "path":
+                path = lantern_config.config_path()
+                _dialog_msgbox("Config Path", f"Configuration file path:\n\n{path}")
+            elif config_action == "export":
+                output = _dialog_inputbox("Export", "Enter output file path:", "git-lantern-servers.json")
+                if output:
+                    export_args = argparse.Namespace(output=output, include_secrets=False)
+                    result = cmd_config_export(export_args)
+                    if result == 0:
+                        _dialog_msgbox("Export", f"Configuration exported to:\n{output}")
+                    else:
+                        _dialog_msgbox("Error", "Failed to export configuration.")
+            elif config_action == "import":
+                input_file = _dialog_inputbox("Import", "Enter input file path:", "git-lantern-servers.json")
+                if input_file and os.path.isfile(input_file):
+                    replace = _dialog_yesno("Replace", "Replace existing servers? (No = merge)")
+                    import_args = argparse.Namespace(input=input_file, output="", replace=replace)
+                    result = cmd_config_import(import_args)
+                    if result == 0:
+                        _dialog_msgbox("Import", "Configuration imported successfully.")
+                    else:
+                        _dialog_msgbox("Error", "Failed to import configuration.")
+                elif input_file:
+                    _dialog_msgbox("Error", f"File not found: {input_file}")
+
+        elif action == "repos":
+            if not os.path.isdir(session_root):
+                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+                continue
+            # Run repos command and display output
+            repos_list = find_repos(session_root, 6, False)
+            if not repos_list:
+                _dialog_msgbox("Repositories", f"No repositories found in:\n{session_root}")
+                continue
+            records = []
+            for path in repos_list:
+                records.append({
+                    "name": os.path.basename(path),
+                    "path": path,
+                    "origin": git.get_origin_url(path),
+                })
+            output_text = render_table(records, ["name", "path", "origin"])
+            _dialog_textbox_from_text("Repositories", output_text, height, width)
+
+        elif action == "status":
+            if not os.path.isdir(session_root):
+                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+                continue
+            fetch = _dialog_yesno("Fetch", "Run 'git fetch' before showing status?")
+            repos_list = find_repos(session_root, 6, False)
+            if not repos_list:
+                _dialog_msgbox("Status", f"No repositories found in:\n{session_root}")
+                continue
+            records = []
+            for path in repos_list:
+                record = build_repo_record(path, fetch)
+                records.append(add_divergence_fields(record))
+            columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
+            output_text = render_table(records, columns)
+            _dialog_textbox_from_text("Status", output_text, height, width)
+
+        elif action == "scan":
+            if not os.path.isdir(session_root):
+                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+                continue
+            output = _dialog_inputbox("Output File", "Enter output JSON file path:", "data/repos.json")
+            if output:
+                fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
+                repos_list = find_repos(session_root, 6, False)
+                records = [build_repo_record(path, fetch) for path in repos_list]
+                payload = {"root": session_root, "repos": records}
+                output_dir = os.path.dirname(output)
+                if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
+                try:
+                    with open(output, "w", encoding="utf-8") as handle:
+                        json.dump(payload, handle, indent=2)
+                    _dialog_msgbox("Scan", f"Scan complete. Found {len(records)} repositories.\n\nOutput saved to:\n{output}")
+                except OSError as exc:
+                    _dialog_msgbox("Error", f"Failed to write output: {exc}")
+
+        elif action == "table":
+            input_file = _dialog_inputbox("Input File", "Enter JSON scan file path:", "data/repos.json")
+            if not input_file:
+                continue
+            if not os.path.isfile(input_file):
+                _dialog_msgbox("Error", f"File not found: {input_file}")
+                continue
+            try:
+                with open(input_file, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                records = payload.get("repos", [])
+                if not records:
+                    _dialog_msgbox("Table", "No records found in the JSON file.")
+                    continue
+                # Add divergence fields if present
+                for record in records:
+                    if all(key in record for key in ("up_ahead", "up_behind", "main_ahead", "main_behind")):
+                        add_divergence_fields(record)
+                # Determine columns
+                if all(key in records[0] for key in ("name", "branch", "upstream", "up", "main_ref", "main")):
+                    columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
+                else:
+                    columns = list(records[0].keys())
+                output_text = render_table(records, columns)
+                _dialog_textbox_from_text("Table", output_text, height, width)
+            except (json.JSONDecodeError, OSError) as exc:
+                _dialog_msgbox("Error", f"Failed to read JSON file: {exc}")
+
+        elif action == "sync":
+            if not os.path.isdir(session_root):
+                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+                continue
+            sync_items: List[Tuple[str, str]] = [
+                ("fetch", "Fetch only"),
+                ("pull", "Fetch and pull"),
+                ("push", "Fetch, pull, and push"),
+            ]
+            sync_action = _dialog_menu("Sync", "Select sync operation:", sync_items)
+            if sync_action:
+                dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no actual changes)?")
+                cmd_args = [sys.executable, "-m", "lantern", "sync", "--root", session_root]
+                if sync_action == "fetch":
+                    cmd_args.append("--fetch")
+                elif sync_action == "pull":
+                    cmd_args.extend(["--fetch", "--pull"])
+                elif sync_action == "push":
+                    cmd_args.extend(["--fetch", "--pull", "--push"])
+                if dry_run:
+                    cmd_args.append("--dry-run")
+                result = subprocess.run(cmd_args, capture_output=True, text=True, check=False, env={**os.environ, "PYTHONPATH": "src"})
+                if result.stdout:
+                    _dialog_textbox_from_text("Sync Results", result.stdout, height, width)
+                else:
+                    _dialog_msgbox("Sync", "No repositories found.")
+
+        elif action == "find":
+            if not os.path.isdir(session_root):
+                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+                continue
+            name = _dialog_inputbox("Name Filter", "Filter by repository name (leave empty for all):", "")
+            remote = _dialog_inputbox("Remote Filter", "Filter by remote URL (leave empty for all):", "")
+            repos_list = find_repos(session_root, 6, False)
+            records = []
+            for path in repos_list:
+                repo_name = os.path.basename(path)
+                origin = git.get_origin_url(path)
+                if name and name not in repo_name:
+                    continue
+                if remote and (not origin or remote not in origin):
+                    continue
+                records.append({"name": repo_name, "path": path, "origin": origin})
+            if records:
+                output_text = render_table(records, ["name", "path", "origin"])
+                _dialog_textbox_from_text("Find Results", output_text, height, width)
+            else:
+                _dialog_msgbox("Find", "No repositories found matching the filters.")
+
+        elif action == "duplicates":
+            if not os.path.isdir(session_root):
+                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+                continue
+            repos_list = find_repos(session_root, 6, False)
+            groups: Dict[str, List[str]] = {}
+            for path in repos_list:
+                origin = git.get_origin_url(path)
+                if not origin:
+                    continue
+                groups.setdefault(origin, []).append(path)
+            records = []
+            for origin, paths in sorted(groups.items()):
+                if len(paths) < 2:
+                    continue
+                records.append({
+                    "origin": origin,
+                    "paths": " | ".join(sorted(paths)),
+                    "count": str(len(paths)),
+                })
+            if records:
+                output_text = render_table(records, ["count", "origin", "paths"])
+                _dialog_textbox_from_text("Duplicates", output_text, height, width)
+            else:
+                _dialog_msgbox("Duplicates", "No duplicate repositories found.")
+
+        elif action == "forge":
+            forge_items: List[Tuple[str, str]] = [
+                ("list", "List remote repositories (display)"),
+                ("list_file", "List remote repositories (save to file)"),
+                ("clone", "Clone repositories from list"),
+                ("back", "Back to main menu"),
+            ]
+            forge_action = _dialog_menu("Forge Operations", "Select an operation:", forge_items, height, width)
+
+            if forge_action in ("list", "list_file"):
+                config = lantern_config.load_config()
+                server_records = lantern_config.list_servers(config)
+                if not server_records:
+                    _dialog_msgbox("Error", "No servers configured.\n\nUse 'config' > 'setup' to add servers.")
+                    continue
+                server_items = [(rec["name"], rec["provider"]) for rec in server_records]
+                server = _dialog_menu("Select Server", "Choose a server:", server_items)
+                if server:
+                    cmd_args = [sys.executable, "-m", "lantern", "forge", "list", "--server", server]
+                    if forge_action == "list_file":
+                        output = _dialog_inputbox("Output File", "Enter output JSON file path:", "data/github.json")
+                        if not output:
+                            continue
+                        cmd_args.extend(["--output", output])
+                    result = subprocess.run(cmd_args, capture_output=True, text=True, check=False, env={**os.environ, "PYTHONPATH": "src"})
+                    if result.returncode == 0:
+                        if forge_action == "list_file":
+                            _dialog_msgbox("List", f"Repository list saved to:\n{output}")
+                        elif result.stdout:
+                            _dialog_textbox_from_text(f"Repositories on {server}", result.stdout, height, width)
+                    else:
+                        _dialog_msgbox("Error", f"Failed to list repositories:\n{result.stderr or result.stdout}")
+
+            elif forge_action == "clone":
+                input_file = _dialog_inputbox("Input File", "Enter JSON file with repository list:", "data/github.json")
+                if input_file and os.path.isfile(input_file):
+                    clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session_root)
+                    if clone_root:
+                        # Use the existing TUI clone with dialog checklist
+                        cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
+                        subprocess.run(cmd_args, check=False, env={**os.environ, "PYTHONPATH": "src"})
+                elif input_file:
+                    _dialog_msgbox("Error", f"File not found: {input_file}")
+
+    return 0
 
 
 def cmd_repos(args: argparse.Namespace) -> int:
@@ -1081,7 +1711,12 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantern")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--tui", "-t",
+        action="store_true",
+        help="Launch interactive TUI mode using dialog",
+    )
+    sub = parser.add_subparsers(dest="command", required=False)
 
     servers = sub.add_parser("servers", help="list configured git servers")
     servers.set_defaults(func=cmd_servers)
@@ -1106,6 +1741,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_path = config_sub.add_parser("path", help="print active config path")
     config_path.set_defaults(func=cmd_config_path)
+
+    config_setup = config_sub.add_parser("setup", help="interactive server configuration (TUI)")
+    config_setup.set_defaults(func=cmd_config_setup)
 
     repos = sub.add_parser("repos", help="list local repos")
     repos.add_argument("--root", default=os.getcwd())
@@ -1298,4 +1936,14 @@ def main() -> None:
     if argcomplete:
         argcomplete.autocomplete(parser)
     args = parser.parse_args()
+
+    # Handle --tui flag: launch interactive TUI mode
+    if args.tui:
+        raise SystemExit(cmd_tui(args))
+
+    # If no command specified, show help
+    if not args.command:
+        parser.print_help()
+        raise SystemExit(0)
+
     raise SystemExit(args.func(args))

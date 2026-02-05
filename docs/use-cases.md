@@ -3,6 +3,102 @@
 This guide focuses on real workflows. For the full command reference, see
 `docs/commands.md`.
 
+## Interactive TUI Mode
+
+Lantern provides a full interactive TUI (terminal user interface) powered by the `dialog` CLI. This is ideal for users who prefer menu-driven interfaces over remembering command-line flags.
+
+### Launching TUI Mode
+
+```bash
+lantern --tui
+lantern -t
+```
+
+### TUI Workflow: First-Time Setup
+
+1. **Launch TUI**: `lantern --tui`
+2. **Configure servers**: Select `config` > `setup`
+3. **Add a server**: Choose from presets (github.com, gitlab.com, bitbucket.org) or add a custom server
+4. **Enter credentials**: Provide your username and optionally your API token
+5. **Save**: Select "Save and exit" to write the configuration
+6. **Set root directory**: Go to `settings` > "Change root directory" and enter your workspace path (e.g., `~/workspace`)
+
+Now all repository operations will use your configured root directory automatically.
+
+### TUI Workflow: Daily Usage
+
+Once configured, a typical session looks like:
+
+1. **Launch TUI**: `lantern --tui`
+2. **Check status**: Select `status` to see all repos with branch divergence info
+3. **Sync repos**: Select `sync` > "Fetch and pull" to update all clean repos
+4. **Find a repo**: Select `find` and enter a name filter to locate a specific repo
+5. **Exit**: Select `exit` (screen is cleared automatically)
+
+### TUI Workflow: Cloning from a Git Server
+
+1. **Launch TUI**: `lantern --tui`
+2. **List remote repos**: Select `forge` > "List remote repositories (save to file)"
+3. **Choose server**: Select your configured server (e.g., github.com)
+4. **Save the list**: Enter a path like `data/github.json`
+5. **Clone repos**: Select `forge` > "Clone repositories from list"
+6. **Select the JSON**: Enter `data/github.json`
+7. **Choose clone directory**: Defaults to your session root
+8. **Select repos**: Use the checklist to pick which repos to clone
+
+### TUI Workflow: Interactive Server Setup
+
+The `lantern config setup` command (also accessible via TUI `config` > `setup`) provides a wizard for server management:
+
+```
+Server Configuration
+├── Add a new server
+│   ├── github.com (preset)
+│   ├── gitlab.com (preset)
+│   ├── bitbucket.org (preset)
+│   └── custom (enter hostname, provider, base URL)
+├── Edit existing server (change username/token)
+├── Remove a server
+├── Set default server
+├── Save and exit
+└── Exit without saving
+```
+
+**Adding a custom self-hosted server:**
+
+1. Select "Add a new server" > "custom"
+2. Enter hostname (e.g., `gitlab.mycompany.com`)
+3. Select provider type (github/gitlab/bitbucket)
+4. Enter API base URL (e.g., `https://gitlab.mycompany.com/api/v4`)
+5. Enter your username
+6. Optionally add your API token (entered securely, not echoed)
+
+### TUI Features
+
+- **Session-based root directory**: Set once, used for all operations in the session
+- **Scrollable output**: Large tables are displayed in scrollable text boxes
+- **Clean exit**: Screen is cleared when exiting
+- **Non-destructive config editing**: Server changes are only saved when you explicitly choose "Save and exit"
+- **Secure token entry**: Tokens are entered via password fields (not visible on screen)
+
+### Installing dialog
+
+The TUI requires the `dialog` CLI:
+
+```bash
+# Debian/Ubuntu
+sudo apt install dialog
+
+# macOS
+brew install dialog
+
+# Fedora/RHEL
+sudo dnf install dialog
+
+# Arch Linux
+sudo pacman -S dialog
+```
+
 ## Server config (GitHub, GitLab, Bitbucket)
 
 Lantern loads server settings from JSON config. Use a per-user config file:

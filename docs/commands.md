@@ -92,6 +92,108 @@ lantern config import --input git-lantern-servers.json --replace
 lantern config path
 ```
 
+**Interactive server setup (TUI)**:
+```bash
+lantern config setup
+```
+
+This opens a dialog-based interface to:
+- Add servers from presets (github.com, gitlab.com, bitbucket.org)
+- Add custom self-hosted servers
+- Edit existing server settings (username, token)
+- Remove servers
+- Set the default server
+
+Requires the `dialog` CLI tool to be installed.
+
+## Interactive TUI Mode
+
+Launch lantern in interactive TUI mode with:
+
+```bash
+lantern --tui
+lantern -t
+```
+
+### TUI Menu Structure
+
+```
+Git Lantern (main menu)
+│
+├── servers         - Display configured servers in a message box
+│
+├── config          - Server configuration submenu
+│   ├── setup       - Interactive server configuration wizard
+│   ├── path        - Show config file path
+│   ├── export      - Export config to JSON file
+│   ├── import      - Import config from JSON file
+│   └── back        - Return to main menu
+│
+├── settings        - Session settings submenu
+│   ├── root        - Change root directory for this session
+│   └── back        - Return to main menu
+│
+├── repos           - List local repositories (uses session root)
+├── status          - Show repository status table (uses session root)
+├── scan            - Scan repos to JSON file (uses session root)
+├── table           - Render table from a JSON scan file
+├── sync            - Sync repositories submenu (uses session root)
+│   ├── fetch       - Fetch only
+│   ├── pull        - Fetch and pull
+│   └── push        - Fetch, pull, and push
+├── find            - Find repos by name/remote (uses session root)
+├── duplicates      - Find duplicate repos (uses session root)
+│
+├── forge           - Git forge operations submenu
+│   ├── list        - List remote repos (display in TUI)
+│   ├── list_file   - List remote repos (save to JSON file)
+│   ├── clone       - Clone repos from JSON list (with checklist selection)
+│   └── back        - Return to main menu
+│
+└── exit            - Exit TUI (clears screen)
+```
+
+### Session Root Directory
+
+The TUI uses a **session-based root directory** that:
+- Defaults to the current working directory when TUI starts
+- Is displayed in the main menu: `Current root: /path/to/workspace`
+- Can be changed via **Settings > Change root directory**
+- Persists for all operations until you exit the TUI or change it again
+- Eliminates repeated prompts for the root directory
+
+### TUI Output Display
+
+All table outputs (repos, status, find, duplicates, etc.) are displayed in:
+- Scrollable dialog text boxes
+- Full terminal height/width (70% of terminal size)
+- Navigate with arrow keys, Page Up/Down
+- Press Enter or Escape to close
+
+### Clean Exit
+
+When exiting the TUI (via "exit" menu item or Cancel), the screen is cleared automatically, returning you to a clean terminal.
+
+### Dependencies
+
+Requires the `dialog` CLI tool:
+
+```bash
+# Debian/Ubuntu
+sudo apt install dialog
+
+# macOS
+brew install dialog
+
+# Fedora/RHEL
+sudo dnf install dialog
+
+# Arch Linux
+sudo pacman -S dialog
+```
+
+For detailed TUI workflows, see `docs/use-cases.md#interactive-tui-mode`.
+
 ## Local repository commands
 
 ### `lantern repos`
