@@ -19,6 +19,9 @@ from . import git
 from . import github
 from .table import render_table
 
+# Resolved path to the src/ directory for subprocess PYTHONPATH
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 # Common server presets for TUI setup
 SERVER_PRESETS = {
@@ -419,6 +422,36 @@ def cmd_config_setup(args: argparse.Namespace) -> int:
                 _dialog_msgbox("Updated", f"Default server set to '{default_server}'.\n\nRemember to save before exiting.")
 
 
+def _run_lantern_subprocess(
+    cmd_args: List[str],
+    height: int,
+    width: int,
+    capture: bool = True,
+) -> subprocess.CompletedProcess:
+    """Run a lantern subprocess with correct PYTHONPATH and error handling."""
+    kwargs: dict = {
+        "check": False,
+        "text": True,
+        "env": {**os.environ, "PYTHONPATH": _SRC_DIR},
+    }
+    if capture:
+        kwargs["capture_output"] = True
+    result = subprocess.run(cmd_args, **kwargs)
+    if result.returncode != 0 and capture:
+        stderr = (result.stderr or "").strip()
+        if stderr:
+            _dialog_msgbox("Error", f"Command failed:\n{stderr}", height, width)
+    return result
+
+
+def _validate_session_root(root: str, height: int, width: int) -> bool:
+    """Check that root is a valid directory, showing an error dialog if not."""
+    if os.path.isdir(root):
+        return True
+    _dialog_msgbox("Error", f"Root directory not found: {root}\n\nUse 'settings' to change it.", height, width)
+    return False
+
+
 def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int = 0) -> None:
     """Display text in a scrollable dialog textbox using a temp file."""
     if height == 0 or width == 0:
@@ -445,16 +478,29 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
     height, width = _dialog_init()
 
-    # Session-level root directory (persists throughout the TUI session)
-    session_root = os.getcwd()
+    # Session-level settings (persist throughout the TUI session)
+    session = {
+        "root": os.getcwd(),
+        "max_depth": 6,
+        "include_hidden": False,
+        "include_forks": False,
+    }
 
     while True:
-        # Build menu with current root shown
-        menu_text = f"Select an operation:\n\nCurrent root: {session_root}"
+        subprocess.run(["clear"], check=False)
+
+        # Build menu with current settings shown
+        hidden_flag = "yes" if session["include_hidden"] else "no"
+        forks_flag = "yes" if session["include_forks"] else "no"
+        menu_text = (
+            f"Select an operation:\n\n"
+            f"Root: {session['root']}  |  Depth: {session['max_depth']}  |  "
+            f"Hidden: {hidden_flag}  |  Forks: {forks_flag}"
+        )
         menu_items: List[Tuple[str, str]] = [
             ("servers", "List configured Git servers"),
             ("config", "Server configuration"),
-            ("settings", "Session settings (root directory)"),
+            ("settings", "Session settings"),
             ("repos", "List local repositories"),
             ("status", "Show repository status"),
             ("scan", "Scan repositories to JSON"),
@@ -463,6 +509,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("find", "Find repositories by name/remote"),
             ("duplicates", "Find duplicate repositories"),
             ("forge", "Git forge operations (list/clone)"),
+            ("report", "Export report (CSV/JSON/MD)"),
             ("exit", "Exit"),
         ]
 
@@ -480,20 +527,45 @@ def cmd_tui(args: argparse.Namespace) -> int:
             return 0
 
         if action == "settings":
+            hidden_label = "ON" if session["include_hidden"] else "OFF"
+            forks_label = "ON" if session["include_forks"] else "OFF"
             settings_items: List[Tuple[str, str]] = [
-                ("root", f"Change root directory (current: {session_root})"),
+                ("root", f"Change root directory (current: {session['root']})"),
+                ("depth", f"Max scan depth (current: {session['max_depth']})"),
+                ("hidden", f"Include hidden directories ({hidden_label})"),
+                ("forks", f"Include forks in forge list ({forks_label})"),
                 ("back", "Back to main menu"),
             ]
             settings_action = _dialog_menu("Session Settings", "Configure session settings:", settings_items, height, width)
 
             if settings_action == "root":
-                new_root = _dialog_inputbox("Root Directory", "Enter the root directory for repository operations:", session_root)
+                new_root = _dialog_inputbox("Root Directory", "Enter the root directory for repository operations:", session["root"])
                 if new_root:
                     if os.path.isdir(new_root):
-                        session_root = os.path.abspath(new_root)
-                        _dialog_msgbox("Settings", f"Root directory set to:\n{session_root}")
+                        session["root"] = os.path.abspath(new_root)
+                        _dialog_msgbox("Settings", f"Root directory set to:\n{session['root']}")
                     else:
                         _dialog_msgbox("Error", f"Directory not found: {new_root}")
+            elif settings_action == "depth":
+                depth_str = _dialog_inputbox("Max Depth", "Enter max scan depth (1-20):", str(session["max_depth"]))
+                if depth_str:
+                    try:
+                        depth_val = int(depth_str)
+                        if 1 <= depth_val <= 20:
+                            session["max_depth"] = depth_val
+                            _dialog_msgbox("Settings", f"Max depth set to: {depth_val}")
+                        else:
+                            _dialog_msgbox("Error", "Depth must be between 1 and 20.")
+                    except ValueError:
+                        _dialog_msgbox("Error", "Invalid number.")
+            elif settings_action == "hidden":
+                session["include_hidden"] = not session["include_hidden"]
+                state = "ON" if session["include_hidden"] else "OFF"
+                _dialog_msgbox("Settings", f"Include hidden directories: {state}")
+            elif settings_action == "forks":
+                session["include_forks"] = not session["include_forks"]
+                state = "ON" if session["include_forks"] else "OFF"
+                _dialog_msgbox("Settings", f"Include forks in forge list: {state}")
 
         elif action == "servers":
             # Show servers in a message box
@@ -552,13 +624,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     _dialog_msgbox("Error", f"File not found: {input_file}")
 
         elif action == "repos":
-            if not os.path.isdir(session_root):
-                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+            if not _validate_session_root(session["root"], height, width):
                 continue
             # Run repos command and display output
-            repos_list = find_repos(session_root, 6, False)
+            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
             if not repos_list:
-                _dialog_msgbox("Repositories", f"No repositories found in:\n{session_root}")
+                _dialog_msgbox("Repositories", f"No repositories found in:\n{session['root']}")
                 continue
             records = []
             for path in repos_list:
@@ -571,13 +642,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
             _dialog_textbox_from_text("Repositories", output_text, height, width)
 
         elif action == "status":
-            if not os.path.isdir(session_root):
-                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+            if not _validate_session_root(session["root"], height, width):
                 continue
             fetch = _dialog_yesno("Fetch", "Run 'git fetch' before showing status?")
-            repos_list = find_repos(session_root, 6, False)
+            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
             if not repos_list:
-                _dialog_msgbox("Status", f"No repositories found in:\n{session_root}")
+                _dialog_msgbox("Status", f"No repositories found in:\n{session['root']}")
                 continue
             records = []
             for path in repos_list:
@@ -588,15 +658,14 @@ def cmd_tui(args: argparse.Namespace) -> int:
             _dialog_textbox_from_text("Status", output_text, height, width)
 
         elif action == "scan":
-            if not os.path.isdir(session_root):
-                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+            if not _validate_session_root(session["root"], height, width):
                 continue
             output = _dialog_inputbox("Output File", "Enter output JSON file path:", "data/repos.json")
             if output:
                 fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
-                repos_list = find_repos(session_root, 6, False)
+                repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
                 records = [build_repo_record(path, fetch) for path in repos_list]
-                payload = {"root": session_root, "repos": records}
+                payload = {"root": session["root"], "repos": records}
                 output_dir = os.path.dirname(output)
                 if output_dir:
                     os.makedirs(output_dir, exist_ok=True)
@@ -636,8 +705,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 _dialog_msgbox("Error", f"Failed to read JSON file: {exc}")
 
         elif action == "sync":
-            if not os.path.isdir(session_root):
-                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+            if not _validate_session_root(session["root"], height, width):
                 continue
             sync_items: List[Tuple[str, str]] = [
                 ("fetch", "Fetch only"),
@@ -647,7 +715,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
             sync_action = _dialog_menu("Sync", "Select sync operation:", sync_items)
             if sync_action:
                 dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no actual changes)?")
-                cmd_args = [sys.executable, "-m", "lantern", "sync", "--root", session_root]
+                only_clean = _dialog_yesno("Only Clean", "Skip repos with uncommitted changes?")
+                only_upstream = _dialog_yesno("Only Upstream", "Skip repos without an upstream branch?")
+                cmd_args = [sys.executable, "-m", "lantern", "sync", "--root", session["root"],
+                            "--max-depth", str(session["max_depth"])]
+                if session["include_hidden"]:
+                    cmd_args.append("--include-hidden")
                 if sync_action == "fetch":
                     cmd_args.append("--fetch")
                 elif sync_action == "pull":
@@ -656,19 +729,22 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     cmd_args.extend(["--fetch", "--pull", "--push"])
                 if dry_run:
                     cmd_args.append("--dry-run")
-                result = subprocess.run(cmd_args, capture_output=True, text=True, check=False, env={**os.environ, "PYTHONPATH": "src"})
-                if result.stdout:
+                if only_clean:
+                    cmd_args.append("--only-clean")
+                if only_upstream:
+                    cmd_args.append("--only-upstream")
+                result = _run_lantern_subprocess(cmd_args, height, width)
+                if result.returncode == 0 and result.stdout:
                     _dialog_textbox_from_text("Sync Results", result.stdout, height, width)
-                else:
+                elif result.returncode == 0:
                     _dialog_msgbox("Sync", "No repositories found.")
 
         elif action == "find":
-            if not os.path.isdir(session_root):
-                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+            if not _validate_session_root(session["root"], height, width):
                 continue
             name = _dialog_inputbox("Name Filter", "Filter by repository name (leave empty for all):", "")
             remote = _dialog_inputbox("Remote Filter", "Filter by remote URL (leave empty for all):", "")
-            repos_list = find_repos(session_root, 6, False)
+            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
             records = []
             for path in repos_list:
                 repo_name = os.path.basename(path)
@@ -685,10 +761,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 _dialog_msgbox("Find", "No repositories found matching the filters.")
 
         elif action == "duplicates":
-            if not os.path.isdir(session_root):
-                _dialog_msgbox("Error", f"Root directory not found: {session_root}\n\nUse 'settings' to change it.")
+            if not _validate_session_root(session["root"], height, width):
                 continue
-            repos_list = find_repos(session_root, 6, False)
+            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
             groups: Dict[str, List[str]] = {}
             for path in repos_list:
                 origin = git.get_origin_url(path)
@@ -715,6 +790,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 ("list", "List remote repositories (display)"),
                 ("list_file", "List remote repositories (save to file)"),
                 ("clone", "Clone repositories from list"),
+                ("snippets", "List gists/snippets (display)"),
+                ("snippets_file", "List gists/snippets (save to file)"),
+                ("snippet_dl", "Download a gist/snippet"),
+                ("gist_create", "Create a gist (GitHub only)"),
                 ("back", "Back to main menu"),
             ]
             forge_action = _dialog_menu("Forge Operations", "Select an operation:", forge_items, height, width)
@@ -729,30 +808,152 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 server = _dialog_menu("Select Server", "Choose a server:", server_items)
                 if server:
                     cmd_args = [sys.executable, "-m", "lantern", "forge", "list", "--server", server]
+                    if session["include_forks"]:
+                        cmd_args.append("--include-forks")
                     if forge_action == "list_file":
                         output = _dialog_inputbox("Output File", "Enter output JSON file path:", "data/github.json")
                         if not output:
                             continue
                         cmd_args.extend(["--output", output])
-                    result = subprocess.run(cmd_args, capture_output=True, text=True, check=False, env={**os.environ, "PYTHONPATH": "src"})
+                    result = _run_lantern_subprocess(cmd_args, height, width)
                     if result.returncode == 0:
                         if forge_action == "list_file":
                             _dialog_msgbox("List", f"Repository list saved to:\n{output}")
                         elif result.stdout:
                             _dialog_textbox_from_text(f"Repositories on {server}", result.stdout, height, width)
-                    else:
-                        _dialog_msgbox("Error", f"Failed to list repositories:\n{result.stderr or result.stdout}")
 
             elif forge_action == "clone":
                 input_file = _dialog_inputbox("Input File", "Enter JSON file with repository list:", "data/github.json")
                 if input_file and os.path.isfile(input_file):
-                    clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session_root)
+                    clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session["root"])
                     if clone_root:
                         # Use the existing TUI clone with dialog checklist
                         cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
-                        subprocess.run(cmd_args, check=False, env={**os.environ, "PYTHONPATH": "src"})
+                        _run_lantern_subprocess(cmd_args, height, width, capture=False)
                 elif input_file:
                     _dialog_msgbox("Error", f"File not found: {input_file}")
+
+            elif forge_action in ("snippets", "snippets_file"):
+                config = lantern_config.load_config()
+                server_records = lantern_config.list_servers(config)
+                if not server_records:
+                    _dialog_msgbox("Error", "No servers configured.\n\nUse 'config' > 'setup' to add servers.")
+                    continue
+                server_items = [(rec["name"], rec["provider"]) for rec in server_records]
+                server = _dialog_menu("Select Server", "Choose a server:", server_items)
+                if server:
+                    cmd_args = [sys.executable, "-m", "lantern", "forge", "snippets", "list", "--server", server]
+                    if forge_action == "snippets_file":
+                        output = _dialog_inputbox("Output File", "Enter output JSON file path:", "data/snippets.json")
+                        if not output:
+                            continue
+                        cmd_args.extend(["--output", output])
+                    result = _run_lantern_subprocess(cmd_args, height, width)
+                    if result.returncode == 0:
+                        if forge_action == "snippets_file":
+                            _dialog_msgbox("Snippets", f"Snippet list saved to:\n{output}")
+                        elif result.stdout:
+                            _dialog_textbox_from_text(f"Gists/Snippets on {server}", result.stdout, height, width)
+
+            elif forge_action == "snippet_dl":
+                config = lantern_config.load_config()
+                server_records = lantern_config.list_servers(config)
+                if not server_records:
+                    _dialog_msgbox("Error", "No servers configured.\n\nUse 'config' > 'setup' to add servers.")
+                    continue
+                server_items = [(rec["name"], rec["provider"]) for rec in server_records]
+                server = _dialog_menu("Select Server", "Choose a server:", server_items)
+                if not server:
+                    continue
+                snippet_id = _dialog_inputbox("Snippet ID", "Enter the gist/snippet ID:")
+                if not snippet_id:
+                    continue
+                output_dir = _dialog_inputbox("Output Directory", "Enter directory to save files:", ".")
+                if not output_dir:
+                    continue
+                cmd_args = [sys.executable, "-m", "lantern", "forge", "snippets", "clone",
+                            snippet_id, "--server", server, "--output-dir", output_dir, "--force"]
+                result = _run_lantern_subprocess(cmd_args, height, width)
+                if result.returncode == 0 and result.stdout:
+                    _dialog_msgbox("Download", result.stdout.strip())
+
+            elif forge_action == "gist_create":
+                config = lantern_config.load_config()
+                server_records = lantern_config.list_servers(config)
+                github_servers = [rec for rec in server_records if rec.get("provider") == "github"]
+                if not github_servers:
+                    _dialog_msgbox("Error", "No GitHub servers configured.\n\nGist creation requires a GitHub server.")
+                    continue
+                server_items = [(rec["name"], rec["provider"]) for rec in github_servers]
+                server = _dialog_menu("Select Server", "Choose a GitHub server:", server_items)
+                if not server:
+                    continue
+                file_path = _dialog_inputbox("File", "Enter path to the file to upload:")
+                if not file_path:
+                    continue
+                if not os.path.isfile(file_path):
+                    _dialog_msgbox("Error", f"File not found: {file_path}")
+                    continue
+                description = _dialog_inputbox("Description", "Enter gist description (optional):", "") or ""
+                is_public = _dialog_yesno("Visibility", "Make this gist public?")
+                cmd_args = [sys.executable, "-m", "lantern", "forge", "gists", "create",
+                            "--server", server, "--file", file_path]
+                if description:
+                    cmd_args.extend(["--description", description])
+                if is_public:
+                    cmd_args.append("--public")
+                else:
+                    cmd_args.append("--private")
+                result = _run_lantern_subprocess(cmd_args, height, width)
+                if result.returncode == 0 and result.stdout:
+                    _dialog_msgbox("Created", f"Gist created:\n{result.stdout.strip()}")
+
+        elif action == "report":
+            input_file = _dialog_inputbox("Input File", "Enter JSON scan file path:", "data/repos.json")
+            if not input_file:
+                continue
+            if not os.path.isfile(input_file):
+                _dialog_msgbox("Error", f"File not found: {input_file}")
+                continue
+            fmt_items: List[Tuple[str, str]] = [
+                ("csv", "Comma-separated values"),
+                ("json", "JSON format"),
+                ("md", "Markdown table"),
+            ]
+            fmt = _dialog_menu("Format", "Select export format:", fmt_items, height, width)
+            if not fmt:
+                continue
+            # Ask for column selection
+            try:
+                with open(input_file, "r", encoding="utf-8") as handle:
+                    peek = json.load(handle)
+                all_records = peek.get("repos", [])
+                if all_records:
+                    available_cols = list(all_records[0].keys())
+                else:
+                    available_cols = []
+            except (json.JSONDecodeError, OSError):
+                available_cols = []
+            columns_str = ""
+            if available_cols:
+                cols_text = ", ".join(available_cols)
+                columns_str = _dialog_inputbox(
+                    "Columns",
+                    f"Enter comma-separated columns (leave empty for all):\n\nAvailable: {cols_text}",
+                    "",
+                ) or ""
+            output = _dialog_inputbox("Output File", "Enter output file path (leave empty for display):", "")
+            cmd_args = [sys.executable, "-m", "lantern", "report", "--input", input_file, "--format", fmt]
+            if columns_str:
+                cmd_args.extend(["--columns", columns_str])
+            if output:
+                cmd_args.extend(["--output", output])
+            result = _run_lantern_subprocess(cmd_args, height, width)
+            if result.returncode == 0:
+                if output:
+                    _dialog_msgbox("Report", f"Report exported to:\n{output}")
+                elif result.stdout:
+                    _dialog_textbox_from_text("Report", result.stdout, height, width)
 
     return 0
 

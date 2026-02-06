@@ -79,7 +79,7 @@ lantern config setup
 Git Lantern
 ├── servers      - View configured Git servers
 ├── config       - Server configuration (setup/export/import/path)
-├── settings     - Session settings (set root directory)
+├── settings     - Session settings (root, depth, hidden, forks)
 ├── repos        - List local repositories
 ├── status       - Show repository status
 ├── scan         - Scan repositories to JSON
@@ -88,19 +88,21 @@ Git Lantern
 ├── find         - Find repositories by name/remote
 ├── duplicates   - Find duplicate repositories
 ├── forge        - Git forge operations
-│   ├── list          - List remote repos (display in TUI)
-│   ├── list_file     - List remote repos (save to JSON)
-│   └── clone         - Clone repos from JSON list
+│   ├── list          - List remote repos (display/save)
+│   ├── clone         - Clone repos from JSON list
+│   ├── snippets      - List/download gists and snippets
+│   └── gist_create   - Create a gist (GitHub only)
+├── report       - Export scan results (CSV/JSON/MD)
 └── exit         - Exit (clears screen)
 ```
 
 ### Session Settings
 
-The TUI uses a **session-based root directory** that persists throughout your session:
+The TUI uses **session-based settings** that persist throughout your session:
 
-1. The current root is shown in the main menu
-2. Use **Settings > Change root directory** to change it
-3. All operations (repos, status, scan, sync, find, duplicates) use this root automatically
+1. All settings are shown in the main menu header
+2. Use **Settings** to change root directory, max depth, include hidden dirs, or include forks
+3. All operations (repos, status, scan, sync, find, duplicates) use these settings automatically
 4. No more repeated prompts for the directory on every operation
 
 ### Server Configuration Wizard

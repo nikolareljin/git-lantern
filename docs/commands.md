@@ -131,36 +131,49 @@ Git Lantern (main menu)
 │
 ├── settings        - Session settings submenu
 │   ├── root        - Change root directory for this session
+│   ├── depth       - Set max scan depth (1-20)
+│   ├── hidden      - Toggle include hidden directories
+│   ├── forks       - Toggle include forks in forge list
 │   └── back        - Return to main menu
 │
-├── repos           - List local repositories (uses session root)
-├── status          - Show repository status table (uses session root)
-├── scan            - Scan repos to JSON file (uses session root)
+├── repos           - List local repositories (uses session settings)
+├── status          - Show repository status table (uses session settings)
+├── scan            - Scan repos to JSON file (uses session settings)
 ├── table           - Render table from a JSON scan file
-├── sync            - Sync repositories submenu (uses session root)
+├── sync            - Sync repositories submenu (uses session settings)
 │   ├── fetch       - Fetch only
 │   ├── pull        - Fetch and pull
 │   └── push        - Fetch, pull, and push
-├── find            - Find repos by name/remote (uses session root)
-├── duplicates      - Find duplicate repos (uses session root)
+│   Options: dry-run, only-clean, only-upstream
+├── find            - Find repos by name/remote (uses session settings)
+├── duplicates      - Find duplicate repos (uses session settings)
 │
 ├── forge           - Git forge operations submenu
 │   ├── list        - List remote repos (display in TUI)
 │   ├── list_file   - List remote repos (save to JSON file)
 │   ├── clone       - Clone repos from JSON list (with checklist selection)
+│   ├── snippets    - List gists/snippets (display in TUI)
+│   ├── snippets_file - List gists/snippets (save to JSON file)
+│   ├── snippet_dl  - Download a gist/snippet by ID
+│   ├── gist_create - Create a new gist (GitHub only)
 │   └── back        - Return to main menu
+│
+├── report          - Export scan results (CSV/JSON/MD)
 │
 └── exit            - Exit TUI (clears screen)
 ```
 
-### Session Root Directory
+### Session Settings
 
-The TUI uses a **session-based root directory** that:
-- Defaults to the current working directory when TUI starts
-- Is displayed in the main menu: `Current root: /path/to/workspace`
-- Can be changed via **Settings > Change root directory**
-- Persists for all operations until you exit the TUI or change it again
-- Eliminates repeated prompts for the root directory
+The TUI uses **session-based settings** that persist throughout your session:
+- **Root directory**: Defaults to the current working directory; displayed in the main menu header
+- **Max depth**: How deep to scan for repositories (default: 6, range: 1-20)
+- **Include hidden**: Whether to scan hidden directories (default: off)
+- **Include forks**: Whether to include forks in forge list (default: off)
+
+All settings are shown in the main menu: `Root: /path | Depth: 6 | Hidden: no | Forks: no`
+
+Use **Settings** to change any setting. Changes apply immediately to all subsequent operations.
 
 ### TUI Output Display
 
