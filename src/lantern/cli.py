@@ -90,7 +90,28 @@ def find_repos(root: str, max_depth: int, include_hidden: bool) -> List[str]:
             continue
         if max_depth is not None and repo_depth(root, current) >= max_depth:
             dirs[:] = []
-    return matches
+    return sorted(matches, key=lambda path: (os.path.basename(path).lower(), path.lower()))
+
+
+def _repo_name_for_sort(record: Dict[str, Any]) -> str:
+    for field in ("repo", "name"):
+        value = str(record.get(field) or "").strip()
+        if value:
+            return value
+    path = str(record.get("path") or "").strip()
+    if path:
+        return os.path.basename(path)
+    return ""
+
+
+def _sort_records_by_repo_name(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(
+        records,
+        key=lambda record: (
+            _repo_name_for_sort(record).lower(),
+            str(record.get("path") or "").lower(),
+        ),
+    )
 
 
 def build_repo_record(path: str, fetch: bool) -> Dict[str, str]:
@@ -1655,6 +1676,7 @@ def cmd_repos(args: argparse.Namespace) -> int:
                 "origin": git.get_origin_url(path),
             }
         )
+    records = _sort_records_by_repo_name(records)
     columns = ["name", "path", "origin"]
     print(render_table(records, columns))
     return 0
@@ -1671,7 +1693,7 @@ def _lazygit_candidates(root: str, max_depth: int, include_hidden: bool) -> List
                 "origin": git.get_origin_url(path) or "-",
             }
         )
-    return out
+    return _sort_records_by_repo_name(out)
 
 
 def cmd_lazygit(args: argparse.Namespace) -> int:
@@ -1750,6 +1772,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
     records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos, args.fetch, "status")]
+    records = _sort_records_by_repo_name(records)
     columns = [
         "name",
         "branch",
@@ -2130,6 +2153,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
     if not results:
         print("No repositories selected.")
         return 0
+    results = _sort_records_by_repo_name(results)
     print(render_table(results, ["repo", "state", "result", "path"]))
     return 0
 
@@ -2147,6 +2171,7 @@ def cmd_table(args: argparse.Namespace) -> int:
         ):
             continue
         add_divergence_fields(record)
+    records = _sort_records_by_repo_name(records)
     if args.columns:
         columns = args.columns.split(",")
     else:
@@ -2172,6 +2197,7 @@ def cmd_find(args: argparse.Namespace) -> int:
         if args.remote and (not origin or args.remote not in origin):
             continue
         records.append({"name": name, "path": path, "origin": origin})
+    records = _sort_records_by_repo_name(records)
     columns = ["name", "path", "origin"]
     print(render_table(records, columns))
     return 0
@@ -2244,6 +2270,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         records.append({"name": name, "path": path, "result": " ".join(statuses)})
     _progress_done()
 
+    records = _sort_records_by_repo_name(records)
     columns = ["name", "result", "path"]
     print(render_table(records, columns))
     return 0
@@ -2256,6 +2283,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     if not records:
         print("No records.")
         return 0
+    records = _sort_records_by_repo_name(records)
     if args.format == "json":
         if args.columns:
             fields = args.columns.split(",")
@@ -2463,6 +2491,8 @@ def _render_list_table(records: List[Dict[str, object]], columns: List[str]) -> 
     display_records: List[Dict[str, str]] = []
     for record in records:
         display_records.append({col: _format_list_value(record.get(col)) for col in columns})
+    if "repo" in columns or "name" in columns:
+        display_records = _sort_records_by_repo_name(display_records)
     print(render_table(display_records, columns))
 
 
@@ -2509,6 +2539,7 @@ def cmd_github_list(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    repos = _sort_records_by_repo_name(repos)
     payload = {
         "server": server.get("name", provider),
         "provider": provider,
@@ -2564,6 +2595,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             )
             return 1
     repos = payload.get("repos", [])
+    repos = _sort_records_by_repo_name(repos)
     os.makedirs(args.root, exist_ok=True)
     if args.tui:
         if not shutil.which("dialog"):
@@ -2604,6 +2636,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             return 0
         selected_set = set(selected)
         repos = [repo for repo in repos if repo.get("name") in selected_set]
+        repos = _sort_records_by_repo_name(repos)
     for repo in repos:
         name = repo.get("name")
         ssh_url = repo.get("ssh_url")
