@@ -1034,9 +1034,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     continue
                 if server_choice != "default":
                     server = server_choice
+            selected_server = lantern_config.get_server(config, server)
+            selected_provider = str(selected_server.get("provider") or "github").lower()
             fetch = _dialog_yesno("Fetch", "Run local git fetch before building fleet plan?")
             include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in plan?")
             fleet_items: List[Tuple[str, str]] = [
+                ("smart_sync", "Smart Sync (preset multi-repo update)"),
                 ("plan", "Show fleet reconciliation plan"),
                 ("apply_all", "Apply clone/pull/push for all eligible repos"),
                 ("apply_select", "Apply actions only for selected repos"),
@@ -1055,11 +1058,222 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 common_opts.append("--include-hidden")
             if session["include_forks"]:
                 common_opts.append("--include-forks")
-            if fetch:
-                common_opts.append("--fetch")
+
+            if fleet_action == "smart_sync":
+                preset_items: List[Tuple[str, str]] = [
+                    ("fast_pull", "Fast Pull (pull behind repos)"),
+                    ("branch_rollout", "Branch Rollout (checkout/update branch)"),
+                    ("pr_rollout", "PR Rollout (checkout PR branch)"),
+                    ("full_reconcile", "Full Reconcile (clone/pull/push)"),
+                ]
+                preset = _dialog_menu("Smart Sync", "Choose a preset:", preset_items, height, width)
+                if not preset:
+                    continue
+                if preset == "pr_rollout" and selected_provider != "github":
+                    _dialog_msgbox("Smart Sync", "PR Rollout is currently supported only for GitHub servers.", height, width)
+                    continue
+
+                smart_fetch = True
+                with_prs = preset in {"branch_rollout", "pr_rollout"}
+                _dialog_infobox(
+                    "Smart Sync",
+                    "Preparing fleet context...\n\nPlease wait.",
+                    max(8, height // 3),
+                    max(60, width // 2),
+                )
+                smart_plan_args = argparse.Namespace(
+                    root=session["root"],
+                    max_depth=session["max_depth"],
+                    include_hidden=session["include_hidden"],
+                    fetch=smart_fetch,
+                    server=server,
+                    input="",
+                    user="",
+                    token="",
+                    include_forks=session["include_forks"],
+                    with_prs=with_prs,
+                    pr_stale_days=30,
+                )
+                try:
+                    smart_rows, _smart_meta = _fleet_plan_records(smart_plan_args)
+                except Exception as exc:
+                    subprocess.run(["clear"], check=False)
+                    _dialog_msgbox("Error", str(exc), height, width)
+                    continue
+                subprocess.run(["clear"], check=False)
+
+                if preset == "fast_pull":
+                    candidates = [r for r in smart_rows if str(r.get("state") or "") == "behind-remote"]
+                elif preset == "full_reconcile":
+                    candidates = [r for r in smart_rows if str(r.get("action") or "") in {"clone", "pull", "push"}]
+                else:
+                    candidates = [
+                        r
+                        for r in smart_rows
+                        if str(r.get("state") or "") in {"in-sync", "behind-remote", "ahead-remote", "diverged", "missing-local"}
+                    ]
+
+                if not candidates:
+                    _dialog_msgbox("Smart Sync", "No repositories match the selected preset.", height, width)
+                    continue
+
+                scope_items: List[Tuple[str, str]] = [
+                    ("all", "All actionable repositories"),
+                    ("clean", "Only clean repositories"),
+                    ("select", "Pick repositories"),
+                ]
+                scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
+                if not scope:
+                    continue
+
+                selected_rows = list(candidates)
+                if scope == "clean":
+                    selected_rows = [r for r in selected_rows if str(r.get("clean") or "") in {"yes", "-"}]
+                elif scope == "select":
+                    checklist_items: List[Tuple[str, str, bool]] = []
+                    idx_to_repo: Dict[str, str] = {}
+                    for i, row in enumerate(candidates, start=1):
+                        tag = str(i)
+                        repo_name = str(row.get("repo") or "")
+                        idx_to_repo[tag] = repo_name
+                        state = str(row.get("state") or "-")
+                        action_name = str(row.get("action") or "-")
+                        desc = f"{repo_name} [{state}] -> {action_name}"
+                        checklist_items.append((tag, desc, True))
+                    selected_tags = _dialog_checklist("Smart Sync", "Select repositories to process:", checklist_items, height, width)
+                    if not selected_tags:
+                        continue
+                    selected_repos = {idx_to_repo[tag] for tag in selected_tags if tag in idx_to_repo}
+                    selected_rows = [r for r in candidates if str(r.get("repo") or "") in selected_repos]
+
+                if not selected_rows:
+                    _dialog_msgbox("Smart Sync", "No repositories selected.", height, width)
+                    continue
+
+                checkout_branch = ""
+                checkout_pr = ""
+                if preset == "branch_rollout":
+                    branch_hints: List[str] = []
+                    for row in selected_rows:
+                        b = str(row.get("latest_branch") or "").strip()
+                        if b and b != "-" and b not in branch_hints:
+                            branch_hints.append(b)
+                    hint = ", ".join(branch_hints[:20]) if branch_hints else "No latest branch hints detected."
+                    checkout_branch = (
+                        _dialog_inputbox(
+                            "Branch Rollout",
+                            f"Enter branch to checkout/update.\n\nHints: {hint}",
+                            branch_hints[0] if branch_hints else "",
+                        )
+                        or ""
+                    ).strip()
+                    if not checkout_branch:
+                        continue
+                elif preset == "pr_rollout":
+                    pr_numbers: List[str] = []
+                    for row in selected_rows:
+                        for part in str(row.get("prs") or "").split(","):
+                            p = part.strip()
+                            if p and p != "-" and p not in pr_numbers:
+                                pr_numbers.append(p)
+                    hint = ", ".join(pr_numbers[:20]) if pr_numbers else "No fresh PR numbers detected."
+                    checkout_pr = (
+                        _dialog_inputbox(
+                            "PR Rollout",
+                            f"Enter PR number to checkout.\n\nDetected: {hint}",
+                            pr_numbers[0] if pr_numbers else "",
+                        )
+                        or ""
+                    ).strip()
+                    if not checkout_pr:
+                        continue
+
+                dry_run = False
+                only_clean = False
+                if _dialog_yesno("Advanced", "Adjust advanced options (dry-run / only-clean)?", height, width):
+                    dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
+                    only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
+
+                apply_cmd = [sys.executable, "-m", "lantern", "fleet", "apply", *common_opts]
+                apply_cmd.append("--fetch")
+                if preset == "fast_pull":
+                    apply_cmd.append("--pull-behind")
+                elif preset == "full_reconcile":
+                    apply_cmd.extend(["--clone-missing", "--pull-behind", "--push-ahead"])
+                else:
+                    apply_cmd.extend(["--clone-missing", "--pull-behind"])
+                if checkout_branch:
+                    apply_cmd.extend(["--checkout-branch", checkout_branch])
+                if checkout_pr:
+                    apply_cmd.extend(["--checkout-pr", checkout_pr])
+                if dry_run:
+                    apply_cmd.append("--dry-run")
+                if only_clean:
+                    apply_cmd.append("--only-clean")
+
+                selected_repos = [str(r.get("repo") or "") for r in selected_rows if str(r.get("repo") or "")]
+                if selected_repos:
+                    apply_cmd.extend(["--repos", ",".join(selected_repos)])
+
+                state_counts: Dict[str, int] = {}
+                for row in selected_rows:
+                    state = str(row.get("state") or "-")
+                    state_counts[state] = state_counts.get(state, 0) + 1
+                state_summary = ", ".join(f"{k}:{state_counts[k]}" for k in sorted(state_counts))
+                preset_label = {
+                    "fast_pull": "Fast Pull",
+                    "branch_rollout": "Branch Rollout",
+                    "pr_rollout": "PR Rollout",
+                    "full_reconcile": "Full Reconcile",
+                }.get(preset, preset)
+                confirm_lines = [
+                    f"Preset: {preset_label}",
+                    f"Repos: {len(selected_rows)}",
+                    f"States: {state_summary or '-'}",
+                ]
+                if checkout_branch:
+                    confirm_lines.append(f"Branch: {checkout_branch}")
+                if checkout_pr:
+                    confirm_lines.append(f"PR: {checkout_pr}")
+                if dry_run:
+                    confirm_lines.append("Mode: dry-run")
+                if only_clean:
+                    confirm_lines.append("Filter: only-clean")
+                confirm_lines.append("")
+                confirm_lines.append("Apply now?")
+                if not _dialog_yesno("Smart Sync Confirm", "\n".join(confirm_lines), 16, 78):
+                    continue
+
+                _dialog_infobox(
+                    "Smart Sync",
+                    "Applying fleet actions...\n\nProgress is shown in terminal.",
+                    max(8, height // 3),
+                    max(60, width // 2),
+                )
+                result = _run_lantern_subprocess(apply_cmd, height, width, capture=False)
+                subprocess.run(["clear"], check=False)
+                if result.returncode == 0:
+                    _dialog_msgbox(
+                        "Smart Sync",
+                        "Smart Sync finished.\n\nLive progress/output was shown during execution.",
+                        height,
+                        width,
+                    )
+                else:
+                    _dialog_msgbox(
+                        "Smart Sync",
+                        "Smart Sync failed.\n\nReview terminal output shown during execution.",
+                        height,
+                        width,
+                    )
+                continue
 
             if fleet_action == "plan":
+                fetch = _dialog_yesno("Fetch", "Run local git fetch before building fleet plan?")
+                include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in plan?")
                 plan_opts = list(common_opts)
+                if fetch:
+                    plan_opts.append("--fetch")
                 if include_prs:
                     plan_opts.append("--with-prs")
                 _dialog_infobox(
@@ -1078,6 +1292,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     _dialog_textbox_from_text("Fleet Plan", result.stdout, height, width)
                 continue
 
+            fetch = _dialog_yesno("Fetch", "Run local git fetch before loading fleet context?")
+            include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in context?")
+            apply_common_opts = list(common_opts)
+            if fetch:
+                apply_common_opts.append("--fetch")
             _dialog_infobox(
                 "Fleet Apply",
                 "Loading repositories, branches and PR context...\n\nPlease wait.",
@@ -1094,7 +1313,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 user="",
                 token="",
                 include_forks=session["include_forks"],
-                with_prs=True,
+                with_prs=include_prs,
                 pr_stale_days=30,
             )
             try:
@@ -1184,7 +1403,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
             apply_cmd = [
                 sys.executable, "-m", "lantern", "fleet", "apply",
-                *common_opts,
+                *apply_common_opts,
                 "--clone-missing", "--pull-behind", "--push-ahead",
             ]
             if checkout_pr:
