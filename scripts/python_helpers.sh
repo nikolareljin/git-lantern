@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: python_helpers.sh
+# DESCRIPTION: Shared Python helper functions for repository shell scripts (source-only utility).
+# USAGE: source ./scripts/python_helpers.sh
+# PARAMETERS: Source this file from other scripts; do not execute directly.
+# EXAMPLE: source ./scripts/python_helpers.sh
 set -euo pipefail
 
 python_version() {

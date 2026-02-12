@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: packaging_init.sh
+# DESCRIPTION: Initialize packaging templates through script-helpers.
+# USAGE: ./scripts/packaging_init.sh
+# PARAMETERS: No required parameters.
+# EXAMPLE: ./scripts/packaging_init.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: build.sh
+# DESCRIPTION: Install git-lantern in editable mode using a managed virtual environment.
+# USAGE: ./scripts/build.sh
+# PARAMETERS: Uses env vars PYTHON_BIN and VENV_DIR when set.
+# EXAMPLE: ./scripts/build.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

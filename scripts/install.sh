@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: install.sh
+# DESCRIPTION: Install git-lantern into a target prefix and create launcher symlink.
+# USAGE: ./scripts/install.sh [--dev] [--prefix PATH] [--bin-link PATH]
+# PARAMETERS: Optional flags: --dev, --prefix, --bin-link.
+# EXAMPLE: ./scripts/install.sh --prefix /opt/git-lantern --bin-link /usr/local/bin/lantern
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
+# SCRIPT: install
+# DESCRIPTION: Wrapper that delegates to scripts/install.sh.
+# USAGE: ./install [--dev] [--prefix PATH] [--bin-link PATH]
+# PARAMETERS: Accepts the same options as scripts/install.sh.
+# EXAMPLE: ./install --prefix /opt/git-lantern
 set -euo pipefail
 "$(dirname "$0")/scripts/install.sh" "$@"

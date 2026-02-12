@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: lint.sh
+# DESCRIPTION: Run lint checks (ruff) using a managed virtual environment.
+# USAGE: ./scripts/lint.sh
+# PARAMETERS: Uses env vars PYTHON_BIN and VENV_DIR when set.
+# EXAMPLE: ./scripts/lint.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
