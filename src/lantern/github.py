@@ -1,11 +1,24 @@
 import json
 import os
+from datetime import datetime, timezone, timedelta
+import subprocess
+import shutil
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional
 
 
 def _request(url: str, token: Optional[str]) -> List[Dict]:
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", f"token {token}")
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = resp.read().decode("utf-8")
+    return json.loads(data)
+
+
+def _request_obj(url: str, token: Optional[str]):
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"token {token}")
@@ -216,3 +229,158 @@ def create_gist(
     with urllib.request.urlopen(req, timeout=20) as resp:
         data = resp.read().decode("utf-8")
     return json.loads(data)
+
+
+def fetch_open_pull_requests(
+    owner: str,
+    repo: str,
+    token: Optional[str],
+    stale_days: int = 30,
+    base_url: Optional[str] = None,
+) -> List[Dict]:
+    gh_items = fetch_open_pull_requests_via_gh(owner, repo, stale_days)
+    if gh_items is not None:
+        return gh_items
+
+    api_base = _base_url(base_url)
+    params = {
+        "state": "open",
+        "sort": "updated",
+        "direction": "desc",
+        "per_page": "100",
+    }
+    url = f"{api_base}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/pulls?{urllib.parse.urlencode(params)}"
+    try:
+        data = _request_obj(url, token)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(stale_days, 0))
+    out: List[Dict] = []
+    for pr in data:
+        if not isinstance(pr, dict):
+            continue
+        updated_raw = str(pr.get("updated_at") or "")
+        updated_dt = None
+        if updated_raw:
+            try:
+                updated_dt = datetime.strptime(updated_raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            except ValueError:
+                updated_dt = None
+        if updated_dt and updated_dt < cutoff:
+            continue
+        head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+        out.append(
+            {
+                "number": pr.get("number"),
+                "title": pr.get("title") or "",
+                "head_ref": head.get("ref") if isinstance(head, dict) else "",
+                "updated_at": updated_raw,
+                "html_url": pr.get("html_url") or "",
+            }
+        )
+    return out
+
+
+def fetch_open_pull_requests_via_gh(owner: str, repo: str, stale_days: int = 30) -> Optional[List[Dict]]:
+    gh_bin = shutil.which("gh")
+    if not gh_bin:
+        return None
+    cmd = [
+        gh_bin,
+        "pr",
+        "list",
+        "--repo",
+        f"{owner}/{repo}",
+        "--state",
+        "open",
+        "--limit",
+        "100",
+        "--json",
+        "number,title,headRefName,updatedAt,url",
+    ]
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(stale_days, 0))
+    out: List[Dict] = []
+    for pr in data:
+        if not isinstance(pr, dict):
+            continue
+        updated_raw = str(pr.get("updatedAt") or "")
+        updated_dt = None
+        if updated_raw:
+            candidate = updated_raw.replace("Z", "+00:00")
+            try:
+                updated_dt = datetime.fromisoformat(candidate)
+            except ValueError:
+                updated_dt = None
+        if updated_dt and updated_dt < cutoff:
+            continue
+        out.append(
+            {
+                "number": pr.get("number"),
+                "title": pr.get("title") or "",
+                "head_ref": pr.get("headRefName") or "",
+                "updated_at": updated_raw,
+                "html_url": pr.get("url") or "",
+            }
+        )
+    return out
+
+
+def get_pr_branch_via_gh(owner: str, repo: str, pr_number: int) -> Optional[str]:
+    gh_bin = shutil.which("gh")
+    if not gh_bin:
+        return None
+    cmd = [
+        gh_bin,
+        "pr",
+        "view",
+        str(pr_number),
+        "--repo",
+        f"{owner}/{repo}",
+        "--json",
+        "headRefName",
+    ]
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    branch = str(data.get("headRefName") or "").strip()
+    return branch or None
+
+
+def get_pr_branch(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: Optional[str],
+    base_url: Optional[str] = None,
+) -> Optional[str]:
+    gh_branch = get_pr_branch_via_gh(owner, repo, pr_number)
+    if gh_branch:
+        return gh_branch
+    api_base = _base_url(base_url)
+    url = f"{api_base}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/pulls/{int(pr_number)}"
+    try:
+        data = _request_obj(url, token)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    head = data.get("head") if isinstance(data.get("head"), dict) else {}
+    branch = str(head.get("ref") or "").strip() if isinstance(head, dict) else ""
+    return branch or None

@@ -1,12 +1,13 @@
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.parse
-from typing import Dict, List, MutableMapping, Optional, Tuple
+from typing import Any, Dict, List, MutableMapping, Optional, Set, Tuple
 
 try:
     import argcomplete
@@ -133,6 +134,36 @@ def _format_divergence(ahead: Optional[int], behind: Optional[int]) -> str:
     return f"{ahead_str}↑/{behind_str}↓"
 
 
+def _progress_line(current: int, total: int, message: str) -> None:
+    if total <= 0:
+        return
+    if sys.stderr.isatty():
+        print(f"\r[{current}/{total}] {message:<60}", end="", file=sys.stderr, flush=True)
+    else:
+        print(f"[{current}/{total}] {message}", file=sys.stderr)
+
+
+def _progress_done() -> None:
+    if sys.stderr.isatty():
+        print(file=sys.stderr)
+
+
+def _collect_repo_records_with_progress(
+    repos: List[str],
+    fetch: bool,
+    action_label: str,
+) -> List[Dict[str, str]]:
+    records: List[Dict[str, str]] = []
+    total = len(repos)
+    for idx, path in enumerate(repos, start=1):
+        repo_name = os.path.basename(path)
+        verb = "fetch+status" if fetch else "status"
+        _progress_line(idx, total, f"{action_label}: {verb} {repo_name}")
+        records.append(build_repo_record(path, fetch))
+    _progress_done()
+    return records
+
+
 def add_divergence_fields(record: MutableMapping[str, object]) -> MutableMapping[str, object]:
     up_ahead = _to_int_or_none(record.get("up_ahead"))
     up_behind = _to_int_or_none(record.get("up_behind"))
@@ -197,6 +228,29 @@ def _dialog_menu(
     return result.stdout.strip()
 
 
+def _dialog_checklist(
+    title: str,
+    text: str,
+    items: List[Tuple[str, str, bool]],
+    height: int = 0,
+    width: int = 0,
+) -> List[str]:
+    """Show a dialog checklist and return selected tags."""
+    if height == 0 or width == 0:
+        height, width = _dialog_init()
+    menu_height = min(len(items), height - 8)
+    cmd = [
+        "dialog", "--stdout", "--separate-output", "--title", title, "--checklist", text,
+        str(height), str(width), str(max(menu_height, 1)),
+    ]
+    for tag, description, selected in items:
+        cmd.extend([tag, description, "on" if selected else "off"])
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
 def _dialog_inputbox(
     title: str,
     text: str,
@@ -251,6 +305,166 @@ def _dialog_msgbox(title: str, text: str, height: int = 10, width: int = 60) -> 
     """Show a dialog message box."""
     cmd = ["dialog", "--title", title, "--msgbox", text, str(height), str(width)]
     subprocess.run(cmd, check=False)
+
+
+def _dialog_infobox(title: str, text: str, height: int = 10, width: int = 70) -> None:
+    """Show a non-blocking informational dialog."""
+    cmd = ["dialog", "--title", title, "--infobox", text, str(height), str(width)]
+    subprocess.run(cmd, check=False)
+
+
+def _lazygit_path() -> Optional[str]:
+    return shutil.which("lazygit")
+
+
+def _launch_lazygit(repo_path: str) -> int:
+    binary = _lazygit_path()
+    if not binary:
+        print("lazygit is not installed or not in PATH.", file=sys.stderr)
+        return 1
+    subprocess.run(["clear"], check=False)
+    result = subprocess.run([binary], cwd=repo_path, check=False)
+    subprocess.run(["clear"], check=False)
+    return result.returncode
+
+
+def _run_git_op(repo_path: str, args: List[str], quiet: bool = True) -> int:
+    kwargs: Dict[str, Any] = {"check": False}
+    if quiet:
+        kwargs.update(
+            {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "text": True,
+            }
+        )
+    result = subprocess.run(["git", "-C", repo_path, *args], **kwargs)
+    return result.returncode
+
+
+def _remote_main_ref(path: str) -> str:
+    refs = git.get_default_branch_refs(path)
+    if "origin" in refs:
+        return refs["origin"]
+    for candidate in ("origin/main", "origin/master"):
+        if git.run_git(path, ["rev-parse", "--verify", candidate]):
+            return candidate
+    for ref in refs.values():
+        return ref
+    return ""
+
+
+def _build_local_state_records(root: str, max_depth: int, include_hidden: bool, fetch: bool) -> List[Dict[str, str]]:
+    records: List[Dict[str, str]] = []
+    for path in find_repos(root, max_depth, include_hidden):
+        record = add_divergence_fields(build_repo_record(path, fetch))
+        record["clean"] = "yes" if git.is_clean(path) else "no"
+        records.append(record)
+    records.sort(key=lambda r: str(r.get("name", "")).lower())
+    return records
+
+
+def _resolve_selected_records(records: List[Dict[str, str]], repos_csv: str) -> Tuple[List[Dict[str, str]], Optional[str]]:
+    names_or_paths = [x.strip() for x in (repos_csv or "").split(",") if x.strip()]
+    if not names_or_paths:
+        return records, None
+    by_name: Dict[str, List[Dict[str, str]]] = {}
+    by_path: Dict[str, Dict[str, str]] = {}
+    for rec in records:
+        name = str(rec.get("name") or "")
+        by_name.setdefault(name, []).append(rec)
+        p = str(rec.get("path") or "")
+        by_path[p] = rec
+
+    selected: List[Dict[str, str]] = []
+    for key in names_or_paths:
+        if key in by_path:
+            selected.append(by_path[key])
+            continue
+        matches = by_name.get(key, [])
+        if len(matches) == 1:
+            selected.append(matches[0])
+            continue
+        if not matches:
+            return [], f"Repository not found: {key}"
+        return [], f"Repository name is ambiguous: {key}. Use full path."
+    return selected, None
+
+
+def _apply_bulk_action(
+    records: List[Dict[str, str]],
+    action: str,
+    dry_run: bool,
+    only_clean: bool,
+) -> List[Dict[str, str]]:
+    results: List[Dict[str, str]] = []
+    for rec in records:
+        name = str(rec.get("name") or "")
+        path = str(rec.get("path") or "")
+        upstream = str(rec.get("upstream") or "")
+        clean = str(rec.get("clean") or "no")
+        result = "skip"
+        detail = ""
+
+        if only_clean and clean != "yes":
+            results.append({"repo": name, "action": action, "result": "skip-dirty", "path": path})
+            continue
+
+        if action == "update":
+            if not upstream:
+                results.append({"repo": name, "action": action, "result": "skip-no-upstream", "path": path})
+                continue
+            if dry_run:
+                result = "dry-run"
+                detail = "fetch+pull"
+            else:
+                rc_fetch = _run_git_op(path, ["fetch", "--prune"])
+                rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_fetch == 0 else 1
+                result = "ok" if (rc_fetch == 0 and rc_pull == 0) else "fail"
+                detail = "fetch+pull"
+
+        elif action == "checkout-main":
+            main_ref = _remote_main_ref(path)
+            if not main_ref:
+                results.append({"repo": name, "action": action, "result": "skip-no-main-ref", "path": path})
+                continue
+            branch = main_ref.split("/", 1)[1] if "/" in main_ref else main_ref
+            if dry_run:
+                result = "dry-run"
+                detail = f"{branch} <= {main_ref}"
+            else:
+                rc_fetch = _run_git_op(path, ["fetch", "--prune"])
+                if rc_fetch != 0:
+                    result = "fail"
+                else:
+                    rc_checkout = _run_git_op(path, ["checkout", branch])
+                    if rc_checkout != 0:
+                        rc_checkout = _run_git_op(path, ["checkout", "-b", branch, "--track", main_ref])
+                    rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
+                    result = "ok" if (rc_checkout == 0 and rc_pull == 0) else "fail"
+                detail = f"{branch} <= {main_ref}"
+
+        elif action == "push":
+            if not upstream:
+                results.append({"repo": name, "action": action, "result": "skip-no-upstream", "path": path})
+                continue
+            if dry_run:
+                result = "dry-run"
+                detail = "push"
+            else:
+                rc = _run_git_op(path, ["push"])
+                result = "ok" if rc == 0 else "fail"
+                detail = "push"
+
+        results.append(
+            {
+                "repo": name,
+                "action": action,
+                "result": result if not detail else f"{result}:{detail}",
+                "path": path,
+            }
+        )
+    return results
 
 
 def cmd_config_setup(args: argparse.Namespace) -> int:
@@ -469,6 +683,55 @@ def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int
             pass
 
 
+def _default_repo_list_candidates(root: str) -> List[str]:
+    root_abs = os.path.abspath(root)
+    cwd = os.getcwd()
+    rels = [
+        os.path.join("data", "github.json"),
+        os.path.join("data", "gitlab.json"),
+        os.path.join("data", "bitbucket.json"),
+    ]
+    candidates: List[str] = []
+    for base in (root_abs, cwd):
+        for rel in rels:
+            candidates.append(os.path.abspath(os.path.join(base, rel)))
+    seen = set()
+    unique: List[str] = []
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def _resolve_existing_repo_list_file(root: str) -> str:
+    for path in _default_repo_list_candidates(root):
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+def _persist_workspace_root(root_path: str) -> Optional[str]:
+    try:
+        config = lantern_config.load_config()
+        config["workspace_root"] = os.path.abspath(root_path)
+        _write_json_secure(lantern_config.config_path(), config)
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
+def _persist_scan_json_path(scan_path: str) -> Optional[str]:
+    try:
+        config = lantern_config.load_config()
+        config["scan_json_path"] = os.path.abspath(scan_path)
+        _write_json_secure(lantern_config.config_path(), config)
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     """Main TUI interface for lantern."""
     if not _dialog_available():
@@ -478,9 +741,56 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
     height, width = _dialog_init()
 
+    config = lantern_config.load_config()
+    configured_root = str(config.get("workspace_root") or "").strip()
+    cli_root = str(getattr(args, "root", "") or "").strip()
+    initial_root = cli_root or configured_root
+    if initial_root and not os.path.isdir(initial_root):
+        initial_root = ""
+    if not initial_root:
+        root_prompt_default = os.getcwd()
+        root_value = _dialog_inputbox(
+            "Workspace Root",
+            "Enter workspace root directory for repository operations:",
+            root_prompt_default,
+        )
+        if not root_value:
+            return 0
+        if not os.path.isdir(root_value):
+            _dialog_msgbox("Error", f"Directory not found: {root_value}", height, width)
+            return 1
+        initial_root = os.path.abspath(root_value)
+        err = _persist_workspace_root(initial_root)
+        if err:
+            _dialog_msgbox("Warning", f"Could not persist workspace root:\n{err}", height, width)
+    else:
+        initial_root = os.path.abspath(initial_root)
+
+    configured_scan_path = str(config.get("scan_json_path") or "").strip()
+    default_scan_path = os.path.abspath(os.path.join(initial_root, "data", "repos.json"))
+    if configured_scan_path:
+        scan_path = os.path.abspath(configured_scan_path)
+    else:
+        if os.path.isfile(default_scan_path):
+            scan_path = default_scan_path
+            _persist_scan_json_path(scan_path)
+        else:
+            scan_candidate = _dialog_inputbox(
+                "Scan JSON Path",
+                "Enter JSON scan file path (used by table/report and scan output):",
+                default_scan_path,
+            )
+            if not scan_candidate:
+                return 0
+            scan_path = os.path.abspath(scan_candidate)
+            err = _persist_scan_json_path(scan_path)
+            if err:
+                _dialog_msgbox("Warning", f"Could not persist scan path:\n{err}", height, width)
+
     # Session-level settings (persist throughout the TUI session)
     session = {
-        "root": os.getcwd(),
+        "root": initial_root,
+        "scan_path": scan_path,
         "max_depth": 6,
         "include_hidden": False,
         "include_forks": False,
@@ -495,7 +805,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
         menu_text = (
             f"Select an operation:\n\n"
             f"Root: {session['root']}  |  Depth: {session['max_depth']}  |  "
-            f"Hidden: {hidden_flag}  |  Forks: {forks_flag}"
+            f"Hidden: {hidden_flag}  |  Forks: {forks_flag}\n"
+            f"Scan JSON: {session['scan_path']}"
         )
         menu_items: List[Tuple[str, str]] = [
             ("servers", "List configured Git servers"),
@@ -503,13 +814,15 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("settings", "Session settings"),
             ("repos", "List local repositories"),
             ("status", "Show repository status"),
+            ("lazygit", "Open repository in lazygit"),
+            ("fleet", "Unified fleet plan/apply (clone, pull, push)"),
             ("scan", "Scan repositories to JSON"),
             ("table", "Render table from JSON scan"),
-            ("sync", "Sync repositories (fetch/pull/push)"),
             ("find", "Find repositories by name/remote"),
             ("duplicates", "Find duplicate repositories"),
             ("forge", "Git forge operations (list/clone)"),
             ("report", "Export report (CSV/JSON/MD)"),
+            ("command", "Run any lantern CLI command"),
             ("exit", "Exit"),
         ]
 
@@ -530,7 +843,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
             hidden_label = "ON" if session["include_hidden"] else "OFF"
             forks_label = "ON" if session["include_forks"] else "OFF"
             settings_items: List[Tuple[str, str]] = [
-                ("root", f"Change root directory (current: {session['root']})"),
                 ("depth", f"Max scan depth (current: {session['max_depth']})"),
                 ("hidden", f"Include hidden directories ({hidden_label})"),
                 ("forks", f"Include forks in forge list ({forks_label})"),
@@ -538,15 +850,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ]
             settings_action = _dialog_menu("Session Settings", "Configure session settings:", settings_items, height, width)
 
-            if settings_action == "root":
-                new_root = _dialog_inputbox("Root Directory", "Enter the root directory for repository operations:", session["root"])
-                if new_root:
-                    if os.path.isdir(new_root):
-                        session["root"] = os.path.abspath(new_root)
-                        _dialog_msgbox("Settings", f"Root directory set to:\n{session['root']}")
-                    else:
-                        _dialog_msgbox("Error", f"Directory not found: {new_root}")
-            elif settings_action == "depth":
+            if settings_action == "depth":
                 depth_str = _dialog_inputbox("Max Depth", "Enter max scan depth (1-20):", str(session["max_depth"]))
                 if depth_str:
                     try:
@@ -586,6 +890,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
         elif action == "config":
             config_items: List[Tuple[str, str]] = [
+                ("workspace", f"Set workspace root (current: {session['root']})"),
+                ("scan_path", f"Set scan JSON path (current: {session['scan_path']})"),
                 ("setup", "Interactive server setup"),
                 ("path", "Show config file path"),
                 ("export", "Export config to JSON"),
@@ -594,7 +900,36 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ]
             config_action = _dialog_menu("Configuration", "Select an operation:", config_items, height, width)
 
-            if config_action == "setup":
+            if config_action == "workspace":
+                new_root = _dialog_inputbox(
+                    "Workspace Root",
+                    "Enter workspace root directory:",
+                    session["root"],
+                )
+                if new_root:
+                    if not os.path.isdir(new_root):
+                        _dialog_msgbox("Error", f"Directory not found: {new_root}", height, width)
+                    else:
+                        session["root"] = os.path.abspath(new_root)
+                        err = _persist_workspace_root(session["root"])
+                        if err:
+                            _dialog_msgbox("Warning", f"Could not persist workspace root:\n{err}", height, width)
+                        else:
+                            _dialog_msgbox("Configuration", f"Workspace root saved:\n{session['root']}", height, width)
+            elif config_action == "scan_path":
+                new_scan = _dialog_inputbox(
+                    "Scan JSON Path",
+                    "Enter scan JSON path:",
+                    session["scan_path"],
+                )
+                if new_scan:
+                    session["scan_path"] = os.path.abspath(new_scan)
+                    err = _persist_scan_json_path(session["scan_path"])
+                    if err:
+                        _dialog_msgbox("Warning", f"Could not persist scan path:\n{err}", height, width)
+                    else:
+                        _dialog_msgbox("Configuration", f"Scan path saved:\n{session['scan_path']}", height, width)
+            elif config_action == "setup":
                 # Create a namespace for the config setup command
                 setup_args = argparse.Namespace()
                 cmd_config_setup(setup_args)
@@ -649,39 +984,301 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if not repos_list:
                 _dialog_msgbox("Status", f"No repositories found in:\n{session['root']}")
                 continue
-            records = []
-            for path in repos_list:
-                record = build_repo_record(path, fetch)
-                records.append(add_divergence_fields(record))
+            _dialog_infobox(
+                "Status",
+                "Collecting repository status...\n\nPlease wait.",
+                max(8, height // 3),
+                max(60, width // 2),
+            )
+            records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos_list, fetch, "status")]
+            subprocess.run(["clear"], check=False)
             columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
             output_text = render_table(records, columns)
             _dialog_textbox_from_text("Status", output_text, height, width)
 
+        elif action == "fleet":
+            if not _validate_session_root(session["root"], height, width):
+                continue
+            config = lantern_config.load_config()
+            server_records = lantern_config.list_servers(config)
+            default_server = lantern_config.get_server_name(config, "")
+            server = default_server
+            if server_records:
+                server_items = [("default", f"Use default ({default_server})")]
+                server_items.extend([(rec["name"], rec["provider"]) for rec in server_records])
+                server_choice = _dialog_menu("Fleet Server", "Choose server for remote comparison:", server_items, height, width)
+                if not server_choice:
+                    continue
+                if server_choice != "default":
+                    server = server_choice
+            fetch = _dialog_yesno("Fetch", "Run local git fetch before building fleet plan?")
+            include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in plan?")
+            fleet_items: List[Tuple[str, str]] = [
+                ("plan", "Show fleet reconciliation plan"),
+                ("apply_all", "Apply clone/pull/push for all eligible repos"),
+                ("apply_select", "Apply actions only for selected repos"),
+                ("back", "Back to main menu"),
+            ]
+            fleet_action = _dialog_menu("Fleet", "Select an operation:", fleet_items, height, width)
+            if not fleet_action or fleet_action == "back":
+                continue
+
+            common_opts = [
+                "--root", session["root"],
+                "--max-depth", str(session["max_depth"]),
+                "--server", server,
+            ]
+            if session["include_hidden"]:
+                common_opts.append("--include-hidden")
+            if session["include_forks"]:
+                common_opts.append("--include-forks")
+            if fetch:
+                common_opts.append("--fetch")
+
+            if fleet_action == "plan":
+                plan_opts = list(common_opts)
+                if include_prs:
+                    plan_opts.append("--with-prs")
+                _dialog_infobox(
+                    "Fleet Plan",
+                    "Building fleet plan...\n\nThis may take a while for large workspaces.",
+                    max(8, height // 3),
+                    max(60, width // 2),
+                )
+                result = _run_lantern_subprocess(
+                    [sys.executable, "-m", "lantern", "fleet", "plan", *plan_opts],
+                    height,
+                    width,
+                )
+                subprocess.run(["clear"], check=False)
+                if result.returncode == 0 and result.stdout:
+                    _dialog_textbox_from_text("Fleet Plan", result.stdout, height, width)
+                continue
+
+            _dialog_infobox(
+                "Fleet Apply",
+                "Loading repositories, branches and PR context...\n\nPlease wait.",
+                max(8, height // 3),
+                max(60, width // 2),
+            )
+            plan_args = argparse.Namespace(
+                root=session["root"],
+                max_depth=session["max_depth"],
+                include_hidden=session["include_hidden"],
+                fetch=fetch,
+                server=server,
+                input="",
+                user="",
+                token="",
+                include_forks=session["include_forks"],
+                with_prs=True,
+                pr_stale_days=30,
+            )
+            try:
+                rows, _meta = _fleet_plan_records(plan_args)
+            except Exception as exc:
+                subprocess.run(["clear"], check=False)
+                _dialog_msgbox("Error", str(exc), height, width)
+                continue
+            subprocess.run(["clear"], check=False)
+
+            actionable = [r for r in rows if r.get("action") in {"clone", "pull", "push"}]
+            if not actionable:
+                _dialog_msgbox("Fleet", "No actionable repositories in current plan.", height, width)
+                continue
+
+            preview_cols = ["repo", "state", "action", "latest_branch", "prs"]
+            _dialog_textbox_from_text("Fleet Context", render_table(actionable, preview_cols), height, width)
+
+            selected_rows = actionable
+            if fleet_action == "apply_select":
+                checklist_items: List[Tuple[str, str, bool]] = []
+                idx_to_repo: Dict[str, str] = {}
+                for i, row in enumerate(actionable, start=1):
+                    tag = str(i)
+                    repo_name = str(row.get("repo") or "")
+                    idx_to_repo[tag] = repo_name
+                    prs = str(row.get("prs") or "-")
+                    latest = str(row.get("latest_branch") or "-")
+                    desc = f"{repo_name} [{row.get('state')}] -> {row.get('action')} | latest:{latest} | prs:{prs}"
+                    checklist_items.append((tag, desc, True))
+                selected_tags = _dialog_checklist("Fleet Apply", "Select repos to process:", checklist_items, height, width)
+                if not selected_tags:
+                    continue
+                selected_repos = {idx_to_repo[tag] for tag in selected_tags if tag in idx_to_repo}
+                if not selected_repos:
+                    continue
+                selected_rows = [r for r in actionable if str(r.get("repo") or "") in selected_repos]
+
+            mode_items: List[Tuple[str, str]] = [
+                ("sync", "Sync only (clone/pull/push)"),
+                ("pr", "Checkout PR number on selected repos"),
+                ("branch", "Checkout branch on selected repos"),
+            ]
+            apply_mode = _dialog_menu("Apply Mode", "Choose apply mode:", mode_items, height, width)
+            if not apply_mode:
+                continue
+
+            checkout_pr = ""
+            checkout_branch = ""
+            if apply_mode == "pr":
+                pr_numbers: List[str] = []
+                for row in selected_rows:
+                    for part in str(row.get("prs") or "").split(","):
+                        p = part.strip()
+                        if p and p != "-" and p not in pr_numbers:
+                            pr_numbers.append(p)
+                hint = ", ".join(pr_numbers[:20]) if pr_numbers else "No fresh PR numbers detected in selected repos."
+                checkout_pr = (
+                    _dialog_inputbox(
+                        "Checkout PR",
+                        f"Enter PR number to checkout on selected repos.\n\nDetected PR numbers: {hint}",
+                        pr_numbers[0] if pr_numbers else "",
+                    )
+                    or ""
+                ).strip()
+                if not checkout_pr:
+                    continue
+            elif apply_mode == "branch":
+                branch_hints: List[str] = []
+                for row in selected_rows:
+                    b = str(row.get("latest_branch") or "").strip()
+                    if b and b != "-" and b not in branch_hints:
+                        branch_hints.append(b)
+                hint = ", ".join(branch_hints[:20]) if branch_hints else "No latest branch hints detected."
+                checkout_branch = (
+                    _dialog_inputbox(
+                        "Checkout Branch",
+                        f"Enter branch to checkout/update on selected repos.\n\nLatest branch hints: {hint}",
+                        branch_hints[0] if branch_hints else "",
+                    )
+                    or ""
+                ).strip()
+                if not checkout_branch:
+                    continue
+
+            dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
+            only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
+            apply_cmd = [
+                sys.executable, "-m", "lantern", "fleet", "apply",
+                *common_opts,
+                "--clone-missing", "--pull-behind", "--push-ahead",
+            ]
+            if checkout_pr:
+                apply_cmd.extend(["--checkout-pr", checkout_pr])
+            if checkout_branch:
+                apply_cmd.extend(["--checkout-branch", checkout_branch])
+            if dry_run:
+                apply_cmd.append("--dry-run")
+            if only_clean:
+                apply_cmd.append("--only-clean")
+
+            if fleet_action == "apply_select":
+                selected_repos = [str(r.get("repo") or "") for r in selected_rows if str(r.get("repo") or "")]
+                if selected_repos:
+                    apply_cmd.extend(["--repos", ",".join(selected_repos)])
+
+            _dialog_infobox(
+                "Fleet Sync",
+                "Applying selected fleet actions...\n\nThis may take a while.",
+                max(8, height // 3),
+                max(60, width // 2),
+            )
+            result = _run_lantern_subprocess(apply_cmd, height, width)
+            subprocess.run(["clear"], check=False)
+            if result.returncode == 0 and result.stdout:
+                _dialog_textbox_from_text("Fleet Apply Results", result.stdout, height, width)
+
+        elif action == "lazygit":
+            if not _validate_session_root(session["root"], height, width):
+                continue
+            binary = _lazygit_path()
+            if not binary:
+                _dialog_msgbox(
+                    "lazygit",
+                    "lazygit is not installed.\n\nInstall it and try again.",
+                    height,
+                    width,
+                )
+                continue
+            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            if not repos_list:
+                _dialog_msgbox("lazygit", f"No repositories found in:\n{session['root']}", height, width)
+                continue
+            items = []
+            for idx, path in enumerate(repos_list, start=1):
+                tag = str(idx)
+                desc = f"{os.path.basename(path)} -> {path}"
+                items.append((tag, desc))
+            selected = _dialog_menu("lazygit", "Select repository to open:", items, height, width)
+            if not selected:
+                continue
+            try:
+                selected_idx = int(selected) - 1
+            except ValueError:
+                continue
+            if selected_idx < 0 or selected_idx >= len(repos_list):
+                continue
+            _launch_lazygit(repos_list[selected_idx])
+
         elif action == "scan":
             if not _validate_session_root(session["root"], height, width):
                 continue
-            output = _dialog_inputbox("Output File", "Enter output JSON file path:", "data/repos.json")
-            if output:
-                fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
-                repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
-                records = [build_repo_record(path, fetch) for path in repos_list]
-                payload = {"root": session["root"], "repos": records}
-                output_dir = os.path.dirname(output)
-                if output_dir:
-                    os.makedirs(output_dir, exist_ok=True)
-                try:
-                    with open(output, "w", encoding="utf-8") as handle:
-                        json.dump(payload, handle, indent=2)
-                    _dialog_msgbox("Scan", f"Scan complete. Found {len(records)} repositories.\n\nOutput saved to:\n{output}")
-                except OSError as exc:
-                    _dialog_msgbox("Error", f"Failed to write output: {exc}")
+            output = session["scan_path"]
+            fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
+            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            _dialog_infobox(
+                "Scan",
+                "Scanning repositories...\n\nPlease wait.",
+                max(8, height // 3),
+                max(60, width // 2),
+            )
+            records = _collect_repo_records_with_progress(repos_list, fetch, "scan")
+            subprocess.run(["clear"], check=False)
+            payload = {"root": session["root"], "repos": records}
+            output_dir = os.path.dirname(output)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            try:
+                with open(output, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, indent=2)
+                _dialog_msgbox("Scan", f"Scan complete. Found {len(records)} repositories.\n\nOutput saved to:\n{output}")
+            except OSError as exc:
+                _dialog_msgbox("Error", f"Failed to write output: {exc}")
 
         elif action == "table":
-            input_file = _dialog_inputbox("Input File", "Enter JSON scan file path:", "data/repos.json")
-            if not input_file:
-                continue
+            input_file = session["scan_path"]
             if not os.path.isfile(input_file):
-                _dialog_msgbox("Error", f"File not found: {input_file}")
+                if _dialog_yesno(
+                    "Scan File Missing",
+                    f"Scan file not found:\n{input_file}\n\nRun a scan now?",
+                    height,
+                    width,
+                ):
+                    fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
+                    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+                    _dialog_infobox(
+                        "Scan",
+                        "Scanning repositories...\n\nPlease wait.",
+                        max(8, height // 3),
+                        max(60, width // 2),
+                    )
+                    records = _collect_repo_records_with_progress(repos_list, fetch, "scan")
+                    subprocess.run(["clear"], check=False)
+                    payload = {"root": session["root"], "repos": records}
+                    output_dir = os.path.dirname(input_file)
+                    if output_dir:
+                        os.makedirs(output_dir, exist_ok=True)
+                    try:
+                        with open(input_file, "w", encoding="utf-8") as handle:
+                            json.dump(payload, handle, indent=2)
+                    except OSError as exc:
+                        _dialog_msgbox("Error", f"Failed to write scan file: {exc}")
+                        continue
+                else:
+                    _dialog_msgbox("Error", f"File not found: {input_file}")
+                    continue
+            if not os.path.isfile(input_file):
                 continue
             try:
                 with open(input_file, "r", encoding="utf-8") as handle:
@@ -823,15 +1420,49 @@ def cmd_tui(args: argparse.Namespace) -> int:
                             _dialog_textbox_from_text(f"Repositories on {server}", result.stdout, height, width)
 
             elif forge_action == "clone":
-                input_file = _dialog_inputbox("Input File", "Enter JSON file with repository list:", "data/github.json")
-                if input_file and os.path.isfile(input_file):
-                    clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session["root"])
-                    if clone_root:
-                        # Use the existing TUI clone with dialog checklist
-                        cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
-                        _run_lantern_subprocess(cmd_args, height, width, capture=False)
-                elif input_file:
-                    _dialog_msgbox("Error", f"File not found: {input_file}")
+                input_file = _resolve_existing_repo_list_file(session["root"])
+                if not input_file:
+                    config = lantern_config.load_config()
+                    server_records = lantern_config.list_servers(config)
+                    if not server_records:
+                        _dialog_msgbox(
+                            "Error",
+                            "No servers configured.\n\nUse 'config' > 'setup' to add servers first.",
+                            height,
+                            width,
+                        )
+                        continue
+                    default_server = lantern_config.get_server_name(config, "")
+                    server = ""
+                    if default_server and any(rec["name"] == default_server for rec in server_records):
+                        server = default_server
+                    elif len(server_records) == 1:
+                        server = server_records[0]["name"]
+                    else:
+                        server_items = [(rec["name"], rec["provider"]) for rec in server_records]
+                        chosen = _dialog_menu("Select Server", "Choose a server to build repository list:", server_items, height, width)
+                        if not chosen:
+                            continue
+                        server = chosen
+                    safe_server = server.replace("/", "_")
+                    input_file = os.path.join(session["root"], "data", f"{safe_server}.json")
+                    cmd_args = [sys.executable, "-m", "lantern", "forge", "list", "--server", server, "--output", input_file]
+                    if session["include_forks"]:
+                        cmd_args.append("--include-forks")
+                    result = _run_lantern_subprocess(cmd_args, height, width)
+                    if result.returncode != 0 or not os.path.isfile(input_file):
+                        _dialog_msgbox(
+                            "Error",
+                            "Could not generate repository list JSON automatically.\n"
+                            "Check server config and try again.",
+                            height,
+                            width,
+                        )
+                        continue
+                clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session["root"])
+                if clone_root:
+                    cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
+                    _run_lantern_subprocess(cmd_args, height, width, capture=False)
 
             elif forge_action in ("snippets", "snippets_file"):
                 config = lantern_config.load_config()
@@ -909,11 +1540,38 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     _dialog_msgbox("Created", f"Gist created:\n{result.stdout.strip()}")
 
         elif action == "report":
-            input_file = _dialog_inputbox("Input File", "Enter JSON scan file path:", "data/repos.json")
-            if not input_file:
-                continue
+            input_file = session["scan_path"]
             if not os.path.isfile(input_file):
-                _dialog_msgbox("Error", f"File not found: {input_file}")
+                if _dialog_yesno(
+                    "Scan File Missing",
+                    f"Scan file not found:\n{input_file}\n\nRun a scan now?",
+                    height,
+                    width,
+                ):
+                    fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
+                    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+                    _dialog_infobox(
+                        "Scan",
+                        "Scanning repositories...\n\nPlease wait.",
+                        max(8, height // 3),
+                        max(60, width // 2),
+                    )
+                    records = _collect_repo_records_with_progress(repos_list, fetch, "scan")
+                    subprocess.run(["clear"], check=False)
+                    payload = {"root": session["root"], "repos": records}
+                    output_dir = os.path.dirname(input_file)
+                    if output_dir:
+                        os.makedirs(output_dir, exist_ok=True)
+                    try:
+                        with open(input_file, "w", encoding="utf-8") as handle:
+                            json.dump(payload, handle, indent=2)
+                    except OSError as exc:
+                        _dialog_msgbox("Error", f"Failed to write scan file: {exc}")
+                        continue
+                else:
+                    _dialog_msgbox("Error", f"File not found: {input_file}")
+                    continue
+            if not os.path.isfile(input_file):
                 continue
             fmt_items: List[Tuple[str, str]] = [
                 ("csv", "Comma-separated values"),
@@ -955,6 +1613,21 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 elif result.stdout:
                     _dialog_textbox_from_text("Report", result.stdout, height, width)
 
+        elif action == "command":
+            raw = _dialog_inputbox("Run Command", "Enter lantern arguments (without leading 'lantern'):", "")
+            if raw is None:
+                continue
+            argv = shlex.split(raw)
+            if not argv:
+                _dialog_msgbox("Command", "No command entered.", height, width)
+                continue
+            cmd_args = [sys.executable, "-m", "lantern", *argv]
+            result = _run_lantern_subprocess(cmd_args, height, width)
+            if result.returncode == 0 and result.stdout:
+                _dialog_textbox_from_text("Command Output", result.stdout, height, width)
+            elif result.returncode == 0:
+                _dialog_msgbox("Command", "Command completed with no output.", height, width)
+
     return 0
 
 
@@ -974,9 +1647,79 @@ def cmd_repos(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lazygit_candidates(root: str, max_depth: int, include_hidden: bool) -> List[Dict[str, str]]:
+    repos = find_repos(root, max_depth, include_hidden)
+    out: List[Dict[str, str]] = []
+    for path in repos:
+        out.append(
+            {
+                "name": os.path.basename(path),
+                "path": path,
+                "origin": git.get_origin_url(path) or "-",
+            }
+        )
+    return out
+
+
+def cmd_lazygit(args: argparse.Namespace) -> int:
+    if not _lazygit_path():
+        print("lazygit is not installed or not in PATH.", file=sys.stderr)
+        return 1
+
+    target_path = ""
+    if args.path:
+        target_path = os.path.abspath(args.path)
+        if not os.path.isdir(target_path) or not _is_git_repo_root(target_path):
+            print(f"Not a git repository root: {target_path}", file=sys.stderr)
+            return 1
+    else:
+        candidates = _lazygit_candidates(args.root, args.max_depth, args.include_hidden)
+        if args.repo:
+            matches = [r for r in candidates if r["name"] == args.repo]
+            if len(matches) == 1:
+                target_path = matches[0]["path"]
+            elif not matches:
+                print(f"Repository not found under root: {args.repo}", file=sys.stderr)
+                return 1
+            else:
+                print(f"Multiple repositories named '{args.repo}'. Use --path.", file=sys.stderr)
+                print(render_table(matches, ["name", "path", "origin"]))
+                return 1
+        elif _is_git_repo_root(os.getcwd()):
+            target_path = os.getcwd()
+        elif len(candidates) == 1:
+            target_path = candidates[0]["path"]
+        elif args.select and _dialog_available():
+            items = []
+            for idx, rec in enumerate(candidates, start=1):
+                items.append((str(idx), f"{rec['name']} -> {rec['path']}"))
+            selected = _dialog_menu("lazygit", "Select repository to open:", items)
+            if not selected:
+                return 0
+            try:
+                selected_idx = int(selected) - 1
+            except ValueError:
+                return 1
+            if selected_idx < 0 or selected_idx >= len(candidates):
+                return 1
+            target_path = candidates[selected_idx]["path"]
+        else:
+            if not candidates:
+                print(f"No repositories found under root: {args.root}", file=sys.stderr)
+                return 1
+            print(
+                "Multiple repositories found. Use --repo <name>, --path <repo-path>, or --select for selection.",
+                file=sys.stderr,
+            )
+            print(render_table(candidates, ["name", "path", "origin"]))
+            return 1
+
+    return _launch_lazygit(target_path)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
-    records = [build_repo_record(path, args.fetch) for path in repos]
+    records = _collect_repo_records_with_progress(repos, args.fetch, "scan")
     output = {"root": args.root, "repos": records}
 
     if args.output:
@@ -993,10 +1736,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
-    records = []
-    for path in repos:
-        record = build_repo_record(path, args.fetch)
-        records.append(add_divergence_fields(record))
+    records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos, args.fetch, "status")]
     columns = [
         "name",
         "branch",
@@ -1006,6 +1746,378 @@ def cmd_status(args: argparse.Namespace) -> int:
         "main",
     ]
     print(render_table(records, columns))
+    return 0
+
+
+def _normalize_repo_url(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("git@") and ":" in raw:
+        host_part, path_part = raw[4:].split(":", 1)
+        host = host_part.strip().lower()
+        path = path_part.strip().lower()
+        if path.endswith(".git"):
+            path = path[:-4]
+        return f"{host}/{path}"
+    parsed = urllib.parse.urlparse(raw)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").strip("/").lower()
+    if path.endswith(".git"):
+        path = path[:-4]
+    if host and path:
+        return f"{host}/{path}"
+    return raw.lower()
+
+
+def _origin_owner_repo(origin_url: str) -> Tuple[str, str, str]:
+    raw = (origin_url or "").strip()
+    if not raw:
+        return "", "", ""
+    if raw.startswith("git@") and ":" in raw:
+        host_part, path_part = raw[4:].split(":", 1)
+        host = host_part.strip().lower()
+        parts = [p for p in path_part.strip("/").split("/") if p]
+        if len(parts) < 2:
+            return host, "", ""
+        owner = parts[-2]
+        repo = parts[-1]
+    else:
+        parsed = urllib.parse.urlparse(raw)
+        host = (parsed.hostname or "").lower()
+        parts = [p for p in (parsed.path or "").strip("/").split("/") if p]
+        if len(parts) < 2:
+            return host, "", ""
+        owner = parts[-2]
+        repo = parts[-1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    return host, owner, repo
+
+
+def _remote_repo_keys(repo: Dict[str, Any]) -> Set[str]:
+    keys: Set[str] = set()
+    for field in ("ssh_url", "clone_url", "html_url"):
+        value = str(repo.get(field) or "").strip()
+        normalized = _normalize_repo_url(value)
+        if normalized:
+            keys.add(normalized)
+    return keys
+
+
+def _fleet_server_context(args: argparse.Namespace) -> Tuple[str, str, str, str, Optional[Dict[str, str]], Dict[str, Any]]:
+    env = github.load_env()
+    config = lantern_config.load_config()
+    server = lantern_config.get_server(config, args.server)
+    provider = (server.get("provider") or "github").lower()
+    base_url = str(server.get("base_url") or "")
+    env_user_key = f"{provider.upper()}_USER"
+    env_token_key = f"{provider.upper()}_TOKEN"
+    user = str(args.user or env.get(env_user_key) or server.get("user") or "")
+    token = str(args.token or env.get(env_token_key) or server.get("token") or "")
+    auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+    return provider, base_url, user, token, auth, server
+
+
+def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
+    if args.input:
+        with open(args.input, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {"repos": []}
+
+    provider, base_url, user, token, auth, server = _fleet_server_context(args)
+    repos = forge.fetch_repos(provider, user, token, args.include_forks, base_url, auth)
+    return {
+        "server": server.get("name", provider),
+        "provider": provider,
+        "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
+        "user": user,
+        "repos": repos,
+    }
+
+
+def _fleet_plan_records(args: argparse.Namespace) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+    local_paths = find_repos(args.root, args.max_depth, args.include_hidden)
+    local_records: List[Dict[str, str]] = []
+    total_local = len(local_paths)
+    for idx, path in enumerate(local_paths, start=1):
+        _progress_line(idx, total_local, f"Scanning {os.path.basename(path)}")
+        record = build_repo_record(path, args.fetch)
+        record = add_divergence_fields(record)
+        record["clean"] = "yes" if git.is_clean(path) else "no"
+        local_records.append(record)
+    _progress_done()
+
+    payload = _fleet_load_remote(args)
+    provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
+    remote_repos = payload.get("repos", []) if isinstance(payload.get("repos"), list) else []
+    remote_by_key: Dict[str, Dict[str, Any]] = {}
+    for repo in remote_repos:
+        if not isinstance(repo, dict):
+            continue
+        for key in _remote_repo_keys(repo):
+            remote_by_key[key] = repo
+
+    local_by_remote_key: Dict[str, Dict[str, str]] = {}
+    pr_cache: Dict[str, List[Dict[str, Any]]] = {}
+    include_prs = bool(getattr(args, "with_prs", False))
+    stale_days = int(getattr(args, "pr_stale_days", 30) or 30)
+    plan_rows: List[Dict[str, str]] = []
+    for rec in local_records:
+        path = rec.get("path", "")
+        origin = str(rec.get("origin") or "")
+        origin_key = _normalize_repo_url(origin)
+        remote_repo = remote_by_key.get(origin_key) if origin_key else None
+        if remote_repo and origin_key:
+            local_by_remote_key[origin_key] = rec
+        up_ahead = _to_int_or_none(rec.get("up_ahead"))
+        up_behind = _to_int_or_none(rec.get("up_behind"))
+        state = "local-only"
+        action = "-"
+        if remote_repo:
+            if (up_ahead or 0) > 0 and (up_behind or 0) > 0:
+                state = "diverged"
+                action = "manual"
+            elif (up_behind or 0) > 0:
+                state = "behind-remote"
+                action = "pull"
+            elif (up_ahead or 0) > 0:
+                state = "ahead-remote"
+                action = "push"
+            else:
+                state = "in-sync"
+                action = "-"
+        latest_branch = "-"
+        prs = "-"
+        if include_prs and provider == "github":
+            host, owner, repo_name = _origin_owner_repo(origin)
+            if owner and repo_name:
+                cache_key = f"{owner}/{repo_name}"
+                if cache_key not in pr_cache:
+                    try:
+                        pr_cache[cache_key] = github.fetch_open_pull_requests(
+                            owner=owner,
+                            repo=repo_name,
+                            token=token or None,
+                            stale_days=stale_days,
+                            base_url=base_url or None,
+                        )
+                    except Exception:
+                        pr_cache[cache_key] = []
+                repo_prs = pr_cache.get(cache_key, [])
+                if repo_prs:
+                    latest_branch = str(repo_prs[0].get("head_ref") or "-")
+                    prs = ",".join(str(pr.get("number")) for pr in repo_prs[:8] if pr.get("number") is not None) or "-"
+        plan_rows.append(
+            {
+                "repo": rec.get("name", os.path.basename(path)),
+                "state": state,
+                "up": str(rec.get("up") or "-"),
+                "clean": str(rec.get("clean") or "no"),
+                "action": action,
+                "latest_branch": latest_branch,
+                "prs": prs,
+                "path": path,
+            }
+        )
+
+    for repo in remote_repos:
+        if not isinstance(repo, dict):
+            continue
+        keys = _remote_repo_keys(repo)
+        if not keys or any(k in local_by_remote_key for k in keys):
+            continue
+        name = str(repo.get("name") or "").strip()
+        if not name:
+            continue
+        dest = os.path.join(args.root, name)
+        plan_rows.append(
+            {
+                "repo": name,
+                "state": "missing-local",
+                "up": "-",
+                "clean": "-",
+                "action": "clone",
+                "latest_branch": "-",
+                "prs": "-",
+                "path": dest,
+            }
+        )
+
+    plan_rows.sort(key=lambda r: (r["repo"].lower(), r["state"]))
+    metadata = {"server": str(payload.get("server") or ""), "remote_count": len(remote_repos), "local_count": len(local_records)}
+    return plan_rows, metadata
+
+
+def _parse_repo_filter(raw: str) -> Set[str]:
+    return {item.strip() for item in (raw or "").split(",") if item.strip()}
+
+
+def cmd_fleet_plan(args: argparse.Namespace) -> int:
+    print("Building fleet plan... please wait.", file=sys.stderr)
+    try:
+        rows, meta = _fleet_plan_records(args)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    columns = ["repo", "state", "up", "clean", "action"]
+    if getattr(args, "with_prs", False):
+        columns.extend(["latest_branch", "prs"])
+    columns.append("path")
+    print(render_table(rows, columns))
+    if rows:
+        print(
+            f"\nserver={meta.get('server') or '-'} local={meta.get('local_count', 0)} "
+            f"remote={meta.get('remote_count', 0)} total={len(rows)}"
+        )
+    print(f"Fleet plan ready: {len(rows)} rows.", file=sys.stderr)
+    return 0
+
+
+def cmd_fleet_apply(args: argparse.Namespace) -> int:
+    checkout_branch = str(getattr(args, "checkout_branch", "") or "").strip()
+    checkout_pr = str(getattr(args, "checkout_pr", "") or "").strip()
+    pr_number = 0
+    if checkout_pr:
+        try:
+            pr_number = int(checkout_pr)
+        except ValueError:
+            print(f"Invalid --checkout-pr value: {checkout_pr}", file=sys.stderr)
+            return 1
+    if checkout_branch.startswith("origin/"):
+        checkout_branch = checkout_branch.split("/", 1)[1]
+
+    if not (args.clone_missing or args.pull_behind or args.push_ahead or checkout_branch or pr_number):
+        args.clone_missing = True
+        args.pull_behind = True
+        args.push_ahead = True
+
+    provider = base_url = user = token = ""
+    try:
+        payload = _fleet_load_remote(args)
+        provider, base_url, user, token, _auth, _server = _fleet_server_context(args)
+        rows, _meta = _fleet_plan_records(args)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    clone_sources: Dict[str, str] = {}
+    for remote_repo in payload.get("repos", []):
+        if not isinstance(remote_repo, dict):
+            continue
+        name = str(remote_repo.get("name") or "").strip()
+        if not name:
+            continue
+        src = str(remote_repo.get("ssh_url") or remote_repo.get("clone_url") or "").strip()
+        if src:
+            clone_sources[name] = src
+
+    selected = _parse_repo_filter(args.repos)
+    target_rows = [row for row in rows if not selected or row["repo"] in selected]
+    results: List[Dict[str, str]] = []
+    total_targets = len(target_rows)
+    for idx, row in enumerate(target_rows, start=1):
+        repo = row["repo"]
+        state = row["state"]
+        path = row["path"]
+        _progress_line(idx, total_targets, f"fleet-apply: {repo} [{state}]")
+        statuses: List[str] = []
+        clone_ok = state != "missing-local"
+        if state == "missing-local" and args.clone_missing:
+            if args.dry_run:
+                statuses.append("clone:dry-run")
+                clone_ok = False
+            else:
+                parent = os.path.dirname(path)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                clone_src = clone_sources.get(repo, "")
+                if not clone_src:
+                    statuses.append("clone:missing-url")
+                    clone_ok = False
+                else:
+                    proc = subprocess.run(["git", "clone", clone_src, path], check=False)
+                    ok = proc.returncode == 0
+                    statuses.append(f"clone:{'ok' if ok else 'fail'}")
+                    clone_ok = ok
+        elif state == "behind-remote" and args.pull_behind:
+            if args.only_clean and row.get("clean") != "yes":
+                statuses.append("pull:skip-dirty")
+            elif args.dry_run:
+                statuses.append("pull:dry-run")
+            else:
+                proc = subprocess.run(
+                    ["git", "-C", path, "pull", "--ff-only"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                statuses.append(f"pull:{'ok' if proc.returncode == 0 else 'fail'}")
+        elif state == "ahead-remote" and args.push_ahead:
+            if args.only_clean and row.get("clean") != "yes":
+                statuses.append("push:skip-dirty")
+            elif args.dry_run:
+                statuses.append("push:dry-run")
+            else:
+                proc = subprocess.run(
+                    ["git", "-C", path, "push"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                statuses.append(f"push:{'ok' if proc.returncode == 0 else 'fail'}")
+
+        effective_branch = checkout_branch
+        if pr_number:
+            _host, owner, repo_name = _origin_owner_repo(str(git.get_origin_url(path) or ""))
+            if provider == "github" and owner and repo_name:
+                try:
+                    resolved = github.get_pr_branch(
+                        owner=owner,
+                        repo=repo_name,
+                        pr_number=pr_number,
+                        token=token or None,
+                        base_url=base_url or None,
+                    )
+                except Exception:
+                    resolved = None
+                if resolved:
+                    effective_branch = resolved
+                else:
+                    statuses.append(f"checkout-pr:{pr_number}:not-found")
+            else:
+                statuses.append(f"checkout-pr:{pr_number}:unsupported")
+
+        if effective_branch:
+            if args.only_clean and row.get("clean") != "yes":
+                statuses.append(f"checkout:{effective_branch}:skip-dirty")
+            elif not clone_ok and not args.dry_run:
+                statuses.append(f"checkout:{effective_branch}:skip-not-cloned")
+            elif args.dry_run:
+                statuses.append(f"checkout:{effective_branch}:dry-run")
+            else:
+                _run_git_op(path, ["fetch", "--prune"])
+                remote_ref = f"origin/{effective_branch}"
+                has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
+                if not has_remote:
+                    statuses.append(f"checkout:{effective_branch}:skip-no-remote")
+                else:
+                    has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
+                    rc_checkout = _run_git_op(path, ["checkout", effective_branch]) if has_local else _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
+                    rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
+                    statuses.append(f"checkout:{effective_branch}:{'ok' if (rc_checkout == 0 and rc_pull == 0) else 'fail'}")
+
+        if not statuses:
+            statuses = ["skip"]
+        results.append({"repo": repo, "state": state, "result": " ".join(statuses), "path": path})
+    _progress_done()
+
+    if not results:
+        print("No repositories selected.")
+        return 0
+    print(render_table(results, ["repo", "state", "result", "path"]))
     return 0
 
 
@@ -1091,6 +2203,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
         actions.append(("push", ["push"]))
 
     records = []
+    total_steps = max(1, len(repos) * max(1, len(actions)))
+    current_step = 0
     for path in repos:
         name = os.path.basename(path)
         if args.only_clean and not git.is_clean(path):
@@ -1101,6 +2215,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
             continue
         statuses = []
         for label, cmd in actions:
+            current_step += 1
+            _progress_line(current_step, total_steps, f"sync: {label} {name}")
             if args.dry_run:
                 statuses.append(f"{label}:dry-run")
                 continue
@@ -1113,6 +2229,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
             )
             statuses.append(f"{label}:{'ok' if result.returncode == 0 else 'fail'}")
         records.append({"name": name, "path": path, "result": " ".join(statuses)})
+    _progress_done()
 
     columns = ["name", "result", "path"]
     print(render_table(records, columns))
@@ -1913,6 +3030,11 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantern")
     parser.add_argument(
+        "--root",
+        default="",
+        help="workspace root override for TUI session (stored root is used when omitted)",
+    )
+    parser.add_argument(
         "--tui", "-t",
         action="store_true",
         help="Launch interactive TUI mode using dialog",
@@ -1951,6 +3073,15 @@ def build_parser() -> argparse.ArgumentParser:
     repos.add_argument("--max-depth", type=int, default=6)
     repos.add_argument("--include-hidden", action="store_true")
     repos.set_defaults(func=cmd_repos)
+
+    lazygit = sub.add_parser("lazygit", help="open lazygit for a selected repository")
+    lazygit.add_argument("--root", default=os.getcwd())
+    lazygit.add_argument("--max-depth", type=int, default=6)
+    lazygit.add_argument("--include-hidden", action="store_true")
+    lazygit.add_argument("--repo", default="", help="repository directory name under root")
+    lazygit.add_argument("--path", default="", help="explicit repository path")
+    lazygit.add_argument("--select", action="store_true", help="interactive repo selection with dialog")
+    lazygit.set_defaults(func=cmd_lazygit)
 
     scan = sub.add_parser("scan", help="scan for git repos and write JSON")
     scan.add_argument("--root", default=os.getcwd())
@@ -1997,6 +3128,43 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--only-clean", action="store_true")
     sync.add_argument("--only-upstream", action="store_true")
     sync.set_defaults(func=cmd_sync)
+
+    fleet = sub.add_parser("fleet", help="unified multi-repo management (plan/apply)")
+    fleet_sub = fleet.add_subparsers(dest="fleet_command", required=True)
+
+    fleet_plan = fleet_sub.add_parser("plan", help="show local vs remote reconciliation plan")
+    fleet_plan.add_argument("--root", default=os.getcwd())
+    fleet_plan.add_argument("--max-depth", type=int, default=6)
+    fleet_plan.add_argument("--include-hidden", action="store_true")
+    fleet_plan.add_argument("--fetch", action="store_true")
+    fleet_plan.add_argument("--server", default="")
+    fleet_plan.add_argument("--input", default="")
+    fleet_plan.add_argument("--user", default="")
+    fleet_plan.add_argument("--token", default="")
+    fleet_plan.add_argument("--include-forks", action="store_true")
+    fleet_plan.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
+    fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
+    fleet_plan.set_defaults(func=cmd_fleet_plan)
+
+    fleet_apply = fleet_sub.add_parser("apply", help="apply clone/pull/push actions from fleet plan")
+    fleet_apply.add_argument("--root", default=os.getcwd())
+    fleet_apply.add_argument("--max-depth", type=int, default=6)
+    fleet_apply.add_argument("--include-hidden", action="store_true")
+    fleet_apply.add_argument("--fetch", action="store_true")
+    fleet_apply.add_argument("--server", default="")
+    fleet_apply.add_argument("--input", default="")
+    fleet_apply.add_argument("--user", default="")
+    fleet_apply.add_argument("--token", default="")
+    fleet_apply.add_argument("--include-forks", action="store_true")
+    fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
+    fleet_apply.add_argument("--clone-missing", action="store_true")
+    fleet_apply.add_argument("--pull-behind", action="store_true")
+    fleet_apply.add_argument("--push-ahead", action="store_true")
+    fleet_apply.add_argument("--checkout-branch", default="", help="checkout/update this branch on selected repos (tracks origin/<branch>)")
+    fleet_apply.add_argument("--checkout-pr", default="", help="checkout branch for this PR number (GitHub)")
+    fleet_apply.add_argument("--dry-run", action="store_true")
+    fleet_apply.add_argument("--only-clean", action="store_true")
+    fleet_apply.set_defaults(func=cmd_fleet_apply)
 
     report = sub.add_parser("report", help="export scan results")
     report.add_argument("--input", default="data/repos.json")
@@ -2138,8 +3306,9 @@ def main() -> None:
         argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
-    # Handle --tui flag: launch interactive TUI mode
-    if args.tui:
+    # Handle global --tui mode only when no subcommand is requested.
+    # Some subcommands also use a --tui flag for their own interactive flows.
+    if args.tui and not args.command:
         raise SystemExit(cmd_tui(args))
 
     # If no command specified, show help
