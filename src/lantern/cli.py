@@ -1184,10 +1184,23 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 max(8, height // 3),
                 max(60, width // 2),
             )
-            result = _run_lantern_subprocess(apply_cmd, height, width)
+            # Stream progress live for long-running fleet apply operations.
+            result = _run_lantern_subprocess(apply_cmd, height, width, capture=False)
             subprocess.run(["clear"], check=False)
-            if result.returncode == 0 and result.stdout:
-                _dialog_textbox_from_text("Fleet Apply Results", result.stdout, height, width)
+            if result.returncode == 0:
+                _dialog_msgbox(
+                    "Fleet Sync",
+                    "Fleet apply finished.\n\nLive progress/output was shown during execution.",
+                    height,
+                    width,
+                )
+            else:
+                _dialog_msgbox(
+                    "Fleet Sync",
+                    "Fleet apply failed.\n\nReview terminal output shown during execution.",
+                    height,
+                    width,
+                )
 
         elif action == "lazygit":
             if not _validate_session_root(session["root"], height, width):
