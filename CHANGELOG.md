@@ -10,6 +10,11 @@ All notable changes to git-lantern are documented in this file.
   - `lantern fleet plan --with-prs` now includes fresh open PR numbers and latest active PR branch hints (GitHub).
   - `lantern fleet apply --checkout-pr <number>` to checkout/update the branch behind a PR number.
   - `lantern fleet apply --checkout-branch <name>` to checkout/update arbitrary branches (including PR branches).
+- TUI `fleet` now includes `Smart Sync` preset flow with minimal steps:
+  - presets: `Fast Pull`, `Branch Rollout`, `PR Rollout`, `Full Reconcile`,
+  - scope selector: all actionable, only clean, or selected repos,
+  - single summary/confirm step before execution,
+  - runs through existing `fleet plan/apply` behavior.
 - TUI `fleet` apply flow now:
   - loads repo context first,
   - shows latest branch + PR numbers before selection,
@@ -25,6 +30,7 @@ All notable changes to git-lantern are documented in this file.
 ### Changed
 
 - TUI now prioritizes `fleet` as the primary multi-repo flow.
+- Repository-oriented displays are consistently sorted alphabetically by repo name in CLI/TUI outputs.
 - TUI `forge -> clone` now auto-resolves repository-list JSON and auto-generates it via `forge list` when missing.
 - TUI `table`/`report` no longer prompt for JSON scan path each time; they use configured `scan_json_path`.
 - TUI `scan` writes directly to configured `scan_json_path` without repeated path prompts.
