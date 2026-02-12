@@ -22,9 +22,12 @@ Primary workflows:
 - Server config: `docs/use-cases.md#server-config-github-gitlab-bitbucket`
 
 Commands (jump to detailed guides):
+- `lantern fleet plan` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
+- `lantern fleet apply` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern repos` -> `docs/use-cases.md#lantern-repos`
 - `lantern scan` -> `docs/use-cases.md#lantern-scan`
 - `lantern status` -> `docs/use-cases.md#lantern-status`
+- `lantern lazygit` -> `docs/use-cases.md#lantern-lazygit`
 - `lantern table` -> `docs/use-cases.md#lantern-table`
 - `lantern find` -> `docs/use-cases.md#lantern-find`
 - `lantern duplicates` -> `docs/use-cases.md#lantern-duplicates`
@@ -40,6 +43,9 @@ Commands (jump to detailed guides):
 
 Quick examples:
 ```bash
+lantern fleet plan --root ~/workspace --server github.com --fetch
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
 lantern forge list --server github.com --output data/github.json
@@ -82,9 +88,10 @@ Git Lantern
 ├── settings     - Session settings (root, depth, hidden, forks)
 ├── repos        - List local repositories
 ├── status       - Show repository status
+├── lazygit      - Open selected repository in lazygit
+├── fleet        - Unified fleet plan/apply (clone/pull/push)
 ├── scan         - Scan repositories to JSON
 ├── table        - Render table from JSON scan
-├── sync         - Sync repositories (fetch/pull/push)
 ├── find         - Find repositories by name/remote
 ├── duplicates   - Find duplicate repositories
 ├── forge        - Git forge operations
@@ -93,6 +100,7 @@ Git Lantern
 │   ├── snippets      - List/download gists and snippets
 │   └── gist_create   - Create a gist (GitHub only)
 ├── report       - Export scan results (CSV/JSON/MD)
+├── command      - Run any `lantern ...` command
 └── exit         - Exit (clears screen)
 ```
 
@@ -101,9 +109,9 @@ Git Lantern
 The TUI uses **session-based settings** that persist throughout your session:
 
 1. All settings are shown in the main menu header
-2. Use **Settings** to change root directory, max depth, include hidden dirs, or include forks
-3. All operations (repos, status, scan, sync, find, duplicates) use these settings automatically
-4. No more repeated prompts for the directory on every operation
+2. Use **Config** to change persistent workspace root / scan JSON path, and **Settings** for depth/hidden/forks
+3. All repo operations (repos, status, lazygit, fleet, scan, find, duplicates) use these settings automatically
+4. No more repeated prompts for workspace root or scan JSON file path
 
 ### Server Configuration Wizard
 

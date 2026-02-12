@@ -6,6 +6,40 @@ All notable changes to git-lantern are documented in this file.
 
 ### Added
 
+- `fleet` workflow improvements:
+  - `lantern fleet plan --with-prs` now includes fresh open PR numbers and latest active PR branch hints (GitHub).
+  - `lantern fleet apply --checkout-pr <number>` to checkout/update the branch behind a PR number.
+  - `lantern fleet apply --checkout-branch <name>` to checkout/update arbitrary branches (including PR branches).
+- TUI `fleet` apply flow now:
+  - loads repo context first,
+  - shows latest branch + PR numbers before selection,
+  - supports informed mode choice (sync, checkout PR, checkout branch).
+- `lazygit` integration:
+  - new `lantern lazygit` command with `--repo`, `--path`, and `--select`.
+  - direct TUI `lazygit` menu action.
+- Persisted TUI workspace settings:
+  - `workspace_root` persisted and reused between sessions.
+  - `scan_json_path` persisted and reused by `scan`, `table`, and `report`.
+  - global CLI override for TUI root: `lantern --tui --root <path>`.
+
+### Changed
+
+- TUI now prioritizes `fleet` as the primary multi-repo flow.
+- TUI `forge -> clone` now auto-resolves repository-list JSON and auto-generates it via `forge list` when missing.
+- TUI `table`/`report` no longer prompt for JSON scan path each time; they use configured `scan_json_path`.
+- TUI `scan` writes directly to configured `scan_json_path` without repeated path prompts.
+
+### Fixed
+
+- Fixed `forge clone --tui` behavior where global `--tui` could intercept subcommand-specific TUI flow.
+- Fixed `fleet` TUI passing `--with-prs` to `fleet apply` (invalid argument).
+- Fixed `fleet` PR enrichment failures (`404`/network errors) from aborting the whole operation; per-repo PR errors are now non-fatal.
+- Added progress indicators for long operations:
+  - `status --fetch`, `scan --fetch`, `sync`, and `fleet plan/apply` in CLI.
+  - visible working indicators for long `status`, `scan`, and `fleet` operations in TUI.
+
+### Added
+
 #### Interactive TUI Mode (`lantern --tui` / `lantern -t`)
 
 A new interactive terminal user interface powered by the `dialog` CLI tool. Launch with:

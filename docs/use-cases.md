@@ -21,7 +21,8 @@ lantern -t
 3. **Add a server**: Choose from presets (github.com, gitlab.com, bitbucket.org) or add a custom server
 4. **Enter credentials**: Provide your username and optionally your API token
 5. **Save**: Select "Save and exit" to write the configuration
-6. **Set root directory**: Go to `settings` > "Change root directory" and enter your workspace path (e.g., `~/workspace`)
+6. **Set workspace root**: Go to `config` > `workspace` and set your workspace path (e.g., `~/workspace`)
+7. **Set scan JSON path (optional)**: Go to `config` > `scan_path`
 
 Now all repository operations will use your configured root directory automatically.
 
@@ -31,20 +32,18 @@ Once configured, a typical session looks like:
 
 1. **Launch TUI**: `lantern --tui`
 2. **Check status**: Select `status` to see all repos with branch divergence info
-3. **Sync repos**: Select `sync` > "Fetch and pull" to update all clean repos
-4. **Find a repo**: Select `find` and enter a name filter to locate a specific repo
-5. **Exit**: Select `exit` (screen is cleared automatically)
+3. **Reconcile repos**: Select `fleet` > `apply all` to clone missing and sync behind/ahead repos
+4. **Deep inspect a repo**: Select `lazygit` to open a selected repository in lazygit
+5. **Find a repo**: Select `find` and enter a name filter to locate a specific repo
+6. **Exit**: Select `exit` (screen is cleared automatically)
 
 ### TUI Workflow: Cloning from a Git Server
 
 1. **Launch TUI**: `lantern --tui`
-2. **List remote repos**: Select `forge` > "List remote repositories (save to file)"
-3. **Choose server**: Select your configured server (e.g., github.com)
-4. **Save the list**: Enter a path like `data/github.json`
-5. **Clone repos**: Select `forge` > "Clone repositories from list"
-6. **Select the JSON**: Enter `data/github.json`
-7. **Choose clone directory**: Defaults to your session root
-8. **Select repos**: Use the checklist to pick which repos to clone
+2. **Clone repos**: Select `forge` > "Clone repositories from list"
+3. **Auto list handling**: Lantern auto-uses an existing repo-list JSON, or auto-generates it if missing
+4. **Choose clone directory**: Defaults to your session root
+5. **Select repos**: Use the checklist to pick which repos to clone
 
 ### TUI Workflow: Interactive Server Setup
 
@@ -149,6 +148,36 @@ lantern config import --input git-lantern-servers.json --replace
 
 ## Local repo status and sync
 
+## Unified fleet workflow (recommended)
+
+Use `fleet` as the single command family for multi-repo management:
+- detect local-vs-remote differences,
+- clone missing repos,
+- pull repos that are behind,
+- push repos that are ahead.
+
+```bash
+# 1) Build a full reconciliation plan (from workspace root)
+lantern fleet plan --root ~/workspace --server github.com --fetch
+
+# 2) Apply all actionable changes
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+
+# 3) Apply only selected repos
+lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --clone-missing --pull-behind --push-ahead
+
+# 4) Dry run
+lantern fleet apply --root ~/workspace --server github.com --dry-run
+```
+
+In TUI (`lantern --tui`):
+1. select `fleet`
+2. choose server
+3. run `plan` or `apply` (all/selected)
+4. for `apply`, review repo context (`latest_branch`, `prs`) before choosing checkout mode
+
+For full CLI parity inside TUI, use `command` and enter any lantern args directly.
+
 ### `lantern repos`
 List local repos with minimal metadata.
 ```bash
@@ -165,6 +194,19 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 Live table of repo status.
 ```bash
 lantern status --root ~/workspace --fetch
+```
+
+### `lantern lazygit`
+Open lazygit for a repository discovered under root.
+```bash
+# interactive selection with dialog
+lantern lazygit --root ~/workspace --select
+
+# by name under root
+lantern lazygit --root ~/workspace --repo git-lantern
+
+# explicit path
+lantern lazygit --path ~/workspace/git-lantern
 ```
 
 ### `lantern table`

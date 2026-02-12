@@ -123,6 +123,8 @@ Git Lantern (main menu)
 ├── servers         - Display configured servers in a message box
 │
 ├── config          - Server configuration submenu
+│   ├── workspace   - Set persistent workspace root
+│   ├── scan_path   - Set persistent JSON scan path
 │   ├── setup       - Interactive server configuration wizard
 │   ├── path        - Show config file path
 │   ├── export      - Export config to JSON file
@@ -130,7 +132,6 @@ Git Lantern (main menu)
 │   └── back        - Return to main menu
 │
 ├── settings        - Session settings submenu
-│   ├── root        - Change root directory for this session
 │   ├── depth       - Set max scan depth (1-20)
 │   ├── hidden      - Toggle include hidden directories
 │   ├── forks       - Toggle include forks in forge list
@@ -138,13 +139,10 @@ Git Lantern (main menu)
 │
 ├── repos           - List local repositories (uses session settings)
 ├── status          - Show repository status table (uses session settings)
+├── lazygit         - Open selected repository in lazygit
+├── fleet           - Unified plan/apply for clone/pull/push
 ├── scan            - Scan repos to JSON file (uses session settings)
 ├── table           - Render table from a JSON scan file
-├── sync            - Sync repositories submenu (uses session settings)
-│   ├── fetch       - Fetch only
-│   ├── pull        - Fetch and pull
-│   └── push        - Fetch, pull, and push
-│   Options: dry-run, only-clean, only-upstream
 ├── find            - Find repos by name/remote (uses session settings)
 ├── duplicates      - Find duplicate repos (uses session settings)
 │
@@ -159,9 +157,12 @@ Git Lantern (main menu)
 │   └── back        - Return to main menu
 │
 ├── report          - Export scan results (CSV/JSON/MD)
+├── command         - Run any `lantern ...` command from TUI
 │
 └── exit            - Exit TUI (clears screen)
 ```
+
+Note: legacy `lantern sync ...` remains available in direct CLI and can also be run from TUI via `command`.
 
 ### Session Settings
 
@@ -206,6 +207,57 @@ sudo pacman -S dialog
 ```
 
 For detailed TUI workflows, see `docs/use-cases.md#interactive-tui-mode`.
+
+## Unified fleet commands
+
+### `lantern fleet plan`
+
+**Purpose**: one-table reconciliation across local and remote repositories.
+
+**What it does**:
+- scans local repos under `--root`,
+- compares local `origin` remotes with remote repos from either:
+  - live forge API (`--server`) or
+  - pre-exported JSON (`--input`),
+- classifies each repo as:
+  - `missing-local` (exists remotely, not cloned locally),
+  - `behind-remote` (local behind upstream),
+  - `ahead-remote` (local ahead upstream),
+  - `in-sync`,
+  - `diverged`,
+  - `local-only`.
+- when `--with-prs` is enabled (GitHub), includes:
+  - fresh open PR numbers,
+  - latest active PR branch hint.
+
+Example:
+```bash
+lantern fleet plan --root ~/workspace --server github.com --fetch
+lantern fleet plan --root ~/workspace --server github.com --fetch --with-prs
+```
+
+### `lantern fleet apply`
+
+**Purpose**: apply selected reconciliation actions.
+
+**Actions**:
+- `--clone-missing`: clone repos in `missing-local` state
+- `--pull-behind`: run `git pull --ff-only` for repos in `behind-remote`
+- `--push-ahead`: run `git push` for repos in `ahead-remote`
+- `--checkout-branch <name>`: checkout/update named branch across selected repos
+- `--checkout-pr <number>`: resolve PR to branch (GitHub) and checkout/update it
+
+**Selection**:
+- `--repos repo1,repo2` to target specific repos from the plan
+- omit `--repos` to target all actionable repos
+
+Example:
+```bash
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --dry-run
+lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --checkout-branch feature/my-work
+lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --checkout-pr 123
+```
 
 ## Local repository commands
 
@@ -269,6 +321,26 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 **Example**:
 ```bash
 lantern status --root ~/workspace
+```
+
+### `lantern lazygit`
+
+**Purpose**: Open lazygit in a selected repository for advanced per-repo Git inspection.
+
+**What it does**:
+- Checks if `lazygit` is installed.
+- Resolves target repository from:
+  - `--path` (explicit repo path), or
+  - `--repo` (repo directory name under `--root`), or
+  - `--select` (interactive selection with dialog), or
+  - current directory (if already a repo root), or
+  - single discovered repo under `--root`.
+
+**Examples**:
+```bash
+lantern lazygit --root ~/workspace --select
+lantern lazygit --root ~/workspace --repo git-lantern
+lantern lazygit --path ~/workspace/git-lantern
 ```
 
 ### `lantern table`
