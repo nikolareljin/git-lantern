@@ -994,6 +994,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     "path": path,
                     "origin": git.get_origin_url(path),
                 })
+            records = _sort_records_by_repo_name(records)
             output_text = render_table(records, ["name", "path", "origin"])
             _dialog_textbox_from_text("Repositories", output_text, height, width)
 
@@ -1013,6 +1014,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             )
             records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos_list, fetch, "status")]
             subprocess.run(["clear"], check=False)
+            records = _sort_records_by_repo_name(records)
             columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
             output_text = render_table(records, columns)
             _dialog_textbox_from_text("Status", output_text, height, width)
@@ -1325,6 +1327,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 for record in records:
                     if all(key in record for key in ("up_ahead", "up_behind", "main_ahead", "main_behind")):
                         add_divergence_fields(record)
+                records = _sort_records_by_repo_name(records)
                 # Determine columns
                 if all(key in records[0] for key in ("name", "branch", "upstream", "up", "main_ref", "main")):
                     columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
@@ -1386,6 +1389,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     continue
                 records.append({"name": repo_name, "path": path, "origin": origin})
             if records:
+                records = _sort_records_by_repo_name(records)
                 output_text = render_table(records, ["name", "path", "origin"])
                 _dialog_textbox_from_text("Find Results", output_text, height, width)
             else:
