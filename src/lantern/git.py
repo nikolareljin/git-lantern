@@ -40,9 +40,31 @@ def get_upstream(repo_path: str) -> Optional[str]:
     return upstream or None
 
 
+def has_in_progress_operation(repo_path: str) -> bool:
+    git_dir = os.path.join(repo_path, ".git")
+    if not os.path.isdir(git_dir):
+        return False
+    markers = (
+        "MERGE_HEAD",
+        "REBASE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+    )
+    for marker in markers:
+        if os.path.exists(os.path.join(git_dir, marker)):
+            return True
+    if os.path.isdir(os.path.join(git_dir, "rebase-merge")):
+        return True
+    if os.path.isdir(os.path.join(git_dir, "rebase-apply")):
+        return True
+    return False
+
+
 def is_clean(repo_path: str) -> bool:
-    status = run_git(repo_path, ["status", "--porcelain"])
-    return status == ""
+    # For sync eligibility, do not treat local uncommitted/untracked files as dirty.
+    # Only block repositories that are in the middle of a Git operation.
+    return not has_in_progress_operation(repo_path)
 
 
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:

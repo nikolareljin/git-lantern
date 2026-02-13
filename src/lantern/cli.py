@@ -364,6 +364,44 @@ def _run_git_op(repo_path: str, args: List[str], quiet: bool = True) -> int:
     return result.returncode
 
 
+def _repo_head(path: str) -> str:
+    return str(git.run_git(path, ["rev-parse", "HEAD"]) or "")
+
+
+def _repo_branch_name(path: str) -> str:
+    branch = str(git.run_git(path, ["symbolic-ref", "-q", "--short", "HEAD"]) or "").strip()
+    return branch or "detached"
+
+
+def _attempt_repo_rollback(path: str, original_head: str, original_branch: str) -> Dict[str, str]:
+    steps: List[str] = []
+    # Best effort abort for interrupted operations.
+    rc_merge_abort = _run_git_op(path, ["merge", "--abort"], quiet=True)
+    if rc_merge_abort == 0:
+        steps.append("merge-abort:ok")
+    rc_rebase_abort = _run_git_op(path, ["rebase", "--abort"], quiet=True)
+    if rc_rebase_abort == 0:
+        steps.append("rebase-abort:ok")
+
+    current_branch = _repo_branch_name(path)
+    if original_branch and original_branch != "detached" and current_branch != original_branch:
+        rc = _run_git_op(path, ["checkout", original_branch], quiet=True)
+        steps.append(f"checkout-original:{'ok' if rc == 0 else 'fail'}")
+
+    if original_head:
+        now_head = _repo_head(path)
+        if now_head and now_head != original_head:
+            rc_reset = _run_git_op(path, ["reset", "--merge", original_head], quiet=True)
+            steps.append(f"reset-merge:{'ok' if rc_reset == 0 else 'fail'}")
+
+    final_head = _repo_head(path)
+    restored = bool(original_head and final_head == original_head)
+    return {
+        "restored": "yes" if restored else "no",
+        "steps": " ".join(steps) if steps else "none",
+    }
+
+
 def _remote_main_ref(path: str) -> str:
     refs = git.get_default_branch_refs(path)
     if "origin" in refs:
@@ -1408,7 +1446,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 scope_items: List[Tuple[str, str]] = [
                     ("all", "All actionable repositories"),
-                    ("clean", "Only clean repositories"),
+                    ("clean", "Only repos without in-progress Git operations"),
                     ("select", "Pick repositories"),
                 ]
                 scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
@@ -1481,7 +1519,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 only_clean = False
                 if _dialog_yesno("Advanced", "Adjust advanced options (dry-run / only-clean)?", height, width):
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
-                    only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
+                    only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
 
                 include_push = False
                 if preset == "full_reconcile":
@@ -1705,7 +1743,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     continue
 
             dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
-            only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
+            only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
             push_choice = _dialog_menu(
                 "Push Mode",
                 "Should ahead repositories be pushed to remote?",
@@ -1907,7 +1945,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             sync_action = _dialog_menu("Sync", "Select sync operation:", sync_items)
             if sync_action:
                 dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no actual changes)?")
-                only_clean = _dialog_yesno("Only Clean", "Skip repos with uncommitted changes?")
+                only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
                 only_upstream = _dialog_yesno("Only Upstream", "Skip repos without an upstream branch?")
                 cmd_args = [sys.executable, "-m", "lantern", "sync", "--root", session["root"],
                             "--max-depth", str(session["max_depth"])]
@@ -2620,6 +2658,8 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         state = row["state"]
         path = row["path"]
         _progress_line(idx, total_targets, f"fleet-apply: {repo} [{state}]")
+        original_head = _repo_head(path) if os.path.isdir(path) else ""
+        original_branch = _repo_branch_name(path) if os.path.isdir(path) else ""
         statuses: List[str] = []
         action_records: List[Dict[str, str]] = []
         planned_actions = _fleet_action_parts_for_row(
@@ -2651,6 +2691,27 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     statuses.append(f"clone:{'ok' if ok else 'fail'}")
                     action_records.append({"action": "clone", "status": "ok" if ok else "fail"})
                     clone_ok = ok
+                    if not ok:
+                        rollback_status = "no"
+                        rollback_detail = "none"
+                        # Best-effort cleanup for failed clone destination.
+                        if os.path.isdir(path):
+                            try:
+                                if not os.listdir(path):
+                                    os.rmdir(path)
+                                    rollback_status = "yes"
+                                    rollback_detail = "cleanup-empty-dir:ok"
+                                else:
+                                    rollback_detail = "cleanup-empty-dir:skipped-non-empty"
+                            except OSError:
+                                rollback_detail = "cleanup-empty-dir:fail"
+                        action_records.append(
+                            {
+                                "action": "rollback",
+                                "status": rollback_status,
+                                "detail": rollback_detail,
+                            }
+                        )
         elif state == "behind-remote" and args.pull_behind:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append("pull:skip-dirty")
@@ -2669,6 +2730,15 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 ok = proc.returncode == 0
                 statuses.append(f"pull:{'ok' if ok else 'fail'}")
                 action_records.append({"action": "pull", "status": "ok" if ok else "fail"})
+                if not ok:
+                    rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                    action_records.append(
+                        {
+                            "action": "rollback",
+                            "status": rollback.get("restored", "no"),
+                            "detail": rollback.get("steps", "none"),
+                        }
+                    )
         elif state == "ahead-remote" and args.push_ahead:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append("push:skip-dirty")
@@ -2732,9 +2802,18 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
                     rc_checkout = _run_git_op(path, ["checkout", effective_branch]) if has_local else _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
                     rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
-                    ok = rc_checkout == 0 and rc_pull == 0
-                    statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
-                    action_records.append({"action": "checkout", "status": "ok" if ok else "fail", "branch": effective_branch})
+                ok = rc_checkout == 0 and rc_pull == 0
+                statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
+                action_records.append({"action": "checkout", "status": "ok" if ok else "fail", "branch": effective_branch})
+                if not ok:
+                    rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                    action_records.append(
+                        {
+                            "action": "rollback",
+                            "status": rollback.get("restored", "no"),
+                            "detail": rollback.get("steps", "none"),
+                        }
+                    )
 
         if not statuses:
             statuses = ["skip"]
@@ -2758,6 +2837,28 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         return 0
     results = _sort_records_by_repo_name(results)
     print(render_table(results, ["repo", "state", "result", "path"]))
+    failures: List[Dict[str, str]] = []
+    for rec in detailed_results:
+        repo_name = str(rec.get("repo") or "")
+        path = str(rec.get("path") or "")
+        for action in rec.get("actions", []):
+            if not isinstance(action, dict):
+                continue
+            action_name = str(action.get("action") or "")
+            status = str(action.get("status") or "")
+            if status in {"fail", "missing-url", "not-found", "unsupported", "skip-no-remote"}:
+                failures.append(
+                    {
+                        "repo": repo_name,
+                        "action": action_name,
+                        "status": status,
+                        "path": path,
+                    }
+                )
+    if failures:
+        failures = _sort_records_by_repo_name(failures)
+        print("\nUnsuccessful fleet operations:")
+        print(render_table(failures, ["repo", "action", "status", "path"]))
     if args.log_json:
         action_totals: Dict[str, int] = {}
         updated_repos = 0
@@ -2804,8 +2905,10 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 "repos_updated": updated_repos,
                 "branch_updates": len(branch_updates),
                 "action_totals": action_totals,
+                "unsuccessful_operations": len(failures),
             },
             "branch_updates": branch_updates,
+            "failures": failures,
             "results": detailed_results,
         }
         log_dir = os.path.dirname(args.log_json)
@@ -2903,6 +3006,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         actions.append(("push", ["push"]))
 
     records = []
+    issues: List[Dict[str, str]] = []
     total_steps = max(1, len(repos) * max(1, len(actions)))
     current_step = 0
     for path in repos:
@@ -2913,6 +3017,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if args.only_upstream and not git.get_upstream(path):
             records.append({"name": name, "path": path, "result": "skip:no-upstream"})
             continue
+        original_head = _repo_head(path)
+        original_branch = _repo_branch_name(path)
         statuses = []
         for label, cmd in actions:
             current_step += 1
@@ -2927,13 +3033,58 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 stderr=subprocess.DEVNULL,
                 text=True,
             )
-            statuses.append(f"{label}:{'ok' if result.returncode == 0 else 'fail'}")
+            ok = result.returncode == 0
+            statuses.append(f"{label}:{'ok' if ok else 'fail'}")
+            if not ok:
+                rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                issues.append(
+                    {
+                        "repo": name,
+                        "path": path,
+                        "action": label,
+                        "error": "command-failed",
+                        "rollback_restored": rollback.get("restored", "no"),
+                        "rollback_steps": rollback.get("steps", "none"),
+                    }
+                )
+                # Stop applying subsequent actions in this repo after failure.
+                break
         records.append({"name": name, "path": path, "result": " ".join(statuses)})
     _progress_done()
 
     records = _sort_records_by_repo_name(records)
     columns = ["name", "result", "path"]
     print(render_table(records, columns))
+    if issues:
+        issue_rows = _sort_records_by_repo_name(issues)
+        print("\nUnsuccessful sync operations:")
+        print(render_table(issue_rows, ["repo", "action", "error", "rollback_restored", "rollback_steps", "path"]))
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        log_path = os.path.join(args.root, "data", "sync-logs", f"sync-issues-{ts}.json")
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            payload = {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "command": "sync",
+                "root": args.root,
+                "options": {
+                    "fetch": bool(args.fetch),
+                    "pull": bool(args.pull),
+                    "push": bool(args.push),
+                    "dry_run": bool(args.dry_run),
+                    "only_clean": bool(args.only_clean),
+                    "only_upstream": bool(args.only_upstream),
+                    "include_hidden": bool(args.include_hidden),
+                    "max_depth": int(args.max_depth),
+                },
+                "issues": issues,
+                "results": records,
+            }
+            with open(log_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2)
+            print(f"\nIssue log: {log_path}")
+        except OSError as exc:
+            print(f"\nFailed to write sync issue log: {exc}", file=sys.stderr)
     return 0
 
 
