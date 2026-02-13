@@ -27,3 +27,5 @@ node_modules/
 src/git_lantern.egg-info/
 man/lantern.1
 TODO.txt
+
+/ignore/
