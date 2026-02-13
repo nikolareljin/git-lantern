@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 import shlex
@@ -704,6 +705,294 @@ def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int
             pass
 
 
+def _fleet_action_parts_for_row(
+    row: Dict[str, str],
+    clone_missing: bool,
+    pull_behind: bool,
+    push_ahead: bool,
+    checkout_branch: str,
+    checkout_pr: str,
+) -> List[str]:
+    state = str(row.get("state") or "")
+    parts: List[str] = []
+    if state == "missing-local" and clone_missing:
+        parts.append("clone")
+    if state == "behind-remote" and pull_behind:
+        parts.append("pull")
+    if state == "ahead-remote" and push_ahead:
+        parts.append("push")
+    if checkout_pr:
+        parts.append(f"checkout-pr:{checkout_pr}")
+    elif checkout_branch:
+        parts.append(f"checkout:{checkout_branch}")
+    if not parts:
+        parts.append("skip")
+    return parts
+
+
+def _fleet_preflight_confirm(
+    title: str,
+    rows: List[Dict[str, str]],
+    clone_missing: bool,
+    pull_behind: bool,
+    push_ahead: bool,
+    checkout_branch: str,
+    checkout_pr: str,
+    dry_run: bool,
+    only_clean: bool,
+    height: int,
+    width: int,
+) -> List[Dict[str, str]]:
+    prepared: List[Dict[str, Any]] = []
+    for row in rows:
+        plan = ", ".join(
+            _fleet_action_parts_for_row(
+                row=row,
+                clone_missing=clone_missing,
+                pull_behind=pull_behind,
+                push_ahead=push_ahead,
+                checkout_branch=checkout_branch,
+                checkout_pr=checkout_pr,
+            )
+        )
+        prepared.append(
+            {
+                "row": row,
+                "repo": str(row.get("repo") or ""),
+                "state": str(row.get("state") or "-"),
+                "plan": plan,
+                "clean": str(row.get("clean") or "-"),
+                "path": str(row.get("path") or ""),
+            }
+        )
+
+    prepared.sort(key=lambda entry: (entry["repo"].lower(), entry["path"].lower()))
+    summary_rows = [
+        {
+            "repo": entry["repo"],
+            "state": entry["state"],
+            "plan": entry["plan"],
+            "clean": entry["clean"],
+            "path": entry["path"],
+        }
+        for entry in prepared
+    ]
+    summary_header = [
+        f"Repos selected: {len(prepared)}",
+        f"Clone missing: {'yes' if clone_missing else 'no'}",
+        f"Pull behind: {'yes' if pull_behind else 'no'}",
+        f"Push ahead: {'yes' if push_ahead else 'no'}",
+    ]
+    if checkout_branch:
+        summary_header.append(f"Checkout branch: {checkout_branch}")
+    if checkout_pr:
+        summary_header.append(f"Checkout PR: {checkout_pr}")
+    summary_header.append(f"Dry run: {'yes' if dry_run else 'no'}")
+    summary_header.append(f"Only clean: {'yes' if only_clean else 'no'}")
+    summary_header.append("")
+    summary_header.append("Planned actions by repository:")
+    summary_text = "\n".join(summary_header) + "\n\n" + render_table(
+        summary_rows,
+        ["repo", "state", "plan", "clean", "path"],
+    )
+    _dialog_textbox_from_text(title, summary_text, height, width)
+
+    checklist_items: List[Tuple[str, str, bool]] = []
+    idx_to_row: Dict[str, Dict[str, str]] = {}
+    for idx, entry in enumerate(prepared, start=1):
+        tag = str(idx)
+        idx_to_row[tag] = entry["row"]
+        desc = f"{entry['repo']} [{entry['state']}] -> {entry['plan']}"
+        checklist_items.append((tag, desc, True))
+    selected_tags = _dialog_checklist(
+        title,
+        "Confirm repositories to process (uncheck to skip):",
+        checklist_items,
+        height,
+        width,
+    )
+    if not selected_tags:
+        return []
+    selected_set = set(selected_tags)
+    return [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda x: int(x)) if tag in selected_set]
+
+
+def _fleet_log_path(root: str) -> str:
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_dir = os.path.join(root, "data", "fleet-logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, f"fleet-apply-{ts}.json")
+
+
+def _fleet_short_summary_from_log(log_path: str) -> str:
+    try:
+        with open(log_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return f"Fleet log saved:\n{log_path}"
+
+    summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+    results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+
+    updated_repos: List[str] = []
+    branch_updates: List[str] = []
+    for rec in results:
+        if not isinstance(rec, dict):
+            continue
+        repo = str(rec.get("repo") or "")
+        actions = rec.get("actions", [])
+        if not isinstance(actions, list):
+            actions = []
+        changed = False
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_name = str(action.get("action") or "")
+            status = str(action.get("status") or "")
+            if status in {"ok", "dry-run"} and action_name in {"clone", "pull", "push"}:
+                changed = True
+            if action_name == "checkout" and status in {"ok", "dry-run"}:
+                branch = str(action.get("branch") or "")
+                if repo and branch:
+                    branch_updates.append(f"{repo}:{branch}")
+                    changed = True
+        if changed and repo:
+            updated_repos.append(repo)
+
+    lines = [
+        "Fleet apply summary:",
+        f"Total repos processed: {int(summary.get('repos_processed', 0) or 0)}",
+        f"Repos updated: {len(updated_repos)}",
+        f"Branch updates: {len(branch_updates)}",
+        "",
+    ]
+    if updated_repos:
+        lines.append("Updated repos:")
+        lines.extend(f"- {name}" for name in updated_repos[:15])
+        if len(updated_repos) > 15:
+            lines.append(f"- ... and {len(updated_repos) - 15} more")
+        lines.append("")
+    if branch_updates:
+        lines.append("Branch changes:")
+        lines.extend(f"- {item}" for item in branch_updates[:15])
+        if len(branch_updates) > 15:
+            lines.append(f"- ... and {len(branch_updates) - 15} more")
+        lines.append("")
+    lines.append(f"Full log: {log_path}")
+    return "\n".join(lines)
+
+
+def _fleet_logs_dir(root: str) -> str:
+    return os.path.join(root, "data", "fleet-logs")
+
+
+def _fleet_log_files(root: str) -> List[str]:
+    log_dir = _fleet_logs_dir(root)
+    if not os.path.isdir(log_dir):
+        return []
+    files: List[str] = []
+    for name in os.listdir(log_dir):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(log_dir, name)
+        if os.path.isfile(path):
+            files.append(path)
+    files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return files
+
+
+def cmd_fleet_logs(args: argparse.Namespace) -> int:
+    log_path = str(args.input or "").strip()
+    if not log_path:
+        logs = _fleet_log_files(args.root)
+        if not logs:
+            print(f"No fleet logs found in: {_fleet_logs_dir(args.root)}")
+            return 0
+        if args.latest:
+            log_path = logs[0]
+        else:
+            records = []
+            for path in logs[: max(1, int(args.limit))]:
+                records.append({"timestamp": os.path.basename(path), "path": path})
+            print(render_table(records, ["timestamp", "path"]))
+            return 0
+
+    try:
+        with open(log_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to read fleet log '{log_path}': {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(payload, dict):
+        print(f"Invalid fleet log format: {log_path}", file=sys.stderr)
+        return 1
+
+    if not bool(getattr(args, "no_pretty", False)):
+        jq_bin = shutil.which("jq")
+        if jq_bin:
+            proc = subprocess.run([jq_bin, ".", log_path], check=False)
+            if proc.returncode == 0:
+                return 0
+            print(f"jq failed for '{log_path}', falling back to built-in output.", file=sys.stderr)
+        else:
+            print("jq is not installed; falling back to built-in output.", file=sys.stderr)
+
+    summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+    options = payload.get("options", {}) if isinstance(payload.get("options"), dict) else {}
+    branch_updates = payload.get("branch_updates", []) if isinstance(payload.get("branch_updates"), list) else []
+    results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+
+    print(f"log={log_path}")
+    print(f"generated_at={payload.get('generated_at', '-')}")
+    print(
+        "repos_targeted={targeted} repos_processed={processed} repos_updated={updated} branch_updates={branches}".format(
+            targeted=int(summary.get("repos_targeted", 0) or 0),
+            processed=int(summary.get("repos_processed", 0) or 0),
+            updated=int(summary.get("repos_updated", 0) or 0),
+            branches=int(summary.get("branch_updates", 0) or 0),
+        )
+    )
+    print(
+        "clone_missing={clone} pull_behind={pull} push_ahead={push} dry_run={dry} only_clean={clean}".format(
+            clone="yes" if options.get("clone_missing") else "no",
+            pull="yes" if options.get("pull_behind") else "no",
+            push="yes" if options.get("push_ahead") else "no",
+            dry="yes" if options.get("dry_run") else "no",
+            clean="yes" if options.get("only_clean") else "no",
+        )
+    )
+
+    if branch_updates:
+        rows = []
+        for item in branch_updates[: max(1, int(args.limit))]:
+            if not isinstance(item, dict):
+                continue
+            rows.append({"repo": str(item.get("repo") or ""), "branch": str(item.get("branch") or "")})
+        if rows:
+            print("\nBranch updates:")
+            print(render_table(rows, ["repo", "branch"]))
+
+    if args.show_results:
+        result_rows: List[Dict[str, str]] = []
+        for rec in results[: max(1, int(args.limit))]:
+            if not isinstance(rec, dict):
+                continue
+            result_rows.append(
+                {
+                    "repo": str(rec.get("repo") or ""),
+                    "state": str(rec.get("state") or ""),
+                    "result": str(rec.get("result") or ""),
+                    "path": str(rec.get("path") or ""),
+                }
+            )
+        if result_rows:
+            print("\nResults:")
+            print(render_table(result_rows, ["repo", "state", "result", "path"]))
+
+    return 0
+
+
 def _default_repo_list_candidates(root: str) -> List[str]:
     root_abs = os.path.abspath(root)
     cwd = os.getcwd()
@@ -1194,13 +1483,38 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
                     only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
 
+                include_push = False
+                if preset == "full_reconcile":
+                    push_choice = _dialog_menu(
+                        "Push Mode",
+                        "Should ahead repositories be pushed to remote?",
+                        [
+                            ("no_push", "No push (skip ahead repos)"),
+                            ("push", "Push ahead repos to remote"),
+                        ],
+                        height,
+                        width,
+                    )
+                    if not push_choice:
+                        continue
+                    include_push = push_choice == "push"
+
                 apply_cmd = [sys.executable, "-m", "lantern", "fleet", "apply", *common_opts]
                 apply_cmd.append("--fetch")
+                clone_missing = False
+                pull_behind = False
                 if preset == "fast_pull":
+                    pull_behind = True
                     apply_cmd.append("--pull-behind")
                 elif preset == "full_reconcile":
-                    apply_cmd.extend(["--clone-missing", "--pull-behind", "--push-ahead"])
+                    clone_missing = True
+                    pull_behind = True
+                    apply_cmd.extend(["--clone-missing", "--pull-behind"])
+                    if include_push:
+                        apply_cmd.append("--push-ahead")
                 else:
+                    clone_missing = True
+                    pull_behind = True
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                 if checkout_branch:
                     apply_cmd.extend(["--checkout-branch", checkout_branch])
@@ -1211,38 +1525,28 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 if only_clean:
                     apply_cmd.append("--only-clean")
 
-                selected_repos = [str(r.get("repo") or "") for r in selected_rows if str(r.get("repo") or "")]
+                confirmed_rows = _fleet_preflight_confirm(
+                    title="Smart Sync Plan",
+                    rows=selected_rows,
+                    clone_missing=clone_missing,
+                    pull_behind=pull_behind,
+                    push_ahead=include_push,
+                    checkout_branch=checkout_branch,
+                    checkout_pr=checkout_pr,
+                    dry_run=dry_run,
+                    only_clean=only_clean,
+                    height=height,
+                    width=width,
+                )
+                if not confirmed_rows:
+                    _dialog_msgbox("Smart Sync", "No repositories confirmed.", height, width)
+                    continue
+
+                selected_repos = [str(r.get("repo") or "") for r in confirmed_rows if str(r.get("repo") or "")]
                 if selected_repos:
                     apply_cmd.extend(["--repos", ",".join(selected_repos)])
-
-                state_counts: Dict[str, int] = {}
-                for row in selected_rows:
-                    state = str(row.get("state") or "-")
-                    state_counts[state] = state_counts.get(state, 0) + 1
-                state_summary = ", ".join(f"{k}:{state_counts[k]}" for k in sorted(state_counts))
-                preset_label = {
-                    "fast_pull": "Fast Pull",
-                    "branch_rollout": "Branch Rollout",
-                    "pr_rollout": "PR Rollout",
-                    "full_reconcile": "Full Reconcile",
-                }.get(preset, preset)
-                confirm_lines = [
-                    f"Preset: {preset_label}",
-                    f"Repos: {len(selected_rows)}",
-                    f"States: {state_summary or '-'}",
-                ]
-                if checkout_branch:
-                    confirm_lines.append(f"Branch: {checkout_branch}")
-                if checkout_pr:
-                    confirm_lines.append(f"PR: {checkout_pr}")
-                if dry_run:
-                    confirm_lines.append("Mode: dry-run")
-                if only_clean:
-                    confirm_lines.append("Filter: only-clean")
-                confirm_lines.append("")
-                confirm_lines.append("Apply now?")
-                if not _dialog_yesno("Smart Sync Confirm", "\n".join(confirm_lines), 16, 78):
-                    continue
+                log_path = _fleet_log_path(session["root"])
+                apply_cmd.extend(["--log-json", log_path])
 
                 _dialog_infobox(
                     "Smart Sync",
@@ -1252,17 +1556,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 )
                 result = _run_lantern_subprocess(apply_cmd, height, width, capture=False)
                 subprocess.run(["clear"], check=False)
+                summary_text = _fleet_short_summary_from_log(log_path)
                 if result.returncode == 0:
                     _dialog_msgbox(
                         "Smart Sync",
-                        "Smart Sync finished.\n\nLive progress/output was shown during execution.",
+                        summary_text,
                         height,
                         width,
                     )
                 else:
                     _dialog_msgbox(
                         "Smart Sync",
-                        "Smart Sync failed.\n\nReview terminal output shown during execution.",
+                        f"{summary_text}\n\nSmart Sync finished with errors.",
                         height,
                         width,
                     )
@@ -1401,11 +1706,26 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
             dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
             only_clean = _dialog_yesno("Only Clean", "Skip dirty repos for pull/push?")
+            push_choice = _dialog_menu(
+                "Push Mode",
+                "Should ahead repositories be pushed to remote?",
+                [
+                    ("no_push", "No push (skip ahead repos)"),
+                    ("push", "Push ahead repos to remote"),
+                ],
+                height,
+                width,
+            )
+            if not push_choice:
+                continue
+            include_push = push_choice == "push"
             apply_cmd = [
                 sys.executable, "-m", "lantern", "fleet", "apply",
                 *apply_common_opts,
-                "--clone-missing", "--pull-behind", "--push-ahead",
+                "--clone-missing", "--pull-behind",
             ]
+            if include_push:
+                apply_cmd.append("--push-ahead")
             if checkout_pr:
                 apply_cmd.extend(["--checkout-pr", checkout_pr])
             if checkout_branch:
@@ -1415,10 +1735,28 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if only_clean:
                 apply_cmd.append("--only-clean")
 
-            if fleet_action == "apply_select":
-                selected_repos = [str(r.get("repo") or "") for r in selected_rows if str(r.get("repo") or "")]
-                if selected_repos:
-                    apply_cmd.extend(["--repos", ",".join(selected_repos)])
+            confirmed_rows = _fleet_preflight_confirm(
+                title="Fleet Apply Plan",
+                rows=selected_rows,
+                clone_missing=True,
+                pull_behind=True,
+                push_ahead=include_push,
+                checkout_branch=checkout_branch,
+                checkout_pr=checkout_pr,
+                dry_run=dry_run,
+                only_clean=only_clean,
+                height=height,
+                width=width,
+            )
+            if not confirmed_rows:
+                _dialog_msgbox("Fleet", "No repositories confirmed.", height, width)
+                continue
+
+            selected_repos = [str(r.get("repo") or "") for r in confirmed_rows if str(r.get("repo") or "")]
+            if selected_repos:
+                apply_cmd.extend(["--repos", ",".join(selected_repos)])
+            log_path = _fleet_log_path(session["root"])
+            apply_cmd.extend(["--log-json", log_path])
 
             _dialog_infobox(
                 "Fleet Sync",
@@ -1429,17 +1767,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
             # Stream progress live for long-running fleet apply operations.
             result = _run_lantern_subprocess(apply_cmd, height, width, capture=False)
             subprocess.run(["clear"], check=False)
+            summary_text = _fleet_short_summary_from_log(log_path)
             if result.returncode == 0:
                 _dialog_msgbox(
                     "Fleet Sync",
-                    "Fleet apply finished.\n\nLive progress/output was shown during execution.",
+                    summary_text,
                     height,
                     width,
                 )
             else:
                 _dialog_msgbox(
                     "Fleet Sync",
-                    "Fleet apply failed.\n\nReview terminal output shown during execution.",
+                    f"{summary_text}\n\nFleet apply finished with errors.",
                     height,
                     width,
                 )
@@ -2274,6 +2613,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
     selected = _parse_repo_filter(args.repos)
     target_rows = [row for row in rows if not selected or row["repo"] in selected]
     results: List[Dict[str, str]] = []
+    detailed_results: List[Dict[str, Any]] = []
     total_targets = len(target_rows)
     for idx, row in enumerate(target_rows, start=1):
         repo = row["repo"]
@@ -2281,10 +2621,20 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         path = row["path"]
         _progress_line(idx, total_targets, f"fleet-apply: {repo} [{state}]")
         statuses: List[str] = []
+        action_records: List[Dict[str, str]] = []
+        planned_actions = _fleet_action_parts_for_row(
+            row=row,
+            clone_missing=args.clone_missing,
+            pull_behind=args.pull_behind,
+            push_ahead=args.push_ahead,
+            checkout_branch=checkout_branch,
+            checkout_pr=checkout_pr,
+        )
         clone_ok = state != "missing-local"
         if state == "missing-local" and args.clone_missing:
             if args.dry_run:
                 statuses.append("clone:dry-run")
+                action_records.append({"action": "clone", "status": "dry-run"})
                 clone_ok = False
             else:
                 parent = os.path.dirname(path)
@@ -2293,17 +2643,21 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 clone_src = clone_sources.get(repo, "")
                 if not clone_src:
                     statuses.append("clone:missing-url")
+                    action_records.append({"action": "clone", "status": "missing-url"})
                     clone_ok = False
                 else:
                     proc = subprocess.run(["git", "clone", clone_src, path], check=False)
                     ok = proc.returncode == 0
                     statuses.append(f"clone:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "clone", "status": "ok" if ok else "fail"})
                     clone_ok = ok
         elif state == "behind-remote" and args.pull_behind:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append("pull:skip-dirty")
+                action_records.append({"action": "pull", "status": "skip-dirty"})
             elif args.dry_run:
                 statuses.append("pull:dry-run")
+                action_records.append({"action": "pull", "status": "dry-run"})
             else:
                 proc = subprocess.run(
                     ["git", "-C", path, "pull", "--ff-only"],
@@ -2312,12 +2666,16 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     stderr=subprocess.DEVNULL,
                     text=True,
                 )
-                statuses.append(f"pull:{'ok' if proc.returncode == 0 else 'fail'}")
+                ok = proc.returncode == 0
+                statuses.append(f"pull:{'ok' if ok else 'fail'}")
+                action_records.append({"action": "pull", "status": "ok" if ok else "fail"})
         elif state == "ahead-remote" and args.push_ahead:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append("push:skip-dirty")
+                action_records.append({"action": "push", "status": "skip-dirty"})
             elif args.dry_run:
                 statuses.append("push:dry-run")
+                action_records.append({"action": "push", "status": "dry-run"})
             else:
                 proc = subprocess.run(
                     ["git", "-C", path, "push"],
@@ -2326,7 +2684,9 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     stderr=subprocess.DEVNULL,
                     text=True,
                 )
-                statuses.append(f"push:{'ok' if proc.returncode == 0 else 'fail'}")
+                ok = proc.returncode == 0
+                statuses.append(f"push:{'ok' if ok else 'fail'}")
+                action_records.append({"action": "push", "status": "ok" if ok else "fail"})
 
         effective_branch = checkout_branch
         if pr_number:
@@ -2346,31 +2706,51 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     effective_branch = resolved
                 else:
                     statuses.append(f"checkout-pr:{pr_number}:not-found")
+                    action_records.append({"action": "checkout-pr", "status": "not-found", "pr": str(pr_number)})
             else:
                 statuses.append(f"checkout-pr:{pr_number}:unsupported")
+                action_records.append({"action": "checkout-pr", "status": "unsupported", "pr": str(pr_number)})
 
         if effective_branch:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append(f"checkout:{effective_branch}:skip-dirty")
+                action_records.append({"action": "checkout", "status": "skip-dirty", "branch": effective_branch})
             elif not clone_ok and not args.dry_run:
                 statuses.append(f"checkout:{effective_branch}:skip-not-cloned")
+                action_records.append({"action": "checkout", "status": "skip-not-cloned", "branch": effective_branch})
             elif args.dry_run:
                 statuses.append(f"checkout:{effective_branch}:dry-run")
+                action_records.append({"action": "checkout", "status": "dry-run", "branch": effective_branch})
             else:
                 _run_git_op(path, ["fetch", "--prune"])
                 remote_ref = f"origin/{effective_branch}"
                 has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
                 if not has_remote:
                     statuses.append(f"checkout:{effective_branch}:skip-no-remote")
+                    action_records.append({"action": "checkout", "status": "skip-no-remote", "branch": effective_branch})
                 else:
                     has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
                     rc_checkout = _run_git_op(path, ["checkout", effective_branch]) if has_local else _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
                     rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
-                    statuses.append(f"checkout:{effective_branch}:{'ok' if (rc_checkout == 0 and rc_pull == 0) else 'fail'}")
+                    ok = rc_checkout == 0 and rc_pull == 0
+                    statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "checkout", "status": "ok" if ok else "fail", "branch": effective_branch})
 
         if not statuses:
             statuses = ["skip"]
+            action_records.append({"action": "skip", "status": "none"})
         results.append({"repo": repo, "state": state, "result": " ".join(statuses), "path": path})
+        detailed_results.append(
+            {
+                "repo": repo,
+                "state": state,
+                "path": path,
+                "clean": str(row.get("clean") or "-"),
+                "planned_actions": planned_actions,
+                "actions": action_records,
+                "result": " ".join(statuses),
+            }
+        )
     _progress_done()
 
     if not results:
@@ -2378,6 +2758,64 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         return 0
     results = _sort_records_by_repo_name(results)
     print(render_table(results, ["repo", "state", "result", "path"]))
+    if args.log_json:
+        action_totals: Dict[str, int] = {}
+        updated_repos = 0
+        branch_updates: List[Dict[str, str]] = []
+        for rec in detailed_results:
+            actions = rec.get("actions", [])
+            if not isinstance(actions, list):
+                continue
+            changed = False
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_name = str(action.get("action") or "")
+                status = str(action.get("status") or "")
+                key = f"{action_name}:{status}"
+                action_totals[key] = action_totals.get(key, 0) + 1
+                if status in {"ok", "dry-run"} and action_name in {"clone", "pull", "push", "checkout"}:
+                    changed = True
+                if action_name == "checkout" and status in {"ok", "dry-run"} and action.get("branch"):
+                    branch_updates.append({"repo": str(rec.get("repo") or ""), "branch": str(action.get("branch") or "")})
+            if changed:
+                updated_repos += 1
+        log_payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "command": "fleet apply",
+            "options": {
+                "root": args.root,
+                "server": args.server,
+                "repos": args.repos,
+                "clone_missing": bool(args.clone_missing),
+                "pull_behind": bool(args.pull_behind),
+                "push_ahead": bool(args.push_ahead),
+                "checkout_branch": checkout_branch,
+                "checkout_pr": checkout_pr,
+                "dry_run": bool(args.dry_run),
+                "only_clean": bool(args.only_clean),
+                "fetch": bool(args.fetch),
+                "include_hidden": bool(args.include_hidden),
+                "max_depth": int(args.max_depth),
+            },
+            "summary": {
+                "repos_targeted": len(target_rows),
+                "repos_processed": len(detailed_results),
+                "repos_updated": updated_repos,
+                "branch_updates": len(branch_updates),
+                "action_totals": action_totals,
+            },
+            "branch_updates": branch_updates,
+            "results": detailed_results,
+        }
+        log_dir = os.path.dirname(args.log_json)
+        try:
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            with open(args.log_json, "w", encoding="utf-8") as handle:
+                json.dump(log_payload, handle, indent=2)
+        except OSError as exc:
+            print(f"Failed to write fleet log '{args.log_json}': {exc}", file=sys.stderr)
     return 0
 
 
@@ -3433,7 +3871,17 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--checkout-pr", default="", help="checkout branch for this PR number (GitHub)")
     fleet_apply.add_argument("--dry-run", action="store_true")
     fleet_apply.add_argument("--only-clean", action="store_true")
+    fleet_apply.add_argument("--log-json", default="", help="write full fleet apply execution log to JSON")
     fleet_apply.set_defaults(func=cmd_fleet_apply)
+
+    fleet_logs = fleet_sub.add_parser("logs", help="inspect fleet apply JSON logs")
+    fleet_logs.add_argument("--root", default=os.getcwd())
+    fleet_logs.add_argument("--input", default="", help="explicit fleet log JSON path")
+    fleet_logs.add_argument("--latest", action="store_true", help="show the latest fleet log")
+    fleet_logs.add_argument("--limit", type=int, default=20, help="row limit for table output")
+    fleet_logs.add_argument("--show-results", action="store_true", help="include per-repo result table in fallback output")
+    fleet_logs.add_argument("--no-pretty", action="store_true", help="disable jq pretty JSON output and use tabular summary output")
+    fleet_logs.set_defaults(func=cmd_fleet_logs)
 
     report = sub.add_parser("report", help="export scan results")
     report.add_argument("--input", default="data/repos.json")
