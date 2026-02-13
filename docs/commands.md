@@ -140,7 +140,7 @@ Git Lantern (main menu)
 ├── repos           - List local repositories (uses session settings)
 ├── status          - Show repository status table (uses session settings)
 ├── lazygit         - Open selected repository in lazygit
-├── fleet           - Unified plan/apply for clone/pull/push
+├── fleet           - Unified plan/apply/logs for clone/pull/push/report
 ├── scan            - Scan repos to JSON file (uses session settings)
 ├── table           - Render table from a JSON scan file
 ├── find            - Find repos by name/remote (uses session settings)
@@ -251,12 +251,33 @@ lantern fleet plan --root ~/workspace --server github.com --fetch --with-prs
 - `--repos repo1,repo2` to target specific repos from the plan
 - omit `--repos` to target all actionable repos
 
+**Execution reporting**:
+- `--log-json <path>`: write full execution details to JSON (`options`, per-repo actions/results, branch updates, summary totals)
+
 Example:
 ```bash
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/run.json
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --dry-run
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --checkout-branch feature/my-work
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --checkout-pr 123
+```
+
+### `lantern fleet logs`
+
+**Purpose**: inspect fleet apply JSON reports.
+
+**What it does**:
+- reads a specific log via `--input`, or discovers logs under `<root>/data/fleet-logs/`,
+- with `--latest`, opens the newest log,
+- by default, renders full JSON using `jq` pretty format,
+- with `--no-pretty`, shows concise tabular summary output (and optional per-repo results with `--show-results`).
+
+Example:
+```bash
+lantern fleet logs --latest
+lantern fleet logs --input data/fleet-logs/fleet-apply-20260213T120000Z.json
+lantern fleet logs --latest --no-pretty --show-results
 ```
 
 ## Local repository commands

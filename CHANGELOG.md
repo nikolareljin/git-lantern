@@ -13,8 +13,12 @@ All notable changes to git-lantern are documented in this file.
 - TUI `fleet` now includes `Smart Sync` preset flow with minimal steps:
   - presets: `Fast Pull`, `Branch Rollout`, `PR Rollout`, `Full Reconcile`,
   - scope selector: all actionable, only clean, or selected repos,
-  - single summary/confirm step before execution,
+  - full preflight summary of planned actions before execution,
+  - mandatory per-repo checklist confirmation before execution,
+  - explicit push-mode selection (skip push or push ahead repos),
   - runs through existing `fleet plan/apply` behavior.
+- `lantern fleet apply --log-json <path>` now writes a full execution report (actions per repo, branch updates, summary totals).
+- `lantern fleet logs --latest` added for quick inspection of fleet execution logs; by default it renders full JSON in pretty format via `jq` (with fallback output when `jq` is unavailable).
 - TUI `fleet` apply flow now:
   - loads repo context first,
   - shows latest branch + PR numbers before selection,

@@ -24,6 +24,7 @@ Primary workflows:
 Commands (jump to detailed guides):
 - `lantern fleet plan` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern fleet apply` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
+- `lantern fleet logs` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern repos` -> `docs/use-cases.md#lantern-repos`
 - `lantern scan` -> `docs/use-cases.md#lantern-scan`
 - `lantern status` -> `docs/use-cases.md#lantern-status`
@@ -45,6 +46,8 @@ Quick examples:
 ```bash
 lantern fleet plan --root ~/workspace --server github.com --fetch
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
+lantern fleet logs --latest
 lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
@@ -89,7 +92,7 @@ Git Lantern
 ├── repos        - List local repositories
 ├── status       - Show repository status
 ├── lazygit      - Open selected repository in lazygit
-├── fleet        - Unified fleet plan/apply (clone/pull/push)
+├── fleet        - Unified fleet plan/apply/logs (clone/pull/push/report)
 ├── scan         - Scan repositories to JSON
 ├── table        - Render table from JSON scan
 ├── find         - Find repositories by name/remote

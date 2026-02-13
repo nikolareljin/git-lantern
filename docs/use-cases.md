@@ -154,7 +154,7 @@ Use `fleet` as the single command family for multi-repo management:
 - detect local-vs-remote differences,
 - clone missing repos,
 - pull repos that are behind,
-- push repos that are ahead.
+- optionally push repos that are ahead.
 
 ```bash
 # 1) Build a full reconciliation plan (from workspace root)
@@ -163,18 +163,27 @@ lantern fleet plan --root ~/workspace --server github.com --fetch
 # 2) Apply all actionable changes
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
 
-# 3) Apply only selected repos
+# 3) Apply without pushing ahead repos
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean
+
+# 4) Apply only selected repos
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --clone-missing --pull-behind --push-ahead
 
-# 4) Dry run
-lantern fleet apply --root ~/workspace --server github.com --dry-run
+# 5) Dry run with full JSON report
+lantern fleet apply --root ~/workspace --server github.com --dry-run --log-json data/fleet-logs/run.json
+
+# 6) Inspect latest report with jq pretty output
+lantern fleet logs --latest
 ```
 
 In TUI (`lantern --tui`):
 1. select `fleet`
 2. choose server
 3. run `plan` or `apply` (all/selected)
-4. for `apply`, review repo context (`latest_branch`, `prs`) before choosing checkout mode
+4. choose push mode (push ahead repos or skip push)
+5. review the full preflight table showing actions that will be executed
+6. confirm the final repo checklist (uncheck repos to exclude)
+7. run apply and review short completion summary with path to full JSON log
 
 For full CLI parity inside TUI, use `command` and enter any lantern args directly.
 
