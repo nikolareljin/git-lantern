@@ -6,19 +6,10 @@ import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
-def _request(url: str, token: Optional[str]) -> List[Dict]:
-    req = urllib.request.Request(url)
-    if token:
-        req.add_header("Authorization", f"token {token}")
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        data = resp.read().decode("utf-8")
-    return json.loads(data)
-
-
-def _request_obj(url: str, token: Optional[str]):
+def _request(url: str, token: Optional[str]) -> Any:
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"token {token}")
@@ -251,7 +242,7 @@ def fetch_open_pull_requests(
     }
     url = f"{api_base}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/pulls?{urllib.parse.urlencode(params)}"
     try:
-        data = _request_obj(url, token)
+        data = _request(url, token)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
         return []
     if not isinstance(data, list):
@@ -275,7 +266,7 @@ def fetch_open_pull_requests(
             {
                 "number": pr.get("number"),
                 "title": pr.get("title") or "",
-                "head_ref": head.get("ref") if isinstance(head, dict) else "",
+                "head_ref": head.get("ref") or "",
                 "updated_at": updated_raw,
                 "html_url": pr.get("html_url") or "",
             }
@@ -376,11 +367,11 @@ def get_pr_branch(
     api_base = _base_url(base_url)
     url = f"{api_base}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/pulls/{int(pr_number)}"
     try:
-        data = _request_obj(url, token)
+        data = _request(url, token)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
     head = data.get("head") if isinstance(data.get("head"), dict) else {}
-    branch = str(head.get("ref") or "").strip() if isinstance(head, dict) else ""
+    branch = str(head.get("ref") or "").strip()
     return branch or None
