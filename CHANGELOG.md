@@ -51,7 +51,7 @@ All notable changes to git-lantern are documented in this file.
   - `status --fetch`, `scan --fetch`, `sync`, and `fleet plan/apply` in CLI.
   - visible working indicators for long `status`, `scan`, and `fleet` operations in TUI.
 
-### Added
+### Added - TUI Features
 
 #### Interactive TUI Mode (`lantern --tui` / `lantern -t`)
 

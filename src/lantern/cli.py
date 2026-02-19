@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -235,6 +236,8 @@ def _dialog_menu(
     width: int = 0,
 ) -> Optional[str]:
     """Show a dialog menu and return the selected item tag, or None if cancelled."""
+    if not items:
+        return None
     if height == 0 or width == 0:
         height, width = _dialog_init()
     menu_height = min(len(items), height - 8)
@@ -679,6 +682,8 @@ def cmd_config_setup(args: argparse.Namespace) -> int:
                 continue
             if _dialog_yesno("Confirm", f"Are you sure you want to remove '{server_to_remove}'?"):
                 del servers[server_to_remove]
+                if config.get("default_server") == server_to_remove:
+                    config.pop("default_server", None)
                 _dialog_msgbox("Removed", f"Server '{server_to_remove}' has been removed.\n\nRemember to save before exiting.")
 
         elif action == "default":
@@ -701,9 +706,9 @@ def _run_lantern_subprocess(
     height: int,
     width: int,
     capture: bool = True,
-) -> subprocess.CompletedProcess:
+) -> "subprocess.CompletedProcess[str]":
     """Run a lantern subprocess with correct PYTHONPATH and error handling."""
-    kwargs: dict = {
+    kwargs: Dict[str, Any] = {
         "check": False,
         "text": True,
         "env": {**os.environ, "PYTHONPATH": _SRC_DIR},
@@ -740,7 +745,15 @@ def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int
         try:
             os.remove(tmp_path)
         except OSError:
+            # Best-effort cleanup: ignore failures removing temporary dialog files.
             pass
+
+
+def _safe_filename_component(value: str) -> str:
+    """Convert an arbitrary label to a filesystem-safe filename component."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned or "server"
 
 
 def _fleet_action_parts_for_row(
@@ -1185,7 +1198,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
         if action is None or action == "exit":
             # Clear screen on exit
             subprocess.run(["clear"], check=False)
-            return 0
+            break
 
         if action == "settings":
             hidden_label = "ON" if session["include_hidden"] else "OFF"
@@ -1934,41 +1947,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
             except (json.JSONDecodeError, OSError) as exc:
                 _dialog_msgbox("Error", f"Failed to read JSON file: {exc}")
 
-        elif action == "sync":
-            if not _validate_session_root(session["root"], height, width):
-                continue
-            sync_items: List[Tuple[str, str]] = [
-                ("fetch", "Fetch only"),
-                ("pull", "Fetch and pull"),
-                ("push", "Fetch, pull, and push"),
-            ]
-            sync_action = _dialog_menu("Sync", "Select sync operation:", sync_items)
-            if sync_action:
-                dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no actual changes)?")
-                only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
-                only_upstream = _dialog_yesno("Only Upstream", "Skip repos without an upstream branch?")
-                cmd_args = [sys.executable, "-m", "lantern", "sync", "--root", session["root"],
-                            "--max-depth", str(session["max_depth"])]
-                if session["include_hidden"]:
-                    cmd_args.append("--include-hidden")
-                if sync_action == "fetch":
-                    cmd_args.append("--fetch")
-                elif sync_action == "pull":
-                    cmd_args.extend(["--fetch", "--pull"])
-                elif sync_action == "push":
-                    cmd_args.extend(["--fetch", "--pull", "--push"])
-                if dry_run:
-                    cmd_args.append("--dry-run")
-                if only_clean:
-                    cmd_args.append("--only-clean")
-                if only_upstream:
-                    cmd_args.append("--only-upstream")
-                result = _run_lantern_subprocess(cmd_args, height, width)
-                if result.returncode == 0 and result.stdout:
-                    _dialog_textbox_from_text("Sync Results", result.stdout, height, width)
-                elif result.returncode == 0:
-                    _dialog_msgbox("Sync", "No repositories found.")
-
         elif action == "find":
             if not _validate_session_root(session["root"], height, width):
                 continue
@@ -2078,7 +2056,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         if not chosen:
                             continue
                         server = chosen
-                    safe_server = server.replace("/", "_")
+                    safe_server = _safe_filename_component(server)
                     input_file = os.path.join(session["root"], "data", f"{safe_server}.json")
                     cmd_args = [sys.executable, "-m", "lantern", "forge", "list", "--server", server, "--output", input_file]
                     if session["include_forks"]:
@@ -2244,8 +2222,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if result.returncode == 0:
                 if output:
                     _dialog_msgbox("Report", f"Report exported to:\n{output}")
-                elif result.stdout:
-                    _dialog_textbox_from_text("Report", result.stdout, height, width)
+                else:
+                    report_output = (result.stdout or "").strip()
+                    if report_output:
+                        _dialog_textbox_from_text("Report", report_output, height, width)
+                    else:
+                        _dialog_msgbox("Report", "Report generated with no output.", height, width)
 
         elif action == "command":
             raw = _dialog_inputbox("Run Command", "Enter lantern arguments (without leading 'lantern'):", "")
@@ -2538,7 +2520,8 @@ def _fleet_plan_records(args: argparse.Namespace) -> Tuple[List[Dict[str, str]],
                             stale_days=stale_days,
                             base_url=base_url or None,
                         )
-                    except Exception:
+                    except Exception as exc:
+                        print(f"Warning: failed to fetch PR data for {cache_key}: {exc}", file=sys.stderr)
                         pr_cache[cache_key] = []
                 repo_prs = pr_cache.get(cache_key, [])
                 if repo_prs:
@@ -2770,7 +2753,11 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         token=token or None,
                         base_url=base_url or None,
                     )
-                except Exception:
+                except Exception as exc:
+                    print(
+                        f"Warning: failed to resolve PR branch for {owner}/{repo_name}#{pr_number}: {exc}",
+                        file=sys.stderr,
+                    )
                     resolved = None
                 if resolved:
                     effective_branch = resolved
