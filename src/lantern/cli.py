@@ -762,6 +762,41 @@ def _safe_filename_component(value: str) -> str:
     return cleaned or "server"
 
 
+def _is_safe_repo_name(name: str) -> bool:
+    """Validate repo names used for local path construction."""
+    candidate = str(name or "").strip()
+    if not candidate or candidate in {".", ".."}:
+        return False
+    if os.path.isabs(candidate):
+        return False
+    if candidate.startswith(("/", "\\", ".", "~")):
+        return False
+    if "/" in candidate or "\\" in candidate:
+        return False
+    if os.sep and os.sep in candidate:
+        return False
+    if os.altsep and os.altsep in candidate:
+        return False
+    return True
+
+
+def _is_valid_git_branch_name(branch: str) -> bool:
+    """Validate branch names before using them in git checkout commands."""
+    candidate = str(branch or "").strip()
+    if not candidate:
+        return False
+    if any(ch in candidate for ch in ("\n", "\r", "\x00")):
+        return False
+    proc = subprocess.run(
+        ["git", "check-ref-format", "--branch", candidate],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return proc.returncode == 0
+
+
 def _fleet_action_parts_for_row(
     row: Dict[str, str],
     clone_missing: bool,
@@ -2553,7 +2588,9 @@ def _fleet_plan_records(args: argparse.Namespace) -> Tuple[List[Dict[str, str]],
         if not keys or any(k in local_by_remote_key for k in keys):
             continue
         name = str(repo.get("name") or "").strip()
-        if not name:
+        if not _is_safe_repo_name(name):
+            if name:
+                print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
         dest = os.path.join(args.root, name)
         plan_rows.append(
@@ -2774,6 +2811,11 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append(f"checkout-pr:{pr_number}:unsupported")
                 action_records.append({"action": "checkout-pr", "status": "unsupported", "pr": str(pr_number)})
 
+        if effective_branch:
+            if not _is_valid_git_branch_name(effective_branch):
+                statuses.append(f"checkout:{effective_branch}:invalid-branch")
+                action_records.append({"action": "checkout", "status": "invalid-branch", "branch": effective_branch})
+                effective_branch = ""
         if effective_branch:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append(f"checkout:{effective_branch}:skip-dirty")
@@ -3408,8 +3450,10 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             return 1
         checklist_items = []
         for repo in repos:
-            name = repo.get("name")
-            if not name:
+            name = str(repo.get("name") or "").strip()
+            if not _is_safe_repo_name(name):
+                if name:
+                    print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
                 continue
             dest = os.path.join(args.root, name)
             status = "on" if os.path.exists(dest) else "off"
@@ -3443,9 +3487,13 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         repos = [repo for repo in repos if repo.get("name") in selected_set]
         repos = _sort_records_by_repo_name(repos)
     for repo in repos:
-        name = repo.get("name")
+        name = str(repo.get("name") or "").strip()
         ssh_url = repo.get("ssh_url")
-        if not name or not ssh_url:
+        if not _is_safe_repo_name(name):
+            if name:
+                print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
+            continue
+        if not ssh_url:
             continue
         dest = os.path.join(args.root, name)
         if os.path.exists(dest):
