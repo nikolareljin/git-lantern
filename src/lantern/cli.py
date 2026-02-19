@@ -215,13 +215,13 @@ def _dialog_init() -> Tuple[int, int]:
         cols = int(subprocess.run(
             ["tput", "cols"], capture_output=True, text=True, check=True
         ).stdout.strip())
-    except (subprocess.CalledProcessError, ValueError):
+    except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
         cols = 120
     try:
         lines = int(subprocess.run(
             ["tput", "lines"], capture_output=True, text=True, check=True
         ).stdout.strip())
-    except (subprocess.CalledProcessError, ValueError):
+    except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
         lines = 40
     width = max(60, cols * 70 // 100)
     height = max(20, lines * 70 // 100)
@@ -708,10 +708,16 @@ def _run_lantern_subprocess(
     capture: bool = True,
 ) -> "subprocess.CompletedProcess[str]":
     """Run a lantern subprocess with correct PYTHONPATH and error handling."""
+    env: Dict[str, str] = dict(os.environ)
+    existing_pythonpath = env.get("PYTHONPATH")
+    if existing_pythonpath:
+        env["PYTHONPATH"] = existing_pythonpath + os.pathsep + _SRC_DIR
+    else:
+        env["PYTHONPATH"] = _SRC_DIR
     kwargs: Dict[str, Any] = {
         "check": False,
         "text": True,
-        "env": {**os.environ, "PYTHONPATH": _SRC_DIR},
+        "env": env,
     }
     if capture:
         kwargs["capture_output"] = True
@@ -1104,7 +1110,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
     config = lantern_config.load_config()
     configured_root = str(config.get("workspace_root") or "").strip()
-    cli_root = str(getattr(args, "root", "") or "").strip()
+    cli_root = str(getattr(args, "tui_root", "") or "").strip()
     initial_root = cli_root or configured_root
     if initial_root and not os.path.isdir(initial_root):
         initial_root = ""
@@ -2789,18 +2795,18 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
                     rc_checkout = _run_git_op(path, ["checkout", effective_branch]) if has_local else _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
                     rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
-                ok = rc_checkout == 0 and rc_pull == 0
-                statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
-                action_records.append({"action": "checkout", "status": "ok" if ok else "fail", "branch": effective_branch})
-                if not ok:
-                    rollback = _attempt_repo_rollback(path, original_head, original_branch)
-                    action_records.append(
-                        {
-                            "action": "rollback",
-                            "status": rollback.get("restored", "no"),
-                            "detail": rollback.get("steps", "none"),
-                        }
-                    )
+                    ok = rc_checkout == 0 and rc_pull == 0
+                    statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "checkout", "status": "ok" if ok else "fail", "branch": effective_branch})
+                    if not ok:
+                        rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                        action_records.append(
+                            {
+                                "action": "rollback",
+                                "status": rollback.get("restored", "no"),
+                                "detail": rollback.get("steps", "none"),
+                            }
+                        )
 
         if not statuses:
             statuses = ["skip"]
@@ -3875,7 +3881,8 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantern")
     parser.add_argument(
-        "--root",
+        "--tui-root",
+        dest="tui_root",
         default="",
         help="workspace root override for TUI session (stored root is used when omitted)",
     )
