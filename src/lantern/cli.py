@@ -762,6 +762,22 @@ def _safe_filename_component(value: str) -> str:
     return cleaned or "server"
 
 
+def _handle_tui_command_action(height: int, width: int) -> None:
+    raw = _dialog_inputbox("Run Command", "Enter lantern arguments (without leading 'lantern'):", "")
+    if raw is None:
+        return
+    argv = shlex.split(raw)
+    if not argv:
+        _dialog_msgbox("Command", "No command entered.", height, width)
+        return
+    cmd_args = [sys.executable, "-m", "lantern", *argv]
+    result = _run_lantern_subprocess(cmd_args, height, width)
+    if result.returncode == 0 and result.stdout:
+        _dialog_textbox_from_text("Command Output", result.stdout, height, width)
+    elif result.returncode == 0:
+        _dialog_msgbox("Command", "Command completed with no output.", height, width)
+
+
 def _is_safe_repo_name(name: str) -> bool:
     """Validate repo names used for local path construction."""
     candidate = str(name or "").strip()
@@ -2271,19 +2287,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         _dialog_msgbox("Report", "Report generated with no output.", height, width)
 
         elif action == "command":
-            raw = _dialog_inputbox("Run Command", "Enter lantern arguments (without leading 'lantern'):", "")
-            if raw is None:
-                continue
-            argv = shlex.split(raw)
-            if not argv:
-                _dialog_msgbox("Command", "No command entered.", height, width)
-                continue
-            cmd_args = [sys.executable, "-m", "lantern", *argv]
-            result = _run_lantern_subprocess(cmd_args, height, width)
-            if result.returncode == 0 and result.stdout:
-                _dialog_textbox_from_text("Command Output", result.stdout, height, width)
-            elif result.returncode == 0:
-                _dialog_msgbox("Command", "Command completed with no output.", height, width)
+            _handle_tui_command_action(height, width)
 
     return 0
 

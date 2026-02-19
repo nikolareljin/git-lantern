@@ -29,7 +29,7 @@ All notable changes to git-lantern are documented in this file.
 - Persisted TUI workspace settings:
   - `workspace_root` persisted and reused between sessions.
   - `scan_json_path` persisted and reused by `scan`, `table`, and `report`.
-  - global CLI override for TUI root: `lantern --tui --root <path>`.
+  - global CLI override for TUI root: `lantern --tui --tui-root <path>` (or `lantern --tui-root <path> --tui`).
 
 ### Changed
 
