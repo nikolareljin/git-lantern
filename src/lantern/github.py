@@ -58,7 +58,16 @@ def _is_safe_repo_component(value: str) -> bool:
     candidate = str(value or "").strip()
     if not candidate:
         return False
-    return re.fullmatch(r"[A-Za-z0-9._-]+", candidate) is not None
+    # Allow namespaced identifiers like "group/subgroup/project" while
+    # rejecting traversal/special components.
+    if re.search(r"[^A-Za-z0-9._/-]", candidate):
+        return False
+    if candidate.startswith("/") or candidate.endswith("/"):
+        return False
+    for part in candidate.split("/"):
+        if part in ("", ".", ".."):
+            return False
+    return True
 
 
 def fetch_repos(
