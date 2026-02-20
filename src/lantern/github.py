@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timezone, timedelta
+import re
 import subprocess
 import shutil
 import urllib.error
@@ -51,6 +52,13 @@ def download_gist_file(raw_url: str, token: Optional[str], base_url: Optional[st
 
 def _base_url(base_url: Optional[str]) -> str:
     return (base_url or "https://api.github.com").rstrip("/")
+
+
+def _is_safe_repo_component(value: str) -> bool:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return False
+    return re.fullmatch(r"[A-Za-z0-9._-]+", candidate) is not None
 
 
 def fetch_repos(
@@ -278,6 +286,8 @@ def fetch_open_pull_requests_via_gh(owner: str, repo: str, stale_days: int = 30)
     gh_bin = shutil.which("gh")
     if not gh_bin:
         return None
+    if not _is_safe_repo_component(owner) or not _is_safe_repo_component(repo):
+        return None
     cmd = [
         gh_bin,
         "pr",
@@ -330,6 +340,8 @@ def fetch_open_pull_requests_via_gh(owner: str, repo: str, stale_days: int = 30)
 def get_pr_branch_via_gh(owner: str, repo: str, pr_number: int) -> Optional[str]:
     gh_bin = shutil.which("gh")
     if not gh_bin:
+        return None
+    if not _is_safe_repo_component(owner) or not _is_safe_repo_component(repo):
         return None
     cmd = [
         gh_bin,
