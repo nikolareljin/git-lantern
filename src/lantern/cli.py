@@ -733,7 +733,14 @@ def _validate_session_root(root: str, height: int, width: int) -> bool:
     """Check that root is a valid directory, showing an error dialog if not."""
     if os.path.isdir(root):
         return True
-    _dialog_msgbox("Error", f"Root directory not found: {root}\n\nUse 'settings' to change it.", height, width)
+    _dialog_msgbox(
+        "Error",
+        f"Root directory not found: {root}\n\n"
+        "Update the workspace root via Config > workspace > persisted workspace_root,\n"
+        "or restart the TUI with a new root.",
+        height,
+        width,
+    )
     return False
 
 
