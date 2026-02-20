@@ -74,7 +74,7 @@ lantern -t
   - `status` - Show repository status with branch divergence
   - `scan` - Scan repositories and save to JSON
   - `table` - Render table from a JSON scan file
-  - `sync` - Sync repositories (fetch/pull/push) with dry-run, only-clean, only-upstream options
+  - `fleet` - Unified fleet plan/apply for clone/pull/push, with sync-only apply mode and dry-run/only-clean controls
   - `find` - Find repositories by name or remote URL
   - `duplicates` - Find duplicate repository clones
   - `forge` - Git forge operations (list/clone repos, list/download/create gists and snippets)

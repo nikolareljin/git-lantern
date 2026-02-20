@@ -301,7 +301,10 @@ def fetch_open_pull_requests_via_gh(owner: str, repo: str, stale_days: int = 30)
         "--json",
         "number,title,headRefName,updatedAt,url",
     ]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return None
     if proc.returncode != 0:
         return None
     try:
@@ -353,7 +356,10 @@ def get_pr_branch_via_gh(owner: str, repo: str, pr_number: int) -> Optional[str]
         "--json",
         "headRefName",
     ]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return None
     if proc.returncode != 0:
         return None
     try:

@@ -76,10 +76,9 @@ def is_operation_free(repo_path: str) -> bool:
 
 
 def is_clean(repo_path: str) -> bool:
-    """Compatibility alias for operation-based cleanliness checks used by sync/fleet."""
-    # For sync eligibility, do not treat local uncommitted/untracked files as dirty.
-    # Only block repositories that are in the middle of a Git operation.
-    return is_operation_free(repo_path)
+    """Return True when the working tree has no uncommitted or untracked changes."""
+    status_output = run_git(repo_path, ["status", "--porcelain"])
+    return status_output == ""
 
 
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:

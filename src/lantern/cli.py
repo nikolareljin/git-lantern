@@ -421,7 +421,7 @@ def _build_local_state_records(root: str, max_depth: int, include_hidden: bool, 
     records: List[Dict[str, str]] = []
     for path in find_repos(root, max_depth, include_hidden):
         record = add_divergence_fields(build_repo_record(path, fetch))
-        record["clean"] = "yes" if git.is_clean(path) else "no"
+        record["clean"] = "yes" if git.is_operation_free(path) else "no"
         records.append(record)
     records.sort(key=lambda r: str(r.get("name", "")).lower())
     return records
@@ -2522,7 +2522,7 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _fleet_plan_records(args: argparse.Namespace) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
     local_paths = find_repos(args.root, args.max_depth, args.include_hidden)
     local_records: List[Dict[str, str]] = []
     total_local = len(local_paths)
@@ -2530,11 +2530,11 @@ def _fleet_plan_records(args: argparse.Namespace) -> Tuple[List[Dict[str, str]],
         _progress_line(idx, total_local, f"Scanning {os.path.basename(path)}")
         record = build_repo_record(path, args.fetch)
         record = add_divergence_fields(record)
-        record["clean"] = "yes" if git.is_clean(path) else "no"
+        record["clean"] = "yes" if git.is_operation_free(path) else "no"
         local_records.append(record)
     _progress_done()
 
-    payload = _fleet_load_remote(args)
+    payload = payload if payload is not None else _fleet_load_remote(args)
     provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
     remote_repos = payload.get("repos", []) if isinstance(payload.get("repos"), list) else []
     remote_by_key: Dict[str, Dict[str, Any]] = {}
@@ -2685,7 +2685,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
     try:
         payload = _fleet_load_remote(args)
         provider, base_url, user, token, _auth, _server = _fleet_server_context(args)
-        rows, _meta = _fleet_plan_records(args)
+        rows, _meta = _fleet_plan_records(args, payload=payload)
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -2844,7 +2844,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 action_records.append({"action": "checkout", "status": "invalid-branch"})
                 effective_branch = ""
         if effective_branch:
-            if args.only_clean and row.get("clean") != "yes":
+            if args.only_clean and row.get("clean") != "yes" and not (state == "missing-local" and clone_ok):
                 statuses.append(f"checkout:{effective_branch}:skip-dirty")
                 action_records.append({"action": "checkout", "status": "skip-dirty", "branch": effective_branch})
             elif not clone_ok and not args.dry_run:
@@ -3073,7 +3073,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     current_step = 0
     for path in repos:
         name = os.path.basename(path)
-        if args.only_clean and not git.is_clean(path):
+        if args.only_clean and not git.is_operation_free(path):
             records.append({"name": name, "path": path, "result": "skip:dirty"})
             continue
         if args.only_upstream and not git.get_upstream(path):
