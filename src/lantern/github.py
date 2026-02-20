@@ -237,6 +237,8 @@ def fetch_open_pull_requests(
     stale_days: int = 30,
     base_url: Optional[str] = None,
 ) -> List[Dict]:
+    if not _is_safe_repo_component(owner) or not _is_safe_repo_component(repo):
+        return []
     gh_items = fetch_open_pull_requests_via_gh(owner, repo, stale_days)
     if gh_items is not None:
         return gh_items
@@ -248,7 +250,11 @@ def fetch_open_pull_requests(
         "direction": "desc",
         "per_page": "100",
     }
-    url = f"{api_base}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/pulls?{urllib.parse.urlencode(params)}"
+    url = (
+        f"{api_base}/repos/"
+        f"{urllib.parse.quote(owner, safe='')}/"
+        f"{urllib.parse.quote(repo, safe='')}/pulls?{urllib.parse.urlencode(params)}"
+    )
     try:
         data = _request(url, token)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
@@ -379,11 +385,17 @@ def get_pr_branch(
     token: Optional[str],
     base_url: Optional[str] = None,
 ) -> Optional[str]:
+    if not _is_safe_repo_component(owner) or not _is_safe_repo_component(repo):
+        return None
     gh_branch = get_pr_branch_via_gh(owner, repo, pr_number)
     if gh_branch:
         return gh_branch
     api_base = _base_url(base_url)
-    url = f"{api_base}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/pulls/{int(pr_number)}"
+    url = (
+        f"{api_base}/repos/"
+        f"{urllib.parse.quote(owner, safe='')}/"
+        f"{urllib.parse.quote(repo, safe='')}/pulls/{int(pr_number)}"
+    )
     try:
         data = _request(url, token)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):

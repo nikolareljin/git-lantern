@@ -3081,9 +3081,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
     for path in repos:
         name = os.path.basename(path)
         if args.only_clean and not git.is_operation_free(path):
-            records.append({"name": name, "path": path, "result": "skip:dirty"})
+            current_step += max(1, len(actions))
+            _progress_line(current_step, total_steps, f"sync: skip in-progress {name}")
+            records.append({"name": name, "path": path, "result": "skip:in-progress"})
             continue
         if args.only_upstream and not git.get_upstream(path):
+            current_step += max(1, len(actions))
+            _progress_line(current_step, total_steps, f"sync: skip no-upstream {name}")
             records.append({"name": name, "path": path, "result": "skip:no-upstream"})
             continue
         original_head = _repo_head(path)
