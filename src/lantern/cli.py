@@ -770,6 +770,14 @@ def _handle_tui_command_action(height: int, width: int) -> None:
     if not argv:
         _dialog_msgbox("Command", "No command entered.", height, width)
         return
+    if not _dialog_yesno(
+        "Confirm Command",
+        "This runs lantern with the exact arguments you entered. Continue?",
+        height,
+        width,
+    ):
+        _dialog_msgbox("Command", "Command cancelled.", height, width)
+        return
     cmd_args = [sys.executable, "-m", "lantern", *argv]
     result = _run_lantern_subprocess(cmd_args, height, width)
     if result.returncode == 0 and result.stdout:
@@ -2832,8 +2840,8 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
 
         if effective_branch:
             if not _is_valid_git_branch_name(effective_branch):
-                statuses.append(f"checkout:{effective_branch}:invalid-branch")
-                action_records.append({"action": "checkout", "status": "invalid-branch", "branch": effective_branch})
+                statuses.append("checkout:invalid-branch")
+                action_records.append({"action": "checkout", "status": "invalid-branch"})
                 effective_branch = ""
         if effective_branch:
             if args.only_clean and row.get("clean") != "yes":

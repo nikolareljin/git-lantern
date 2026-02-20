@@ -70,10 +70,16 @@ def has_in_progress_operation(repo_path: str) -> bool:
     return False
 
 
+def is_operation_free(repo_path: str) -> bool:
+    """Return True when no merge/rebase/cherry-pick/revert/bisect is in progress."""
+    return not has_in_progress_operation(repo_path)
+
+
 def is_clean(repo_path: str) -> bool:
+    """Compatibility alias for operation-based cleanliness checks used by sync/fleet."""
     # For sync eligibility, do not treat local uncommitted/untracked files as dirty.
     # Only block repositories that are in the middle of a Git operation.
-    return not has_in_progress_operation(repo_path)
+    return is_operation_free(repo_path)
 
 
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:
