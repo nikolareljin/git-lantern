@@ -41,7 +41,16 @@ def get_upstream(repo_path: str) -> Optional[str]:
 
 
 def has_in_progress_operation(repo_path: str) -> bool:
-    git_dir = os.path.join(repo_path, ".git")
+    resolved_git_dir = subprocess.run(
+        ["git", "-C", repo_path, "rev-parse", "--git-dir"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout.strip()
+    if not resolved_git_dir:
+        return False
+    git_dir = resolved_git_dir if os.path.isabs(resolved_git_dir) else os.path.join(repo_path, resolved_git_dir)
     if not os.path.isdir(git_dir):
         return False
     markers = (

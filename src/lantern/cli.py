@@ -783,15 +783,28 @@ def _is_safe_repo_name(name: str) -> bool:
     candidate = str(name or "").strip()
     if not candidate or candidate in {".", ".."}:
         return False
-    if os.path.isabs(candidate):
+    if any(ch in candidate for ch in ("\x00", "\n", "\r")):
         return False
-    if candidate.startswith(("/", "\\", ".", "~")):
+    if candidate.startswith(("~", ".", "/", "\\")):
         return False
-    if "/" in candidate or "\\" in candidate:
+    if any(part == ".." for part in candidate.replace("\\", "/").split("/")):
         return False
-    if os.sep and os.sep in candidate:
+
+    # Allow namespaced paths (e.g., "group/project"), but reject absolute/drive paths
+    # and traversal segments after normalization.
+    normalized = os.path.normpath(candidate.replace("\\", os.sep).replace("/", os.sep))
+    if not normalized or normalized in {".", ".."}:
         return False
-    if os.altsep and os.altsep in candidate:
+    if os.path.isabs(normalized):
+        return False
+    drive, _ = os.path.splitdrive(normalized)
+    if drive:
+        return False
+
+    parts = [part for part in normalized.split(os.sep) if part]
+    if not parts:
+        return False
+    if any(part in {".", ".."} for part in parts):
         return False
     return True
 
@@ -2424,7 +2437,9 @@ def _normalize_repo_url(url: str) -> str:
             path = path[:-4]
         return f"{host}/{path}"
     parsed = urllib.parse.urlparse(raw)
-    host = (parsed.netloc or "").lower()
+    host = (parsed.hostname or "").lower()
+    if host and parsed.port:
+        host = f"{host}:{parsed.port}"
     path = (parsed.path or "").strip("/").lower()
     if path.endswith(".git"):
         path = path[:-4]
