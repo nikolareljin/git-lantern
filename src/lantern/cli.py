@@ -2851,7 +2851,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 action_records.append({"action": "checkout", "status": "invalid-branch"})
                 effective_branch = ""
         if effective_branch:
-            if args.only_clean and row.get("clean") != "yes" and not (state == "missing-local" and clone_ok):
+            if args.only_clean and row.get("clean") == "no":
                 statuses.append(f"checkout:{effective_branch}:skip-dirty")
                 action_records.append({"action": "checkout", "status": "skip-dirty", "branch": effective_branch})
             elif not clone_ok and not args.dry_run:
