@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: generate_man.sh
+# DESCRIPTION: Generate man pages for lantern using help2man when available.
+# USAGE: ./scripts/generate_man.sh
+# PARAMETERS: No required parameters.
+# EXAMPLE: ./scripts/generate_man.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

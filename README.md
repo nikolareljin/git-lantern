@@ -22,9 +22,13 @@ Primary workflows:
 - Server config: `docs/use-cases.md#server-config-github-gitlab-bitbucket`
 
 Commands (jump to detailed guides):
+- `lantern fleet plan` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
+- `lantern fleet apply` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
+- `lantern fleet logs` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern repos` -> `docs/use-cases.md#lantern-repos`
 - `lantern scan` -> `docs/use-cases.md#lantern-scan`
 - `lantern status` -> `docs/use-cases.md#lantern-status`
+- `lantern lazygit` -> `docs/use-cases.md#lantern-lazygit`
 - `lantern table` -> `docs/use-cases.md#lantern-table`
 - `lantern find` -> `docs/use-cases.md#lantern-find`
 - `lantern duplicates` -> `docs/use-cases.md#lantern-duplicates`
@@ -35,9 +39,16 @@ Commands (jump to detailed guides):
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`
 - `lantern forge snippets ...` -> `docs/use-cases.md#list-snippets-githubgitlabbitbucket`
 - `lantern config export/import/path` -> `docs/use-cases.md#server-config-github-gitlab-bitbucket`
+- `lantern config setup` - Interactive server configuration (TUI)
+- `lantern --tui` / `lantern -t` - Interactive TUI mode for all operations
 
 Quick examples:
 ```bash
+lantern fleet plan --root ~/workspace --server github.com --fetch
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
+lantern fleet logs --latest
+lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
 lantern forge list --server github.com --output data/github.json
@@ -55,6 +66,86 @@ lantern config export --output git-lantern-servers.json
 lantern config import --input git-lantern-servers.json
 lantern config path
 ```
+
+## Interactive TUI Mode
+
+Lantern includes an interactive TUI mode using the `dialog` CLI. This provides a menu-driven interface for all lantern operations without needing to remember command-line flags.
+
+### Quick Start
+
+```bash
+# Launch TUI mode
+lantern --tui
+lantern -t
+
+# Or just configure servers interactively
+lantern config setup
+```
+
+### TUI Main Menu
+
+```
+Git Lantern
+├── servers      - View configured Git servers
+├── config       - Server configuration (setup/export/import/path)
+├── settings     - Session settings (root, depth, hidden, forks)
+├── repos        - List local repositories
+├── status       - Show repository status
+├── lazygit      - Open selected repository in lazygit
+├── fleet        - Unified fleet plan/apply/logs (clone/pull/push/report)
+├── scan         - Scan repositories to JSON
+├── table        - Render table from JSON scan
+├── find         - Find repositories by name/remote
+├── duplicates   - Find duplicate repositories
+├── forge        - Git forge operations
+│   ├── list          - List remote repos (display/save)
+│   ├── clone         - Clone repos from JSON list
+│   ├── snippets      - List/download gists and snippets
+│   └── gist_create   - Create a gist (GitHub only)
+├── report       - Export scan results (CSV/JSON/MD)
+├── command      - Run any `lantern ...` command
+└── exit         - Exit (clears screen)
+```
+
+### Session Settings
+
+The TUI uses **session-based settings** that persist throughout your session:
+
+1. All settings are shown in the main menu header
+2. Use **Config** to change persistent workspace root / scan JSON path, and **Settings** for depth/hidden/forks
+3. All repo operations (repos, status, lazygit, fleet, scan, find, duplicates) use these settings automatically
+4. No more repeated prompts for workspace root or scan JSON file path
+
+### Server Configuration Wizard
+
+`lantern config setup` provides an interactive wizard for managing servers:
+
+- **Add servers** from presets (github.com, gitlab.com, bitbucket.org)
+- **Add custom servers** (self-hosted GitHub Enterprise, GitLab, Bitbucket)
+- **Edit servers** (change username, update token)
+- **Remove servers**
+- **Set default server**
+- Changes are saved only when you choose "Save and exit"
+
+### Installing dialog
+
+The TUI requires the `dialog` CLI tool:
+
+```bash
+# Debian/Ubuntu
+sudo apt install dialog
+
+# macOS
+brew install dialog
+
+# Fedora/RHEL
+sudo dnf install dialog
+
+# Arch Linux
+sudo pacman -S dialog
+```
+
+See `docs/use-cases.md#interactive-tui-mode` for detailed TUI workflows.
 
 ## Shell completion
 

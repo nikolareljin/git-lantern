@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: release.sh
+# DESCRIPTION: Create release artifacts and optionally create/push a version tag.
+# USAGE: ./scripts/release.sh [--no-tag] [--tag-prefix PREFIX]
+# PARAMETERS: Optional flags: --no-tag, --tag-prefix.
+# EXAMPLE: ./scripts/release.sh --tag-prefix v
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

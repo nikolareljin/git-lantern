@@ -40,9 +40,45 @@ def get_upstream(repo_path: str) -> Optional[str]:
     return upstream or None
 
 
+def has_in_progress_operation(repo_path: str) -> bool:
+    resolved_git_dir = subprocess.run(
+        ["git", "-C", repo_path, "rev-parse", "--git-dir"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout.strip()
+    if not resolved_git_dir:
+        return False
+    git_dir = resolved_git_dir if os.path.isabs(resolved_git_dir) else os.path.join(repo_path, resolved_git_dir)
+    if not os.path.isdir(git_dir):
+        return False
+    markers = (
+        "MERGE_HEAD",
+        "REBASE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+    )
+    for marker in markers:
+        if os.path.exists(os.path.join(git_dir, marker)):
+            return True
+    if os.path.isdir(os.path.join(git_dir, "rebase-merge")):
+        return True
+    if os.path.isdir(os.path.join(git_dir, "rebase-apply")):
+        return True
+    return False
+
+
+def is_operation_free(repo_path: str) -> bool:
+    """Return True when no merge/rebase/cherry-pick/revert/bisect is in progress."""
+    return not has_in_progress_operation(repo_path)
+
+
 def is_clean(repo_path: str) -> bool:
-    status = run_git(repo_path, ["status", "--porcelain"])
-    return status == ""
+    """Return True when the working tree has no uncommitted or untracked changes."""
+    status_output = run_git(repo_path, ["status", "--porcelain"])
+    return status_output == ""
 
 
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:

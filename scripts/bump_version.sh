@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# SCRIPT: bump_version.sh
+# DESCRIPTION: Bump VERSION and synchronize pyproject.toml version.
+# USAGE: ./scripts/bump_version.sh <major|minor|patch|X.Y.Z>
+# PARAMETERS: One required argument: bump mode or explicit version.
+# EXAMPLE: ./scripts/bump_version.sh patch
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
