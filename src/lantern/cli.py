@@ -2869,7 +2869,10 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     action_records.append({"action": "checkout", "status": "skip-no-remote", "branch": effective_branch})
                 else:
                     has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
-                    rc_checkout = _run_git_op(path, ["checkout", effective_branch]) if has_local else _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
+                    if has_local:
+                        rc_checkout = _run_git_op(path, ["checkout", effective_branch])
+                    else:
+                        rc_checkout = _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
                     rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
                     ok = rc_checkout == 0 and rc_pull == 0
                     statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
