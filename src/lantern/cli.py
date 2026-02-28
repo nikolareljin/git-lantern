@@ -24,6 +24,7 @@ from .table import render_table
 
 # Resolved path to the src/ directory for subprocess PYTHONPATH
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_DIR = os.path.dirname(_SRC_DIR)
 
 
 # Common server presets for TUI setup
@@ -793,6 +794,151 @@ def _handle_tui_command_action(height: int, width: int) -> None:
         _dialog_msgbox("Command", "Command completed with no output.", height, width)
 
 
+def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: int) -> None:
+    """Run scripts/todo_to_issues.py for a selected repository from TUI."""
+    if not _validate_session_root(session["root"], height, width):
+        return
+
+    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+    if not repos_list:
+        _dialog_msgbox("TODO -> Issues", f"No repositories found in:\n{session['root']}", height, width)
+        return
+
+    menu_items: List[Tuple[str, str]] = []
+    tag_to_path: Dict[str, str] = {}
+    for idx, repo_path in enumerate(repos_list, start=1):
+        tag = str(idx)
+        repo_name = os.path.basename(repo_path)
+        menu_items.append((tag, f"{repo_name}  ({repo_path})"))
+        tag_to_path[tag] = repo_path
+
+    selected_tag = _dialog_menu(
+        "TODO -> Issues",
+        "Select repository where issues should be created:",
+        menu_items,
+        height,
+        width,
+    )
+    if not selected_tag or selected_tag not in tag_to_path:
+        return
+    repo_path = tag_to_path[selected_tag]
+
+    default_todo = os.path.join(repo_path, "TODO.txt")
+    todo_file = _dialog_inputbox(
+        "TODO File",
+        "Path to TODO file:",
+        default_todo,
+        height,
+        width,
+    )
+    if not todo_file:
+        return
+    todo_file = os.path.abspath(todo_file)
+    if not os.path.isfile(todo_file):
+        _dialog_msgbox("Error", f"TODO file not found:\n{todo_file}", height, width)
+        return
+
+    limit_str = _dialog_inputbox("Issue Scan Limit", "How many existing issues to check for duplicates?", "1000")
+    if limit_str is None:
+        return
+    limit_str = (limit_str or "").strip() or "1000"
+    try:
+        limit = int(limit_str)
+        if limit <= 0:
+            raise ValueError
+    except ValueError:
+        _dialog_msgbox("Error", "Issue scan limit must be a positive integer.", height, width)
+        return
+
+    labels_raw = _dialog_inputbox(
+        "Labels",
+        "Optional comma-separated labels to apply to created issues:",
+        "todo",
+        height,
+        width,
+    )
+    if labels_raw is None:
+        return
+    labels = [label.strip() for label in labels_raw.split(",") if label.strip()]
+
+    repo_override = _dialog_inputbox(
+        "GitHub Repo",
+        "Optional OWNER/REPO override (leave empty to use current repository):",
+        "",
+        height,
+        width,
+    )
+    if repo_override is None:
+        return
+    repo_override = repo_override.strip()
+
+    dry_run = _dialog_yesno("Dry Run", "Run in dry-run mode first (no issues created)?", height, width)
+
+    preview_parts = [
+        f"Repository path: {repo_path}",
+        f"TODO file: {todo_file}",
+        f"Issue scan limit: {limit}",
+        f"Labels: {', '.join(labels) if labels else '(none)'}",
+        f"Repo override: {repo_override or '(current repo)'}",
+        f"Mode: {'dry-run' if dry_run else 'create issues'}",
+    ]
+    if not _dialog_yesno(
+        "Confirm",
+        "Run TODO -> Issues with these settings?\n\n" + "\n".join(preview_parts),
+        height,
+        width,
+    ):
+        _dialog_msgbox("TODO -> Issues", "Operation cancelled.", height, width)
+        return
+
+    script_path = os.path.join(_REPO_DIR, "scripts", "todo_to_issues.py")
+    if not os.path.isfile(script_path):
+        _dialog_msgbox("Error", f"Script not found:\n{script_path}", height, width)
+        return
+
+    cmd_args = [
+        sys.executable,
+        script_path,
+        "--todo-file",
+        todo_file,
+        "--limit",
+        str(limit),
+    ]
+    for label in labels:
+        cmd_args.extend(["--label", label])
+    if repo_override:
+        cmd_args.extend(["--repo", repo_override])
+    if dry_run:
+        cmd_args.append("--dry-run")
+
+    _dialog_infobox(
+        "TODO -> Issues",
+        "Processing TODO items...\n\nPlease wait.",
+        max(8, height // 3),
+        max(60, width // 2),
+    )
+    result = subprocess.run(
+        cmd_args,
+        cwd=repo_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(["clear"], check=False)
+
+    output_lines: List[str] = []
+    if result.stdout:
+        output_lines.append(result.stdout.strip())
+    if result.stderr:
+        output_lines.append("\n[stderr]\n" + result.stderr.strip())
+    output_text = "\n\n".join([chunk for chunk in output_lines if chunk]).strip()
+    if not output_text:
+        output_text = "Command completed with no output."
+
+    title = "TODO -> Issues Output" if result.returncode == 0 else "TODO -> Issues Error"
+    _dialog_textbox_from_text(title, output_text, height, width)
+
+
 def _is_safe_repo_name(name: str) -> bool:
     """Validate repo names used for local path construction."""
     candidate = str(name or "").strip()
@@ -1260,6 +1406,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("settings", "Session settings"),
             ("repos", "List local repositories"),
             ("status", "Show repository status"),
+            ("todo_issues", "Create GitHub issues from TODO.txt"),
             ("lazygit", "Open repository in lazygit"),
             ("fleet", "Unified fleet plan/apply (clone, pull, push)"),
             ("scan", "Scan repositories to JSON"),
@@ -1443,6 +1590,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
             columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
             output_text = render_table(records, columns)
             _dialog_textbox_from_text("Status", output_text, height, width)
+
+        elif action == "todo_issues":
+            _handle_tui_todo_issues_action(session, height, width)
 
         elif action == "fleet":
             if not _validate_session_root(session["root"], height, width):

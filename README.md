@@ -93,6 +93,7 @@ Git Lantern
 ├── settings     - Session settings (root, depth, hidden, forks)
 ├── repos        - List local repositories
 ├── status       - Show repository status
+├── todo_issues  - Create GitHub issues from TODO.txt
 ├── lazygit      - Open selected repository in lazygit
 ├── fleet        - Unified fleet plan/apply/logs (clone/pull/push/report)
 ├── scan         - Scan repositories to JSON
@@ -175,6 +176,7 @@ Scripts:
 ./scripts/release.sh
 ./scripts/release.sh --no-tag
 ./scripts/release.sh --tag-prefix v
+./scripts/todo_to_issues.py --dry-run
 ```
 
 Makefile shortcuts:
