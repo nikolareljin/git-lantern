@@ -4,7 +4,14 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Added
+
+- Added `lantern todo issues` command to create GitHub issues from `TODO.txt` with duplicate checks by title/body.
+- Added parser coverage for the new TODO issues command in `tests/test_cli_todo_command.py`.
+
+### Changed
+
+- Updated CLI documentation and quick examples in `README.md` for TODO-to-issues workflows.
 
 ## [0.2.0] - 2026-02-28
 

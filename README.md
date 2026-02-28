@@ -34,6 +34,7 @@ Commands (jump to detailed guides):
 - `lantern duplicates` -> `docs/use-cases.md#lantern-duplicates`
 - `lantern sync` -> `docs/use-cases.md#lantern-sync`
 - `lantern report` -> `docs/use-cases.md#lantern-report`
+- `lantern todo issues` -> create GitHub issues from `TODO.txt` (duplicate-safe)
 - `lantern forge list` -> `docs/use-cases.md#list-repos-from-a-server`
 - `lantern forge clone` -> `docs/use-cases.md#clone-missing-repos-to-a-workspace`
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`
@@ -52,6 +53,8 @@ lantern fleet logs --latest
 lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
+lantern todo issues --dry-run
+lantern todo issues --label todo --label backlog
 lantern forge list --server github.com --output data/github.json
 lantern forge list --server github.com --org my-org --org platform --with-user --output data/github-orgs.json
 lantern forge clone --server github.com --input data/github.json --root ~/workspace

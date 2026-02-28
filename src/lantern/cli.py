@@ -3666,6 +3666,32 @@ def cmd_github_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_todo_issues(args: argparse.Namespace) -> int:
+    """Create GitHub issues from TODO.txt entries."""
+    script_path = os.path.join(_REPO_DIR, "scripts", "todo_to_issues.py")
+    if not os.path.isfile(script_path):
+        print(f"TODO issues script not found: {script_path}", file=sys.stderr)
+        return 1
+
+    cmd_args = [
+        sys.executable,
+        script_path,
+        "--todo-file",
+        args.todo_file,
+        "--limit",
+        str(args.limit),
+    ]
+    if args.repo:
+        cmd_args.extend(["--repo", args.repo])
+    for label in args.label:
+        cmd_args.extend(["--label", label])
+    if args.dry_run:
+        cmd_args.append("--dry-run")
+
+    result = subprocess.run(cmd_args, check=False, cwd=args.cwd)
+    return result.returncode
+
+
 def cmd_github_clone(args: argparse.Namespace) -> int:
     with open(args.input, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -4343,6 +4369,18 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--format", choices=["csv", "json", "md"], default="csv")
     report.add_argument("--columns", default="")
     report.set_defaults(func=cmd_report)
+
+    todo = sub.add_parser("todo", help="TODO file workflows")
+    todo_sub = todo.add_subparsers(dest="todo_command", required=True)
+
+    todo_issues = todo_sub.add_parser("issues", help="create GitHub issues from TODO.txt")
+    todo_issues.add_argument("--todo-file", default="TODO.txt", help="Path to TODO file (default: TODO.txt).")
+    todo_issues.add_argument("--repo", default="", help="Optional OWNER/REPO override.")
+    todo_issues.add_argument("--limit", type=int, default=1000, help="Existing-issue scan limit for duplicate checks.")
+    todo_issues.add_argument("--label", action="append", default=[], help="Issue label to apply (repeatable).")
+    todo_issues.add_argument("--dry-run", action="store_true", help="Preview without creating issues.")
+    todo_issues.add_argument("--cwd", default=os.getcwd(), help="Working directory for gh context (default: current dir).")
+    todo_issues.set_defaults(func=cmd_todo_issues)
 
     forge = sub.add_parser("forge", help="git server utilities")
     forge_sub = forge.add_subparsers(dest="forge_command", required=True)
