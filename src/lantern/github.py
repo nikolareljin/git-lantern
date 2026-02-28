@@ -83,7 +83,7 @@ def fetch_repos(
     api_base = _base_url(base_url)
     seen_full_names = set()
 
-    def _append_repo(repo: Dict, owner_filter: str) -> None:
+    def _append_repo(repo: Dict, owner_filter: str, org_label: str = "") -> None:
         owner_login = str((repo.get("owner") or {}).get("login") or "")
         if owner_filter and owner_login.lower() != owner_filter.lower():
             return
@@ -107,11 +107,17 @@ def fetch_repos(
                 "clone_url": repo.get("clone_url"),
                 "html_url": repo.get("html_url"),
                 "owner": owner_login,
-                "org": owner_filter if owner_filter else "",
+                "org": org_label,
             }
         )
 
-    def _fetch_endpoint(url_base: str, params: Dict[str, str], request_token: Optional[str], owner_filter: str) -> None:
+    def _fetch_endpoint(
+        url_base: str,
+        params: Dict[str, str],
+        request_token: Optional[str],
+        owner_filter: str,
+        org_label: str = "",
+    ) -> None:
         page = 1
         while True:
             page_params = dict(params)
@@ -121,7 +127,7 @@ def fetch_repos(
             if not data:
                 break
             for repo in data:
-                _append_repo(repo, owner_filter)
+                _append_repo(repo, owner_filter, org_label)
             page += 1
 
     if include_user:
@@ -131,6 +137,7 @@ def fetch_repos(
                 {"affiliation": "owner", "per_page": str(per_page)},
                 token,
                 user,
+                "",
             )
         else:
             _fetch_endpoint(
@@ -138,6 +145,7 @@ def fetch_repos(
                 {"type": "owner", "per_page": str(per_page)},
                 None,
                 user,
+                "",
             )
 
     for org_entry in organizations or []:
@@ -149,6 +157,7 @@ def fetch_repos(
             f"{api_base}/orgs/{urllib.parse.quote(org_name)}/repos",
             {"type": "all", "per_page": str(per_page)},
             org_token,
+            org_name,
             org_name,
         )
 

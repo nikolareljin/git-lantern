@@ -85,9 +85,10 @@ def get_server_organizations(server: Dict) -> List[Dict[str, str]]:
 
     def _append(name: str, token: str = "") -> None:
         org = str(name or "").strip()
-        if not org or org in seen:
+        key = org.lower()
+        if not org or key in seen:
             return
-        seen.add(org)
+        seen.add(key)
         normalized.append({"name": org, "token": str(token or "").strip()})
 
     if isinstance(raw, list):

@@ -2517,7 +2517,11 @@ def _resolve_org_selection(
     server: Dict[str, Any],
 ) -> Tuple[List[Dict[str, str]], bool, List[str]]:
     configured_orgs = lantern_config.get_server_organizations(server)
-    configured_by_name = {entry.get("name", ""): dict(entry) for entry in configured_orgs if entry.get("name")}
+    configured_by_name = {
+        str(entry.get("name") or "").strip().lower(): dict(entry)
+        for entry in configured_orgs
+        if str(entry.get("name") or "").strip()
+    }
     requested_orgs = [str(org).strip() for org in getattr(args, "orgs", []) if str(org).strip()]
     use_all_orgs = bool(getattr(args, "all_orgs", False))
 
@@ -2529,11 +2533,13 @@ def _resolve_org_selection(
     elif requested_orgs:
         seen = set()
         for org_name in requested_orgs:
-            if org_name in seen:
+            key = org_name.lower()
+            if key in seen:
                 continue
-            seen.add(org_name)
-            selected_entries.append(dict(configured_by_name.get(org_name, {"name": org_name, "token": ""})))
-            selected_names.append(org_name)
+            seen.add(key)
+            selected_entry = dict(configured_by_name.get(key, {"name": org_name, "token": ""}))
+            selected_entries.append(selected_entry)
+            selected_names.append(str(selected_entry.get("name") or org_name))
 
     include_user = True
     if selected_entries:

@@ -4,9 +4,11 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+
 ## [0.2.0] - 2026-02-28
 
-### Added
+### Highlights
 
 - Added GitHub organization-aware repository listing:
   - `lantern forge list --org <name>` (repeatable),
@@ -67,7 +69,7 @@ All notable changes to git-lantern are documented in this file.
   - `status --fetch`, `scan --fetch`, `sync`, and `fleet plan/apply` in CLI.
   - visible working indicators for long `status`, `scan`, and `fleet` operations in TUI.
 
-### Added - TUI Features
+### TUI Features
 
 #### Interactive TUI Mode (`lantern --tui` / `lantern -t`)
 
@@ -136,7 +138,7 @@ lantern config setup
 
 - **Non-destructive workflow**: Changes are held in memory until you explicitly choose "Save and exit".
 
-### Changed
+### Changed (continued)
 
 - **Forge list in TUI**: Split into two separate menu options:
   - "List remote repositories (display)" - Shows results directly in the TUI
