@@ -12,7 +12,7 @@ SRC_DIR = os.path.join(REPO_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from lantern.todo_issues import main
+from lantern.todo_issues import main  # noqa: E402
 
 
 if __name__ == "__main__":
