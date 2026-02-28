@@ -123,9 +123,16 @@ def fetch_repos(
             page_params = dict(params)
             page_params["page"] = str(page)
             url = f"{url_base}?{urllib.parse.urlencode(page_params)}"
-            data = _request(url, request_token)
+            try:
+                data = _request(url, request_token)
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+                raise ValueError(f"Failed to fetch GitHub data from {url}") from exc
             if not data:
                 break
+            if not isinstance(data, list):
+                raise ValueError(
+                    f"Expected list of repositories from GitHub API, got {type(data).__name__} for {url}"
+                )
             for repo in data:
                 _append_repo(repo, owner_filter, org_label)
             page += 1
@@ -141,7 +148,7 @@ def fetch_repos(
             )
         else:
             _fetch_endpoint(
-                f"{api_base}/users/{user}/repos",
+                f"{api_base}/users/{urllib.parse.quote(user, safe='')}/repos",
                 {"type": "owner", "per_page": str(per_page)},
                 None,
                 user,
@@ -154,7 +161,7 @@ def fetch_repos(
             continue
         org_token = str((org_entry or {}).get("token") or "").strip() or token
         _fetch_endpoint(
-            f"{api_base}/orgs/{urllib.parse.quote(org_name)}/repos",
+            f"{api_base}/orgs/{urllib.parse.quote(org_name, safe='')}/repos",
             {"type": "all", "per_page": str(per_page)},
             org_token,
             org_name,

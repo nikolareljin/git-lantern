@@ -2691,9 +2691,14 @@ def _resolve_org_selection(
             selected_entries.append(selected_entry)
             selected_names.append(str(selected_entry.get("name") or org_name))
 
+    with_user_flag = bool(getattr(args, "with_user", False))
     include_user = True
     if selected_entries:
-        include_user = bool(getattr(args, "with_user", False))
+        include_user = with_user_flag
+    elif use_all_orgs and not with_user_flag:
+        # Keep --all-orgs behavior explicit: do not silently fall back to
+        # personal repositories when no organizations are configured.
+        include_user = False
     return selected_entries, include_user, selected_names
 
 

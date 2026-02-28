@@ -202,6 +202,49 @@ class OrgSupportTests(unittest.TestCase):
         self.assertFalse(include_user)
         self.assertEqual(selected_orgs, ["My-Org"])
 
+    def test_resolve_org_selection_all_orgs_without_config_does_not_include_user(self) -> None:
+        args = argparse.Namespace(orgs=[], all_orgs=True, with_user=False)
+        server = {"organizations": []}
+        org_entries, include_user, selected_orgs = cli._resolve_org_selection(args, server)
+        self.assertEqual(org_entries, [])
+        self.assertFalse(include_user)
+        self.assertEqual(selected_orgs, [])
+
+    def test_github_fetch_repos_raises_on_non_list_payload(self) -> None:
+        def fake_request(_url: str, _token: str):
+            return {"message": "API error"}
+
+        with patch("lantern.github._request", side_effect=fake_request):
+            with self.assertRaisesRegex(ValueError, r"Expected list of repositories"):
+                github.fetch_repos(
+                    user="alice",
+                    token="main-token",
+                    include_forks=False,
+                    base_url="https://api.github.com",
+                    organizations=[{"name": "org-a", "token": ""}],
+                    include_user=False,
+                )
+
+    def test_github_fetch_repos_escapes_user_and_org_path_segments(self) -> None:
+        seen_urls = []
+
+        def fake_request(url: str, _token: str):
+            seen_urls.append(url)
+            return []
+
+        with patch("lantern.github._request", side_effect=fake_request):
+            github.fetch_repos(
+                user="alice/team",
+                token=None,
+                include_forks=False,
+                base_url="https://api.github.com",
+                organizations=[{"name": "org/team", "token": ""}],
+                include_user=True,
+            )
+
+        self.assertTrue(any("/users/alice%2Fteam/repos" in url for url in seen_urls))
+        self.assertTrue(any("/orgs/org%2Fteam/repos" in url for url in seen_urls))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
