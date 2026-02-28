@@ -4,6 +4,22 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-28
+
+### Added
+
+- Added GitHub organization-aware repository listing:
+  - `lantern forge list --org <name>` (repeatable),
+  - `lantern forge list --all-orgs`,
+  - `lantern forge list --with-user` to combine personal repos with selected org repos.
+- Added the same org selection flags to `lantern fleet plan` / `lantern fleet apply` when remote repos are fetched from the configured server.
+- Added support for per-organization token overrides in server config using `organizations` / `orgs` entries.
+
+### Changed
+
+- GitHub forge/fleet repo listings now emit namespaced repo names (`owner/repo`) to keep multi-organization results unambiguous.
+- Documentation now includes examples for multi-organization selection and per-org token configuration under a single Git service.
+
 ### Added
 
 - `fleet` workflow improvements:

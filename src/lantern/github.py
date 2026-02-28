@@ -75,47 +75,82 @@ def fetch_repos(
     token: Optional[str],
     include_forks: bool,
     base_url: Optional[str] = None,
+    organizations: Optional[List[Dict[str, str]]] = None,
+    include_user: bool = True,
 ) -> List[Dict]:
     per_page = 100
-    page = 1
     repos: List[Dict] = []
     api_base = _base_url(base_url)
+    seen_full_names = set()
 
-    if token:
-        url_base = f"{api_base}/user/repos"
-        params = {
-            "affiliation": "owner",
-            "per_page": str(per_page),
-        }
-    else:
-        url_base = f"{api_base}/users/{user}/repos"
-        params = {
-            "type": "owner",
-            "per_page": str(per_page),
-        }
+    def _append_repo(repo: Dict, owner_filter: str) -> None:
+        owner_login = str((repo.get("owner") or {}).get("login") or "")
+        if owner_filter and owner_login.lower() != owner_filter.lower():
+            return
+        if not include_forks and repo.get("fork"):
+            return
+        full_name = str(repo.get("full_name") or "").strip()
+        if not full_name:
+            name = str(repo.get("name") or "").strip()
+            if not name or not owner_login:
+                return
+            full_name = f"{owner_login}/{name}"
+        if full_name in seen_full_names:
+            return
+        seen_full_names.add(full_name)
+        repos.append(
+            {
+                "name": full_name,
+                "private": bool(repo.get("private")),
+                "default_branch": repo.get("default_branch"),
+                "ssh_url": repo.get("ssh_url"),
+                "clone_url": repo.get("clone_url"),
+                "html_url": repo.get("html_url"),
+                "owner": owner_login,
+                "org": owner_filter if owner_filter else "",
+            }
+        )
 
-    while True:
-        params["page"] = str(page)
-        url = f"{url_base}?{urllib.parse.urlencode(params)}"
-        data = _request(url, token)
-        if not data:
-            break
-        for repo in data:
-            if repo.get("owner", {}).get("login") != user:
-                continue
-            if not include_forks and repo.get("fork"):
-                continue
-            repos.append(
-                {
-                    "name": repo.get("name"),
-                    "private": bool(repo.get("private")),
-                    "default_branch": repo.get("default_branch"),
-                    "ssh_url": repo.get("ssh_url"),
-                    "clone_url": repo.get("clone_url"),
-                    "html_url": repo.get("html_url"),
-                }
+    def _fetch_endpoint(url_base: str, params: Dict[str, str], request_token: Optional[str], owner_filter: str) -> None:
+        page = 1
+        while True:
+            page_params = dict(params)
+            page_params["page"] = str(page)
+            url = f"{url_base}?{urllib.parse.urlencode(page_params)}"
+            data = _request(url, request_token)
+            if not data:
+                break
+            for repo in data:
+                _append_repo(repo, owner_filter)
+            page += 1
+
+    if include_user:
+        if token:
+            _fetch_endpoint(
+                f"{api_base}/user/repos",
+                {"affiliation": "owner", "per_page": str(per_page)},
+                token,
+                user,
             )
-        page += 1
+        else:
+            _fetch_endpoint(
+                f"{api_base}/users/{user}/repos",
+                {"type": "owner", "per_page": str(per_page)},
+                None,
+                user,
+            )
+
+    for org_entry in organizations or []:
+        org_name = str((org_entry or {}).get("name") or "").strip()
+        if not org_name:
+            continue
+        org_token = str((org_entry or {}).get("token") or "").strip() or token
+        _fetch_endpoint(
+            f"{api_base}/orgs/{urllib.parse.quote(org_name)}/repos",
+            {"type": "all", "per_page": str(per_page)},
+            org_token,
+            org_name,
+        )
 
     return repos
 

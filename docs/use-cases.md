@@ -115,7 +115,11 @@ Example config:
       "provider": "github",
       "base_url": "https://api.github.com",
       "USER": "my-user",
-      "TOKEN": "ghp_xxx"
+      "TOKEN": "ghp_xxx",
+      "organizations": [
+        { "name": "my-org-a", "token": "ghp_org_a_token" },
+        { "name": "my-org-b" }
+      ]
     },
     "gitlab.com": {
       "provider": "gitlab",
@@ -265,6 +269,8 @@ Omit `--output` to render a table instead of JSON.
 lantern forge list --server github.com --output data/github.json
 lantern forge list --server gitlab.com --output data/gitlab.json
 lantern forge list --server bitbucket.org --output data/bitbucket.json
+lantern forge list --server github.com --org my-org-a --org my-org-b --output data/github-orgs.json
+lantern forge list --server github.com --all-orgs --with-user --output data/github-all.json
 ```
 
 ### Clone missing repos to a workspace

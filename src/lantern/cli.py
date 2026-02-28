@@ -2512,6 +2512,35 @@ def _fleet_server_context(args: argparse.Namespace) -> Tuple[str, str, str, str,
     return provider, base_url, user, token, auth, server
 
 
+def _resolve_org_selection(
+    args: argparse.Namespace,
+    server: Dict[str, Any],
+) -> Tuple[List[Dict[str, str]], bool, List[str]]:
+    configured_orgs = lantern_config.get_server_organizations(server)
+    configured_by_name = {entry.get("name", ""): dict(entry) for entry in configured_orgs if entry.get("name")}
+    requested_orgs = [str(org).strip() for org in getattr(args, "orgs", []) if str(org).strip()]
+    use_all_orgs = bool(getattr(args, "all_orgs", False))
+
+    selected_names: List[str] = []
+    selected_entries: List[Dict[str, str]] = []
+    if use_all_orgs:
+        selected_entries = [dict(entry) for entry in configured_orgs]
+        selected_names = [entry.get("name", "") for entry in selected_entries if entry.get("name")]
+    elif requested_orgs:
+        seen = set()
+        for org_name in requested_orgs:
+            if org_name in seen:
+                continue
+            seen.add(org_name)
+            selected_entries.append(dict(configured_by_name.get(org_name, {"name": org_name, "token": ""})))
+            selected_names.append(org_name)
+
+    include_user = True
+    if selected_entries:
+        include_user = bool(getattr(args, "with_user", False))
+    return selected_entries, include_user, selected_names
+
+
 def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     if args.input:
         with open(args.input, "r", encoding="utf-8") as handle:
@@ -2519,12 +2548,24 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
         return payload if isinstance(payload, dict) else {"repos": []}
 
     provider, base_url, user, token, auth, server = _fleet_server_context(args)
-    repos = forge.fetch_repos(provider, user, token, args.include_forks, base_url, auth)
+    org_entries, include_user, selected_orgs = _resolve_org_selection(args, server)
+    repos = forge.fetch_repos(
+        provider,
+        user,
+        token,
+        args.include_forks,
+        base_url,
+        auth,
+        organizations=org_entries,
+        include_user=include_user,
+    )
     return {
         "server": server.get("name", provider),
         "provider": provider,
         "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
         "user": user,
+        "selected_orgs": selected_orgs,
+        "include_user": include_user,
         "repos": repos,
     }
 
@@ -3422,8 +3463,18 @@ def cmd_github_list(args: argparse.Namespace) -> int:
     user = args.user or env.get(env_user_key) or server.get("user")
     token = args.token or env.get(env_token_key) or server.get("token")
     auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+    org_entries, include_user, selected_orgs = _resolve_org_selection(args, server)
     try:
-        repos = forge.fetch_repos(provider, user, token, args.include_forks, base_url, auth)
+        repos = forge.fetch_repos(
+            provider,
+            user,
+            token,
+            args.include_forks,
+            base_url,
+            auth,
+            organizations=org_entries,
+            include_user=include_user,
+        )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -3433,6 +3484,8 @@ def cmd_github_list(args: argparse.Namespace) -> int:
         "provider": provider,
         "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
         "user": user,
+        "selected_orgs": selected_orgs,
+        "include_user": include_user,
         "repos": repos,
     }
     if args.output:
@@ -4083,6 +4136,9 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_plan.add_argument("--user", default="")
     fleet_plan.add_argument("--token", default="")
     fleet_plan.add_argument("--include-forks", action="store_true")
+    fleet_plan.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    fleet_plan.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    fleet_plan.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_plan.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
     fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_plan.set_defaults(func=cmd_fleet_plan)
@@ -4097,6 +4153,9 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--user", default="")
     fleet_apply.add_argument("--token", default="")
     fleet_apply.add_argument("--include-forks", action="store_true")
+    fleet_apply.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    fleet_apply.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    fleet_apply.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
     fleet_apply.add_argument("--clone-missing", action="store_true")
     fleet_apply.add_argument("--pull-behind", action="store_true")
@@ -4132,6 +4191,9 @@ def build_parser() -> argparse.ArgumentParser:
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
     gh_list.add_argument("--include-forks", action="store_true")
+    gh_list.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    gh_list.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    gh_list.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     gh_list.add_argument(
         "--output",
         default=None,

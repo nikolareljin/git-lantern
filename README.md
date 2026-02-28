@@ -45,6 +45,7 @@ Commands (jump to detailed guides):
 Quick examples:
 ```bash
 lantern fleet plan --root ~/workspace --server github.com --fetch
+lantern fleet plan --root ~/workspace --server github.com --org my-org --with-user
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
 lantern fleet logs --latest
@@ -52,6 +53,7 @@ lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
 lantern forge list --server github.com --output data/github.json
+lantern forge list --server github.com --org my-org --org platform --with-user --output data/github-orgs.json
 lantern forge clone --server github.com --input data/github.json --root ~/workspace
 lantern forge gists list --server github.com --output data/gists.json
 ```

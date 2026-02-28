@@ -45,7 +45,11 @@ Lantern can read a `config.json` file to manage multiple git servers (GitHub, Gi
       "provider": "github",
       "base_url": "https://api.github.com",
       "USER": "my-user",
-      "TOKEN": "ghp_xxx"
+      "TOKEN": "ghp_xxx",
+      "organizations": [
+        { "name": "my-org-a", "token": "ghp_org_a_token" },
+        { "name": "my-org-b" }
+      ]
     },
     "gitlab.com": {
       "provider": "gitlab",
@@ -490,6 +494,11 @@ Environment fallbacks:
 - Uses `--server` to select a provider (defaults to `default_server`, which defaults to `github.com`).
 - Uses `--user` (or config/env defaults) to scope repos.
 - If `--token` is set, it uses the authenticated endpoint and can include private repos owned by the user.
+- GitHub supports organization-scoped listing:
+  - `--org ORG` (repeatable) selects one or more orgs.
+  - `--all-orgs` uses all orgs configured under the selected server.
+  - `--with-user` includes personal repos alongside selected org repos.
+- Organization entries in config can carry per-org token overrides (`organizations[].token`).
 - If `--include-forks` is not set, forked repos are excluded.
 - Writes JSON to `--output` (or stdout with `--output -`).
 - If `--output` is omitted, prints a table instead of JSON.
@@ -505,6 +514,8 @@ Environment fallbacks:
 lantern forge list --server github.com --user my-user --output data/github.json
 lantern forge list --server gitlab.com --output data/gitlab.json
 lantern forge list --server bitbucket.org --output data/bitbucket.json
+lantern forge list --server github.com --org my-org-a --org my-org-b --output data/github-orgs.json
+lantern forge list --server github.com --all-orgs --with-user --output data/github-all.json
 ```
 
 ### `lantern forge clone`

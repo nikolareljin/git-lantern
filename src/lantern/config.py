@@ -67,6 +67,51 @@ def list_servers(config: Dict) -> List[Dict]:
     return output
 
 
+def get_server_organizations(server: Dict) -> List[Dict[str, str]]:
+    """Normalize configured organization entries for a server.
+
+    Supports these shapes:
+    - organizations: ["org-a", "org-b"]
+    - organizations: [{"name": "org-a", "token": "..."}, ...]
+    - organizations: {"org-a": {"token": "..."}, "org-b": "...token..."}
+    - orgs: <same shapes as organizations>
+    """
+    raw = server.get("organizations")
+    if raw is None:
+        raw = server.get("orgs")
+
+    normalized: List[Dict[str, str]] = []
+    seen = set()
+
+    def _append(name: str, token: str = "") -> None:
+        org = str(name or "").strip()
+        if not org or org in seen:
+            return
+        seen.add(org)
+        normalized.append({"name": org, "token": str(token or "").strip()})
+
+    if isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, str):
+                _append(entry)
+                continue
+            if isinstance(entry, dict):
+                _append(entry.get("name") or entry.get("org") or entry.get("organization") or "", entry.get("token") or "")
+        return normalized
+
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(value, dict):
+                _append(value.get("name") or key, value.get("token") or "")
+            elif isinstance(value, str):
+                _append(key, value)
+            else:
+                _append(key, "")
+        return normalized
+
+    return normalized
+
+
 def _infer_provider(name: str) -> str:
     if not name:
         return "github"
