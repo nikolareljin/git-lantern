@@ -61,8 +61,9 @@ def fetch_repos(
             raise ValueError("User is required for GitHub.")
         if not include_user and not organizations:
             raise ValueError(
-                "At least one organization is required when user repositories are "
-                "excluded (set include_user=False or use --org/--all-orgs)."
+                "User repositories are excluded, but no organizations were selected. "
+                "Configure 'organizations'/'orgs' in server config, pass --org/--all-orgs, "
+                "or use --with-user to include personal repositories."
             )
         return github.fetch_repos(
             user or "",

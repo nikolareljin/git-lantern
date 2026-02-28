@@ -20,11 +20,11 @@ from . import config as lantern_config
 from . import forge
 from . import git
 from . import github
+from . import todo_issues
 from .table import render_table
 
 # Resolved path to the src/ directory for subprocess PYTHONPATH
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_REPO_DIR = os.path.dirname(_SRC_DIR)
 
 
 # Common server presets for TUI setup
@@ -795,7 +795,7 @@ def _handle_tui_command_action(height: int, width: int) -> None:
 
 
 def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: int) -> None:
-    """Run scripts/todo_to_issues.py for a selected repository from TUI."""
+    """Run TODO-to-issues workflow for a selected repository from TUI."""
     if not _validate_session_root(session["root"], height, width):
         return
 
@@ -891,14 +891,10 @@ def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: 
         _dialog_msgbox("TODO -> Issues", "Operation cancelled.", height, width)
         return
 
-    script_path = os.path.join(_REPO_DIR, "scripts", "todo_to_issues.py")
-    if not os.path.isfile(script_path):
-        _dialog_msgbox("Error", f"Script not found:\n{script_path}", height, width)
-        return
-
     cmd_args = [
         sys.executable,
-        script_path,
+        "-m",
+        "lantern.todo_issues",
         "--todo-file",
         todo_file,
         "--limit",
@@ -3668,28 +3664,19 @@ def cmd_github_list(args: argparse.Namespace) -> int:
 
 def cmd_todo_issues(args: argparse.Namespace) -> int:
     """Create GitHub issues from TODO.txt entries."""
-    script_path = os.path.join(_REPO_DIR, "scripts", "todo_to_issues.py")
-    if not os.path.isfile(script_path):
-        print(f"TODO issues script not found: {script_path}", file=sys.stderr)
-        return 1
-
-    cmd_args = [
-        sys.executable,
-        script_path,
-        "--todo-file",
-        args.todo_file,
-        "--limit",
-        str(args.limit),
-    ]
-    if args.repo:
-        cmd_args.extend(["--repo", args.repo])
-    for label in args.label:
-        cmd_args.extend(["--label", label])
-    if args.dry_run:
-        cmd_args.append("--dry-run")
-
-    result = subprocess.run(cmd_args, check=False, cwd=args.cwd)
-    return result.returncode
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(args.cwd)
+        argv = ["--todo-file", args.todo_file, "--limit", str(args.limit)]
+        if args.repo:
+            argv.extend(["--repo", args.repo])
+        for label in args.label:
+            argv.extend(["--label", label])
+        if args.dry_run:
+            argv.append("--dry-run")
+        return todo_issues.main(argv)
+    finally:
+        os.chdir(original_cwd)
 
 
 def cmd_github_clone(args: argparse.Namespace) -> int:

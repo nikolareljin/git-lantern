@@ -1,14 +1,12 @@
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
+import os
 import sys
 
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC = os.path.join(ROOT, "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "todo_to_issues.py"
-SPEC = spec_from_file_location("todo_to_issues", SCRIPT_PATH)
-todo_to_issues = module_from_spec(SPEC)
-assert SPEC and SPEC.loader
-sys.modules[SPEC.name] = todo_to_issues
-SPEC.loader.exec_module(todo_to_issues)
+from lantern import todo_issues  # noqa: E402
 
 
 def test_parse_todo_items_basic():
@@ -24,7 +22,7 @@ Description: Second description
 [/TODO]
 """.strip()
 
-    items = todo_to_issues.parse_todo_items(content)
+    items = todo_issues.parse_todo_items(content)
     assert len(items) == 2
     assert items[0].item_id == "001"
     assert items[0].title == "First title"
@@ -46,29 +44,43 @@ Line three
 [/TODO]
 """.strip()
 
-    items = todo_to_issues.parse_todo_items(content)
+    items = todo_issues.parse_todo_items(content)
     assert len(items) == 1
     assert items[0].description == "Line one\nLine two\n\nLine three"
 
 
 def test_is_duplicate_by_title_or_description():
-    item = todo_to_issues.TodoItem(
+    item = todo_issues.TodoItem(
         item_id="001",
         title="Detect branch",
         description="Display latest branch",
     )
-    body = todo_to_issues.build_issue_body(item)
+    body = todo_issues.build_issue_body(item)
 
-    title_hit = todo_to_issues.is_duplicate(
+    title_hit = todo_issues.is_duplicate(
         item,
-        {todo_to_issues.normalize_text("detect BRANCH")},
+        {todo_issues.normalize_text("detect BRANCH")},
         set(),
     )
     assert title_hit
 
-    description_hit = todo_to_issues.is_duplicate(
+    description_hit = todo_issues.is_duplicate(
         item,
         set(),
-        {todo_to_issues.normalize_text(body)},
+        {todo_issues.normalize_text(body)},
     )
     assert description_hit
+
+
+def test_extract_todo_block_malformed_order_falls_back():
+    content = """
+[/TODO]
+noise
+[TODO]
+ID: 001
+Title: Later
+Description: Parse me
+[/TODO]
+""".strip()
+    block = todo_issues.extract_todo_block(content)
+    assert "Title: Later" in block

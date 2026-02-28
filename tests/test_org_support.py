@@ -76,7 +76,7 @@ class OrgSupportTests(unittest.TestCase):
             self.assertFalse(kwargs["include_user"])
 
     def test_forge_fetch_repos_error_message_mentions_supported_flags(self) -> None:
-        with self.assertRaisesRegex(ValueError, r"--org/--all-orgs"):
+        with self.assertRaisesRegex(ValueError, r"--org/--all-orgs|--with-user|organizations"):
             forge.fetch_repos(
                 provider="github",
                 user="alice",
