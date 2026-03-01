@@ -147,8 +147,8 @@ def fetch_existing_issues(repo: Optional[str], limit: int) -> Tuple[set, set]:
             raise ValueError(
                 f"Unexpected gh issue entry type: {type(issue).__name__}. Expected an object."
             )
-        title = normalize_text(issue.get("title", ""))
-        body = normalize_text(issue.get("body", ""))
+        title = normalize_text(issue.get("title") or "")
+        body = normalize_text(issue.get("body") or "")
         if title:
             title_set.add(title)
         if body:
