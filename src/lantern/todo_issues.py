@@ -15,6 +15,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 TODO_START = "[TODO]"
 TODO_END = "[/TODO]"
+GH_NOT_FOUND_ERROR = "gh CLI not found. Install GitHub CLI and ensure 'gh' is in PATH."
 
 
 @dataclass
@@ -110,7 +111,10 @@ def read_todo_file(todo_path: Path) -> List[TodoItem]:
 
 
 def run_gh_json(command: Sequence[str]) -> object:
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(GH_NOT_FOUND_ERROR) from exc
     if not result.stdout.strip():
         return []
     return json.loads(result.stdout)
@@ -132,9 +136,17 @@ def fetch_existing_issues(repo: Optional[str], limit: int) -> Tuple[set, set]:
         cmd.extend(["-R", repo])
 
     issues = run_gh_json(cmd)
+    if not isinstance(issues, list):
+        raise ValueError(
+            f"Unexpected gh issue payload type: {type(issues).__name__}. Expected a JSON list."
+        )
     title_set = set()
     description_set = set()
     for issue in issues:
+        if not isinstance(issue, dict):
+            raise ValueError(
+                f"Unexpected gh issue entry type: {type(issue).__name__}. Expected an object."
+            )
         title = normalize_text(issue.get("title", ""))
         body = normalize_text(issue.get("body", ""))
         if title:
@@ -173,7 +185,10 @@ def create_issue(
     if repo:
         cmd.extend(["-R", repo])
 
-    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(GH_NOT_FOUND_ERROR) from exc
     created = result.stdout.strip() or item.title
     print(f"[CREATED] {created}")
 
@@ -230,6 +245,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         seen_titles, seen_descriptions = fetch_existing_issues(args.repo, args.limit)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
         print("Failed to load existing issues via gh.", file=sys.stderr)
@@ -238,6 +256,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     except json.JSONDecodeError as exc:
         print(f"Failed to parse gh JSON output: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"Failed to parse gh issue payload: {exc}", file=sys.stderr)
         return 1
 
     created = 0
@@ -250,6 +271,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         try:
             create_issue(item, args.repo, args.label, args.dry_run)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()
             print(f"[ERROR] Failed to create issue: {item.title}", file=sys.stderr)
@@ -263,3 +287,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"Done. Created: {created}, Skipped duplicates: {skipped}, Parsed: {len(items)}")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

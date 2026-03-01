@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from types import SimpleNamespace
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -49,3 +50,18 @@ def test_todo_issues_parser_flags():
     assert args.limit == 250
     assert args.label == ["todo", "backlog"]
     assert args.dry_run is True
+
+
+def test_cmd_todo_issues_invalid_cwd(capsys):
+    args = SimpleNamespace(
+        cwd="/definitely/missing/path",
+        todo_file="TODO.txt",
+        limit=10,
+        repo="",
+        label=[],
+        dry_run=False,
+    )
+    rc = cli.cmd_todo_issues(args)
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "Failed to change working directory" in captured.err

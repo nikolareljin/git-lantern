@@ -3666,7 +3666,11 @@ def cmd_todo_issues(args: argparse.Namespace) -> int:
     """Create GitHub issues from TODO.txt entries."""
     original_cwd = os.getcwd()
     try:
-        os.chdir(args.cwd)
+        try:
+            os.chdir(args.cwd)
+        except OSError as exc:
+            print(f"Failed to change working directory to '{args.cwd}': {exc}", file=sys.stderr)
+            return 1
         argv = ["--todo-file", args.todo_file, "--limit", str(args.limit)]
         if args.repo:
             argv.extend(["--repo", args.repo])

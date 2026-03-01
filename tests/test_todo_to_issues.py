@@ -84,3 +84,72 @@ Description: Parse me
 """.strip()
     block = todo_issues.extract_todo_block(content)
     assert "Title: Later" in block
+
+
+def test_fetch_existing_issues_rejects_non_list_payload(monkeypatch):
+    monkeypatch.setattr(todo_issues, "run_gh_json", lambda _cmd: {"items": []})
+    try:
+        todo_issues.fetch_existing_issues(repo=None, limit=10)
+    except ValueError as exc:
+        assert "Expected a JSON list" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for non-list gh payload")
+
+
+def test_run_gh_json_reports_missing_gh(monkeypatch):
+    def _raise(*_args, **_kwargs):
+        raise FileNotFoundError("gh not found")
+
+    monkeypatch.setattr(todo_issues.subprocess, "run", _raise)
+    try:
+        todo_issues.run_gh_json(["gh", "issue", "list"])
+    except RuntimeError as exc:
+        assert "gh CLI not found" in str(exc)
+    else:
+        raise AssertionError("Expected RuntimeError when gh is missing")
+
+
+def test_main_reports_missing_gh(tmp_path, monkeypatch, capsys):
+    todo_file = tmp_path / "TODO.txt"
+    todo_file.write_text(
+        "\n".join(
+            [
+                "[TODO]",
+                "ID: 001",
+                "Title: Title",
+                "Description: Desc",
+                "[/TODO]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        todo_issues,
+        "fetch_existing_issues",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(todo_issues.GH_NOT_FOUND_ERROR)),
+    )
+
+    rc = todo_issues.main(["--todo-file", str(todo_file)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "gh CLI not found" in captured.err
+
+
+def test_main_executes_as_module_smoke(tmp_path):
+    todo_file = tmp_path / "TODO.txt"
+    todo_file.write_text("[TODO]\n[/TODO]\n", encoding="utf-8")
+    cmd = [
+        sys.executable,
+        "-m",
+        "lantern.todo_issues",
+        "--todo-file",
+        str(todo_file),
+        "--dry-run",
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = SRC
+    import subprocess
+
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert result.returncode == 0
