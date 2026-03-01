@@ -6,6 +6,31 @@ All notable changes to git-lantern are documented in this file.
 
 ### Added
 
+- Added `lantern todo issues` command to create GitHub issues from `TODO.txt` with duplicate checks by title/body.
+- Added parser coverage for the new TODO issues command in `tests/test_cli_todo_command.py`.
+
+### Changed
+
+- Updated CLI documentation and quick examples in `README.md` for TODO-to-issues workflows.
+
+## [0.2.0] - 2026-02-28
+
+### Highlights
+
+- Added GitHub organization-aware repository listing:
+  - `lantern forge list --org <name>` (repeatable),
+  - `lantern forge list --all-orgs`,
+  - `lantern forge list --with-user` to combine personal repos with selected org repos.
+- Added the same org selection flags to `lantern fleet plan` / `lantern fleet apply` when remote repos are fetched from the configured server.
+- Added support for per-organization token overrides in server config using `organizations` / `orgs` entries.
+
+### Changed
+
+- GitHub forge/fleet repo listings now emit namespaced repo names (`owner/repo`) to keep multi-organization results unambiguous.
+- Documentation now includes examples for multi-organization selection and per-org token configuration under a single Git service.
+
+### Added
+
 - `fleet` workflow improvements:
   - `lantern fleet plan --with-prs` now includes fresh open PR numbers and latest active PR branch hints (GitHub).
   - `lantern fleet apply --checkout-pr <number>` to checkout/update the branch behind a PR number.
@@ -51,7 +76,7 @@ All notable changes to git-lantern are documented in this file.
   - `status --fetch`, `scan --fetch`, `sync`, and `fleet plan/apply` in CLI.
   - visible working indicators for long `status`, `scan`, and `fleet` operations in TUI.
 
-### Added - TUI Features
+### TUI Features
 
 #### Interactive TUI Mode (`lantern --tui` / `lantern -t`)
 
@@ -120,7 +145,7 @@ lantern config setup
 
 - **Non-destructive workflow**: Changes are held in memory until you explicitly choose "Save and exit".
 
-### Changed
+### Changed (continued)
 
 - **Forge list in TUI**: Split into two separate menu options:
   - "List remote repositories (display)" - Shows results directly in the TUI

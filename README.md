@@ -34,6 +34,7 @@ Commands (jump to detailed guides):
 - `lantern duplicates` -> `docs/use-cases.md#lantern-duplicates`
 - `lantern sync` -> `docs/use-cases.md#lantern-sync`
 - `lantern report` -> `docs/use-cases.md#lantern-report`
+- `lantern todo issues` -> create GitHub issues from `TODO.txt` (duplicate-safe)
 - `lantern forge list` -> `docs/use-cases.md#list-repos-from-a-server`
 - `lantern forge clone` -> `docs/use-cases.md#clone-missing-repos-to-a-workspace`
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`
@@ -45,13 +46,17 @@ Commands (jump to detailed guides):
 Quick examples:
 ```bash
 lantern fleet plan --root ~/workspace --server github.com --fetch
+lantern fleet plan --root ~/workspace --server github.com --org my-org --with-user
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
 lantern fleet logs --latest
 lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
+lantern todo issues --dry-run
+lantern todo issues --label todo --label backlog
 lantern forge list --server github.com --output data/github.json
+lantern forge list --server github.com --org my-org --org platform --with-user --output data/github-orgs.json
 lantern forge clone --server github.com --input data/github.json --root ~/workspace
 lantern forge gists list --server github.com --output data/gists.json
 ```
@@ -91,6 +96,7 @@ Git Lantern
 ├── settings     - Session settings (root, depth, hidden, forks)
 ├── repos        - List local repositories
 ├── status       - Show repository status
+├── todo_issues  - Create GitHub issues from TODO.txt
 ├── lazygit      - Open selected repository in lazygit
 ├── fleet        - Unified fleet plan/apply/logs (clone/pull/push/report)
 ├── scan         - Scan repositories to JSON
@@ -173,6 +179,7 @@ Scripts:
 ./scripts/release.sh
 ./scripts/release.sh --no-tag
 ./scripts/release.sh --tag-prefix v
+./scripts/todo_to_issues.py --dry-run
 ```
 
 Makefile shortcuts:

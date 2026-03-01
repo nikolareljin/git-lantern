@@ -20,6 +20,7 @@ from . import config as lantern_config
 from . import forge
 from . import git
 from . import github
+from . import todo_issues
 from .table import render_table
 
 # Resolved path to the src/ directory for subprocess PYTHONPATH
@@ -793,6 +794,147 @@ def _handle_tui_command_action(height: int, width: int) -> None:
         _dialog_msgbox("Command", "Command completed with no output.", height, width)
 
 
+def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: int) -> None:
+    """Run TODO-to-issues workflow for a selected repository from TUI."""
+    if not _validate_session_root(session["root"], height, width):
+        return
+
+    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+    if not repos_list:
+        _dialog_msgbox("TODO -> Issues", f"No repositories found in:\n{session['root']}", height, width)
+        return
+
+    menu_items: List[Tuple[str, str]] = []
+    tag_to_path: Dict[str, str] = {}
+    for idx, repo_path in enumerate(repos_list, start=1):
+        tag = str(idx)
+        repo_name = os.path.basename(repo_path)
+        menu_items.append((tag, f"{repo_name}  ({repo_path})"))
+        tag_to_path[tag] = repo_path
+
+    selected_tag = _dialog_menu(
+        "TODO -> Issues",
+        "Select repository where issues should be created:",
+        menu_items,
+        height,
+        width,
+    )
+    if not selected_tag or selected_tag not in tag_to_path:
+        return
+    repo_path = tag_to_path[selected_tag]
+
+    default_todo = os.path.join(repo_path, "TODO.txt")
+    todo_file = _dialog_inputbox(
+        "TODO File",
+        "Path to TODO file:",
+        default_todo,
+        height,
+        width,
+    )
+    if not todo_file:
+        return
+    todo_file = os.path.abspath(todo_file)
+    if not os.path.isfile(todo_file):
+        _dialog_msgbox("Error", f"TODO file not found:\n{todo_file}", height, width)
+        return
+
+    limit_str = _dialog_inputbox("Issue Scan Limit", "How many existing issues to check for duplicates?", "1000")
+    if limit_str is None:
+        return
+    limit_str = (limit_str or "").strip() or "1000"
+    try:
+        limit = int(limit_str)
+        if limit <= 0:
+            raise ValueError
+    except ValueError:
+        _dialog_msgbox("Error", "Issue scan limit must be a positive integer.", height, width)
+        return
+
+    labels_raw = _dialog_inputbox(
+        "Labels",
+        "Optional comma-separated labels to apply to created issues:",
+        "todo",
+        height,
+        width,
+    )
+    if labels_raw is None:
+        return
+    labels = [label.strip() for label in labels_raw.split(",") if label.strip()]
+
+    repo_override = _dialog_inputbox(
+        "GitHub Repo",
+        "Optional OWNER/REPO override (leave empty to use current repository):",
+        "",
+        height,
+        width,
+    )
+    if repo_override is None:
+        return
+    repo_override = repo_override.strip()
+
+    dry_run = _dialog_yesno("Dry Run", "Run in dry-run mode first (no issues created)?", height, width)
+
+    preview_parts = [
+        f"Repository path: {repo_path}",
+        f"TODO file: {todo_file}",
+        f"Issue scan limit: {limit}",
+        f"Labels: {', '.join(labels) if labels else '(none)'}",
+        f"Repo override: {repo_override or '(current repo)'}",
+        f"Mode: {'dry-run' if dry_run else 'create issues'}",
+    ]
+    if not _dialog_yesno(
+        "Confirm",
+        "Run TODO -> Issues with these settings?\n\n" + "\n".join(preview_parts),
+        height,
+        width,
+    ):
+        _dialog_msgbox("TODO -> Issues", "Operation cancelled.", height, width)
+        return
+
+    cmd_args = [
+        sys.executable,
+        "-m",
+        "lantern.todo_issues",
+        "--todo-file",
+        todo_file,
+        "--limit",
+        str(limit),
+    ]
+    for label in labels:
+        cmd_args.extend(["--label", label])
+    if repo_override:
+        cmd_args.extend(["--repo", repo_override])
+    if dry_run:
+        cmd_args.append("--dry-run")
+
+    _dialog_infobox(
+        "TODO -> Issues",
+        "Processing TODO items...\n\nPlease wait.",
+        max(8, height // 3),
+        max(60, width // 2),
+    )
+    result = subprocess.run(
+        cmd_args,
+        cwd=repo_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(["clear"], check=False)
+
+    output_lines: List[str] = []
+    if result.stdout:
+        output_lines.append(result.stdout.strip())
+    if result.stderr:
+        output_lines.append("\n[stderr]\n" + result.stderr.strip())
+    output_text = "\n\n".join([chunk for chunk in output_lines if chunk]).strip()
+    if not output_text:
+        output_text = "Command completed with no output."
+
+    title = "TODO -> Issues Output" if result.returncode == 0 else "TODO -> Issues Error"
+    _dialog_textbox_from_text(title, output_text, height, width)
+
+
 def _is_safe_repo_name(name: str) -> bool:
     """Validate repo names used for local path construction."""
     candidate = str(name or "").strip()
@@ -1260,6 +1402,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("settings", "Session settings"),
             ("repos", "List local repositories"),
             ("status", "Show repository status"),
+            ("todo_issues", "Create GitHub issues from TODO.txt"),
             ("lazygit", "Open repository in lazygit"),
             ("fleet", "Unified fleet plan/apply (clone, pull, push)"),
             ("scan", "Scan repositories to JSON"),
@@ -1443,6 +1586,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
             columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
             output_text = render_table(records, columns)
             _dialog_textbox_from_text("Status", output_text, height, width)
+
+        elif action == "todo_issues":
+            _handle_tui_todo_issues_action(session, height, width)
 
         elif action == "fleet":
             if not _validate_session_root(session["root"], height, width):
@@ -2512,6 +2658,46 @@ def _fleet_server_context(args: argparse.Namespace) -> Tuple[str, str, str, str,
     return provider, base_url, user, token, auth, server
 
 
+def _resolve_org_selection(
+    args: argparse.Namespace,
+    server: Dict[str, Any],
+) -> Tuple[List[Dict[str, str]], bool, List[str]]:
+    configured_orgs = lantern_config.get_server_organizations(server)
+    configured_by_name = {
+        str(entry.get("name") or "").strip().lower(): dict(entry)
+        for entry in configured_orgs
+        if str(entry.get("name") or "").strip()
+    }
+    requested_orgs = [str(org).strip() for org in getattr(args, "orgs", []) if str(org).strip()]
+    use_all_orgs = bool(getattr(args, "all_orgs", False))
+
+    selected_names: List[str] = []
+    selected_entries: List[Dict[str, str]] = []
+    if use_all_orgs:
+        selected_entries = [dict(entry) for entry in configured_orgs]
+        selected_names = [entry.get("name", "") for entry in selected_entries if entry.get("name")]
+    elif requested_orgs:
+        seen = set()
+        for org_name in requested_orgs:
+            key = org_name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            selected_entry = dict(configured_by_name.get(key, {"name": org_name, "token": ""}))
+            selected_entries.append(selected_entry)
+            selected_names.append(str(selected_entry.get("name") or org_name))
+
+    with_user_flag = bool(getattr(args, "with_user", False))
+    include_user = True
+    if selected_entries:
+        include_user = with_user_flag
+    elif use_all_orgs and not with_user_flag:
+        # Keep --all-orgs behavior explicit: do not silently fall back to
+        # personal repositories when no organizations are configured.
+        include_user = False
+    return selected_entries, include_user, selected_names
+
+
 def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     if args.input:
         with open(args.input, "r", encoding="utf-8") as handle:
@@ -2519,12 +2705,24 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
         return payload if isinstance(payload, dict) else {"repos": []}
 
     provider, base_url, user, token, auth, server = _fleet_server_context(args)
-    repos = forge.fetch_repos(provider, user, token, args.include_forks, base_url, auth)
+    org_entries, include_user, selected_orgs = _resolve_org_selection(args, server)
+    repos = forge.fetch_repos(
+        provider,
+        user,
+        token,
+        args.include_forks,
+        base_url,
+        auth,
+        organizations=org_entries,
+        include_user=include_user,
+    )
     return {
         "server": server.get("name", provider),
         "provider": provider,
         "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
         "user": user,
+        "selected_orgs": selected_orgs,
+        "include_user": include_user,
         "repos": repos,
     }
 
@@ -3422,8 +3620,18 @@ def cmd_github_list(args: argparse.Namespace) -> int:
     user = args.user or env.get(env_user_key) or server.get("user")
     token = args.token or env.get(env_token_key) or server.get("token")
     auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
+    org_entries, include_user, selected_orgs = _resolve_org_selection(args, server)
     try:
-        repos = forge.fetch_repos(provider, user, token, args.include_forks, base_url, auth)
+        repos = forge.fetch_repos(
+            provider,
+            user,
+            token,
+            args.include_forks,
+            base_url,
+            auth,
+            organizations=org_entries,
+            include_user=include_user,
+        )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -3433,6 +3641,8 @@ def cmd_github_list(args: argparse.Namespace) -> int:
         "provider": provider,
         "base_url": base_url or forge.DEFAULT_BASE_URLS.get(provider, ""),
         "user": user,
+        "selected_orgs": selected_orgs,
+        "include_user": include_user,
         "repos": repos,
     }
     if args.output:
@@ -3450,6 +3660,27 @@ def cmd_github_list(args: argparse.Namespace) -> int:
         columns = ["name", "private", "default_branch", "ssh_url", "html_url"]
         _render_list_table(repos, columns)
     return 0
+
+
+def cmd_todo_issues(args: argparse.Namespace) -> int:
+    """Create GitHub issues from TODO.txt entries."""
+    original_cwd = os.getcwd()
+    try:
+        try:
+            os.chdir(args.cwd)
+        except OSError as exc:
+            print(f"Failed to change working directory to '{args.cwd}': {exc}", file=sys.stderr)
+            return 1
+        argv = ["--todo-file", args.todo_file, "--limit", str(args.limit)]
+        if args.repo:
+            argv.extend(["--repo", args.repo])
+        for label in args.label:
+            argv.extend(["--label", label])
+        if args.dry_run:
+            argv.append("--dry-run")
+        return todo_issues.main(argv)
+    finally:
+        os.chdir(original_cwd)
 
 
 def cmd_github_clone(args: argparse.Namespace) -> int:
@@ -4083,6 +4314,9 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_plan.add_argument("--user", default="")
     fleet_plan.add_argument("--token", default="")
     fleet_plan.add_argument("--include-forks", action="store_true")
+    fleet_plan.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    fleet_plan.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    fleet_plan.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_plan.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
     fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_plan.set_defaults(func=cmd_fleet_plan)
@@ -4097,6 +4331,9 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--user", default="")
     fleet_apply.add_argument("--token", default="")
     fleet_apply.add_argument("--include-forks", action="store_true")
+    fleet_apply.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    fleet_apply.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    fleet_apply.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
     fleet_apply.add_argument("--clone-missing", action="store_true")
     fleet_apply.add_argument("--pull-behind", action="store_true")
@@ -4124,6 +4361,18 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--columns", default="")
     report.set_defaults(func=cmd_report)
 
+    todo = sub.add_parser("todo", help="TODO file workflows")
+    todo_sub = todo.add_subparsers(dest="todo_command", required=True)
+
+    todo_issues = todo_sub.add_parser("issues", help="create GitHub issues from TODO.txt")
+    todo_issues.add_argument("--todo-file", default="TODO.txt", help="Path to TODO file (default: TODO.txt).")
+    todo_issues.add_argument("--repo", default="", help="Optional OWNER/REPO override.")
+    todo_issues.add_argument("--limit", type=int, default=1000, help="Existing-issue scan limit for duplicate checks.")
+    todo_issues.add_argument("--label", action="append", default=[], help="Issue label to apply (repeatable).")
+    todo_issues.add_argument("--dry-run", action="store_true", help="Preview without creating issues.")
+    todo_issues.add_argument("--cwd", default=os.getcwd(), help="Working directory for gh context (default: current dir).")
+    todo_issues.set_defaults(func=cmd_todo_issues)
+
     forge = sub.add_parser("forge", help="git server utilities")
     forge_sub = forge.add_subparsers(dest="forge_command", required=True)
 
@@ -4132,6 +4381,9 @@ def build_parser() -> argparse.ArgumentParser:
     gh_list.add_argument("--user", default="")
     gh_list.add_argument("--token", default="")
     gh_list.add_argument("--include-forks", action="store_true")
+    gh_list.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    gh_list.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    gh_list.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     gh_list.add_argument(
         "--output",
         default=None,

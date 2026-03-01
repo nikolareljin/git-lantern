@@ -52,12 +52,27 @@ def fetch_repos(
     include_forks: bool,
     base_url: str,
     auth: Optional[Dict[str, str]] = None,
+    organizations: Optional[List[Dict[str, str]]] = None,
+    include_user: bool = True,
 ) -> List[Dict]:
     provider = (provider or "github").lower()
     if provider == "github":
-        if not user:
+        if not user and include_user:
             raise ValueError("User is required for GitHub.")
-        return github.fetch_repos(user, token, include_forks, base_url)
+        if not include_user and not organizations:
+            raise ValueError(
+                "User repositories are excluded, but no organizations were selected. "
+                "Configure 'organizations'/'orgs' in server config, pass --org/--all-orgs, "
+                "or use --with-user to include personal repositories."
+            )
+        return github.fetch_repos(
+            user or "",
+            token,
+            include_forks,
+            base_url,
+            organizations=organizations,
+            include_user=include_user,
+        )
     if provider == "gitlab":
         return _fetch_gitlab_repos(user, token, include_forks, base_url, auth)
     if provider == "bitbucket":
