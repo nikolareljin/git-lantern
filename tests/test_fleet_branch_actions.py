@@ -95,7 +95,7 @@ def test_cmd_fleet_apply_uses_latest_branch_hint_in_dry_run(monkeypatch, capsys)
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert "checkout:feature/latest:dry-run" in out
+    assert "checkout-latest:feature/latest:dry-run" in out
 
 
 def test_cmd_fleet_apply_skips_when_latest_branch_missing(monkeypatch, capsys):

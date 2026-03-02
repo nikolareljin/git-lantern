@@ -3101,28 +3101,29 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append("checkout-latest:skip-no-latest")
                 action_records.append({"action": "checkout-latest", "status": "skip-no-latest"})
 
+        checkout_action = "checkout-latest" if checkout_latest_branch else "checkout"
         if effective_branch:
             if not _is_valid_git_branch_name(effective_branch):
-                statuses.append("checkout:invalid-branch")
-                action_records.append({"action": "checkout", "status": "invalid-branch"})
+                statuses.append(f"{checkout_action}:invalid-branch")
+                action_records.append({"action": checkout_action, "status": "invalid-branch"})
                 effective_branch = ""
         if effective_branch:
             if args.only_clean and row.get("clean") == "no":
-                statuses.append(f"checkout:{effective_branch}:skip-dirty")
-                action_records.append({"action": "checkout", "status": "skip-dirty", "branch": effective_branch})
+                statuses.append(f"{checkout_action}:{effective_branch}:skip-dirty")
+                action_records.append({"action": checkout_action, "status": "skip-dirty", "branch": effective_branch})
             elif not clone_ok and not args.dry_run:
-                statuses.append(f"checkout:{effective_branch}:skip-not-cloned")
-                action_records.append({"action": "checkout", "status": "skip-not-cloned", "branch": effective_branch})
+                statuses.append(f"{checkout_action}:{effective_branch}:skip-not-cloned")
+                action_records.append({"action": checkout_action, "status": "skip-not-cloned", "branch": effective_branch})
             elif args.dry_run:
-                statuses.append(f"checkout:{effective_branch}:dry-run")
-                action_records.append({"action": "checkout", "status": "dry-run", "branch": effective_branch})
+                statuses.append(f"{checkout_action}:{effective_branch}:dry-run")
+                action_records.append({"action": checkout_action, "status": "dry-run", "branch": effective_branch})
             else:
                 _run_git_op(path, ["fetch", "--prune"])
                 remote_ref = f"origin/{effective_branch}"
                 has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
                 if not has_remote:
-                    statuses.append(f"checkout:{effective_branch}:skip-no-remote")
-                    action_records.append({"action": "checkout", "status": "skip-no-remote", "branch": effective_branch})
+                    statuses.append(f"{checkout_action}:{effective_branch}:skip-no-remote")
+                    action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": effective_branch})
                 else:
                     has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
                     if has_local:
@@ -3131,8 +3132,8 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         rc_checkout = _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
                     rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
                     ok = rc_checkout == 0 and rc_pull == 0
-                    statuses.append(f"checkout:{effective_branch}:{'ok' if ok else 'fail'}")
-                    action_records.append({"action": "checkout", "status": "ok" if ok else "fail", "branch": effective_branch})
+                    statuses.append(f"{checkout_action}:{effective_branch}:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": effective_branch})
                     if not ok:
                         rollback = _attempt_repo_rollback(path, original_head, original_branch)
                         action_records.append(
@@ -3203,9 +3204,9 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 status = str(action.get("status") or "")
                 key = f"{action_name}:{status}"
                 action_totals[key] = action_totals.get(key, 0) + 1
-                if status in {"ok", "dry-run"} and action_name in {"clone", "pull", "push", "checkout"}:
+                if status in {"ok", "dry-run"} and action_name in {"clone", "pull", "push", "checkout", "checkout-latest"}:
                     changed = True
-                if action_name == "checkout" and status in {"ok", "dry-run"} and action.get("branch"):
+                if action_name in {"checkout", "checkout-latest"} and status in {"ok", "dry-run"} and action.get("branch"):
                     branch_updates.append({"repo": str(rec.get("repo") or ""), "branch": str(action.get("branch") or "")})
             if changed:
                 updated_repos += 1
