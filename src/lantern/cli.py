@@ -1174,9 +1174,9 @@ def _fleet_short_summary_from_log(log_path: str) -> str:
                 continue
             action_name = str(action.get("action") or "")
             status = str(action.get("status") or "")
-            if status in {"ok", "dry-run"} and action_name in {"clone", "pull", "push"}:
+            if status in {"ok", "dry-run"} and action_name in {"clone", "pull", "push", "checkout", "checkout-latest"}:
                 changed = True
-            if action_name == "checkout" and status in {"ok", "dry-run"}:
+            if action_name in {"checkout", "checkout-latest"} and status in {"ok", "dry-run"}:
                 branch = str(action.get("branch") or "")
                 if repo and branch:
                     branch_updates.append(f"{repo}:{branch}")
@@ -1209,6 +1209,13 @@ def _fleet_short_summary_from_log(log_path: str) -> str:
 
 def _fleet_logs_dir(root: str) -> str:
     return os.path.join(root, "data", "fleet-logs")
+
+
+def _fleet_apply_candidates_for_mode(rows: List[Dict[str, str]], apply_mode: str) -> List[Dict[str, str]]:
+    mode = str(apply_mode or "").strip().lower()
+    if mode in {"branch", "pr", "latest"}:
+        return list(rows)
+    return [r for r in rows if r.get("action") in {"clone", "pull", "push"}]
 
 
 def _fleet_log_files(root: str) -> List[str]:
@@ -1948,7 +1955,17 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             subprocess.run(["clear"], check=False)
 
-            actionable = [r for r in rows if r.get("action") in {"clone", "pull", "push"}]
+            mode_items: List[Tuple[str, str]] = [
+                ("sync", "Sync only (clone/pull/push)"),
+                ("pr", "Checkout PR number on selected repos"),
+                ("branch", "Checkout branch on selected repos"),
+                ("latest", "Checkout latest detected branch per repo"),
+            ]
+            apply_mode = _dialog_menu("Apply Mode", "Choose apply mode:", mode_items, height, width)
+            if not apply_mode:
+                continue
+
+            actionable = _fleet_apply_candidates_for_mode(rows, apply_mode)
             if not actionable:
                 _dialog_msgbox("Fleet", "No actionable repositories in current plan.", height, width)
                 continue
@@ -1975,16 +1992,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 if not selected_repos:
                     continue
                 selected_rows = [r for r in actionable if str(r.get("repo") or "") in selected_repos]
-
-            mode_items: List[Tuple[str, str]] = [
-                ("sync", "Sync only (clone/pull/push)"),
-                ("pr", "Checkout PR number on selected repos"),
-                ("branch", "Checkout branch on selected repos"),
-                ("latest", "Checkout latest detected branch per repo"),
-            ]
-            apply_mode = _dialog_menu("Apply Mode", "Choose apply mode:", mode_items, height, width)
-            if not apply_mode:
-                continue
 
             checkout_pr = ""
             checkout_branch = ""
