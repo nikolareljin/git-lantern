@@ -1026,6 +1026,7 @@ def _fleet_action_parts_for_row(
     push_ahead: bool,
     checkout_branch: str,
     checkout_pr: str,
+    checkout_latest_branch: bool,
 ) -> List[str]:
     state = str(row.get("state") or "")
     parts: List[str] = []
@@ -1039,6 +1040,12 @@ def _fleet_action_parts_for_row(
         parts.append(f"checkout-pr:{checkout_pr}")
     elif checkout_branch:
         parts.append(f"checkout:{checkout_branch}")
+    elif checkout_latest_branch:
+        latest = str(row.get("latest_branch") or "").strip()
+        if latest and latest != "-":
+            parts.append(f"checkout-latest:{latest}")
+        else:
+            parts.append("checkout-latest:none")
     if not parts:
         parts.append("skip")
     return parts
@@ -1052,6 +1059,7 @@ def _fleet_preflight_confirm(
     push_ahead: bool,
     checkout_branch: str,
     checkout_pr: str,
+    checkout_latest_branch: bool,
     dry_run: bool,
     only_clean: bool,
     height: int,
@@ -1067,6 +1075,7 @@ def _fleet_preflight_confirm(
                 push_ahead=push_ahead,
                 checkout_branch=checkout_branch,
                 checkout_pr=checkout_pr,
+                checkout_latest_branch=checkout_latest_branch,
             )
         )
         prepared.append(
@@ -1101,6 +1110,8 @@ def _fleet_preflight_confirm(
         summary_header.append(f"Checkout branch: {checkout_branch}")
     if checkout_pr:
         summary_header.append(f"Checkout PR: {checkout_pr}")
+    if checkout_latest_branch:
+        summary_header.append("Checkout latest branch per repo: yes")
     summary_header.append(f"Dry run: {'yes' if dry_run else 'no'}")
     summary_header.append(f"Only clean: {'yes' if only_clean else 'no'}")
     summary_header.append("")
@@ -1759,23 +1770,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 checkout_branch = ""
                 checkout_pr = ""
+                checkout_latest_branch = False
                 if preset == "branch_rollout":
-                    branch_hints: List[str] = []
-                    for row in selected_rows:
-                        b = str(row.get("latest_branch") or "").strip()
-                        if b and b != "-" and b not in branch_hints:
-                            branch_hints.append(b)
-                    hint = ", ".join(branch_hints[:20]) if branch_hints else "No latest branch hints detected."
-                    checkout_branch = (
-                        _dialog_inputbox(
-                            "Branch Rollout",
-                            f"Enter branch to checkout/update.\n\nHints: {hint}",
-                            branch_hints[0] if branch_hints else "",
-                        )
-                        or ""
-                    ).strip()
-                    if not checkout_branch:
-                        continue
+                    checkout_latest_branch = True
                 elif preset == "pr_rollout":
                     pr_numbers: List[str] = []
                     for row in selected_rows:
@@ -1838,6 +1835,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     apply_cmd.extend(["--checkout-branch", checkout_branch])
                 if checkout_pr:
                     apply_cmd.extend(["--checkout-pr", checkout_pr])
+                if checkout_latest_branch:
+                    apply_cmd.append("--checkout-latest-branch")
                 if dry_run:
                     apply_cmd.append("--dry-run")
                 if only_clean:
@@ -1851,6 +1850,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     push_ahead=include_push,
                     checkout_branch=checkout_branch,
                     checkout_pr=checkout_pr,
+                    checkout_latest_branch=checkout_latest_branch,
                     dry_run=dry_run,
                     only_clean=only_clean,
                     height=height,
@@ -1979,6 +1979,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 ("sync", "Sync only (clone/pull/push)"),
                 ("pr", "Checkout PR number on selected repos"),
                 ("branch", "Checkout branch on selected repos"),
+                ("latest", "Checkout latest detected branch per repo"),
             ]
             apply_mode = _dialog_menu("Apply Mode", "Choose apply mode:", mode_items, height, width)
             if not apply_mode:
@@ -1986,6 +1987,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
             checkout_pr = ""
             checkout_branch = ""
+            checkout_latest_branch = False
             if apply_mode == "pr":
                 pr_numbers: List[str] = []
                 for row in selected_rows:
@@ -2021,6 +2023,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 ).strip()
                 if not checkout_branch:
                     continue
+            elif apply_mode == "latest":
+                checkout_latest_branch = True
 
             dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
             only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
@@ -2048,6 +2052,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 apply_cmd.extend(["--checkout-pr", checkout_pr])
             if checkout_branch:
                 apply_cmd.extend(["--checkout-branch", checkout_branch])
+            if checkout_latest_branch:
+                apply_cmd.append("--checkout-latest-branch")
             if dry_run:
                 apply_cmd.append("--dry-run")
             if only_clean:
@@ -2061,6 +2067,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 push_ahead=include_push,
                 checkout_branch=checkout_branch,
                 checkout_pr=checkout_pr,
+                checkout_latest_branch=checkout_latest_branch,
                 dry_run=dry_run,
                 only_clean=only_clean,
                 height=height,
@@ -2908,6 +2915,7 @@ def cmd_fleet_plan(args: argparse.Namespace) -> int:
 def cmd_fleet_apply(args: argparse.Namespace) -> int:
     checkout_branch = str(getattr(args, "checkout_branch", "") or "").strip()
     checkout_pr = str(getattr(args, "checkout_pr", "") or "").strip()
+    checkout_latest_branch = bool(getattr(args, "checkout_latest_branch", False))
     pr_number = 0
     if checkout_pr:
         try:
@@ -2917,8 +2925,12 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             return 1
     if checkout_branch.startswith("origin/"):
         checkout_branch = checkout_branch.split("/", 1)[1]
+    checkout_modes = int(bool(checkout_branch)) + int(bool(pr_number)) + int(checkout_latest_branch)
+    if checkout_modes > 1:
+        print("Use only one checkout mode: --checkout-branch, --checkout-pr, or --checkout-latest-branch.", file=sys.stderr)
+        return 1
 
-    if not (args.clone_missing or args.pull_behind or args.push_ahead or checkout_branch or pr_number):
+    if not (args.clone_missing or args.pull_behind or args.push_ahead or checkout_branch or pr_number or checkout_latest_branch):
         args.clone_missing = True
         args.pull_behind = True
         args.push_ahead = True
@@ -2961,10 +2973,11 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             row=row,
             clone_missing=args.clone_missing,
             pull_behind=args.pull_behind,
-            push_ahead=args.push_ahead,
-            checkout_branch=checkout_branch,
-            checkout_pr=checkout_pr,
-        )
+                push_ahead=args.push_ahead,
+                checkout_branch=checkout_branch,
+                checkout_pr=checkout_pr,
+                checkout_latest_branch=checkout_latest_branch,
+            )
         clone_ok = state != "missing-local"
         if state == "missing-local" and args.clone_missing:
             if args.dry_run:
@@ -3079,6 +3092,13 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             else:
                 statuses.append(f"checkout-pr:{pr_number}:unsupported")
                 action_records.append({"action": "checkout-pr", "status": "unsupported", "pr": str(pr_number)})
+        elif checkout_latest_branch:
+            latest = str(row.get("latest_branch") or "").strip()
+            if latest and latest != "-":
+                effective_branch = latest
+            else:
+                statuses.append("checkout-latest:skip-no-latest")
+                action_records.append({"action": "checkout-latest", "status": "skip-no-latest"})
 
         if effective_branch:
             if not _is_valid_git_branch_name(effective_branch):
@@ -3200,6 +3220,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 "push_ahead": bool(args.push_ahead),
                 "checkout_branch": checkout_branch,
                 "checkout_pr": checkout_pr,
+                "checkout_latest_branch": checkout_latest_branch,
                 "dry_run": bool(args.dry_run),
                 "only_clean": bool(args.only_clean),
                 "fetch": bool(args.fetch),
@@ -4377,6 +4398,11 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--push-ahead", action="store_true")
     fleet_apply.add_argument("--checkout-branch", default="", help="checkout/update this branch on selected repos (tracks origin/<branch>)")
     fleet_apply.add_argument("--checkout-pr", default="", help="checkout branch for this PR number (GitHub)")
+    fleet_apply.add_argument(
+        "--checkout-latest-branch",
+        action="store_true",
+        help="checkout/update each selected repo's detected latest branch",
+    )
     fleet_apply.add_argument("--dry-run", action="store_true")
     fleet_apply.add_argument("--only-clean", action="store_true")
     fleet_apply.add_argument("--log-json", default="", help="write full fleet apply execution log to JSON")

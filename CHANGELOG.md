@@ -9,6 +9,8 @@ All notable changes to git-lantern are documented in this file.
 - Added `lantern todo issues` command to create GitHub issues from `TODO.txt` with duplicate checks by title/body.
 - Added parser coverage for the new TODO issues command in `tests/test_cli_todo_command.py`.
 - Added latest-branch detection in `fleet plan` rows using most-recently-updated origin refs (with local/default-branch fallback).
+- Added `lantern fleet apply --checkout-latest-branch` to checkout/update each selected repository to its detected latest branch.
+- Added TUI fleet apply mode for latest-branch rollout across selected repositories.
 
 ### Changed
 

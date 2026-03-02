@@ -48,6 +48,7 @@ Quick examples:
 lantern fleet plan --root ~/workspace --server github.com --fetch
 lantern fleet plan --root ~/workspace --server github.com --org my-org --with-user
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --checkout-latest-branch
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
 lantern fleet logs --latest
 lantern lazygit --root ~/workspace --select
