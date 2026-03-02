@@ -1692,7 +1692,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     continue
 
                 smart_fetch = True
-                with_prs = preset in {"branch_rollout", "pr_rollout"}
+                # Latest-branch rollout no longer depends on PR hints.
+                with_prs = preset == "pr_rollout"
                 _dialog_infobox(
                     "Smart Sync",
                     "Preparing fleet context...\n\nPlease wait.",
