@@ -418,6 +418,42 @@ def _remote_main_ref(path: str) -> str:
     return ""
 
 
+def _detect_latest_branch(path: str) -> str:
+    """Detect latest branch by most recent commit date, preferring origin refs."""
+    remote_refs = str(
+        git.run_git(
+            path,
+            ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/remotes/origin"],
+        )
+        or ""
+    )
+    for ref in remote_refs.splitlines():
+        candidate = ref.strip()
+        if not candidate or candidate == "origin/HEAD":
+            continue
+        if candidate.startswith("origin/"):
+            return candidate.split("/", 1)[1]
+        return candidate
+
+    local_refs = str(
+        git.run_git(
+            path,
+            ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"],
+        )
+        or ""
+    )
+    for ref in local_refs.splitlines():
+        candidate = ref.strip()
+        if candidate:
+            return candidate
+    return "-"
+
+
+def _remote_latest_branch_hint(repo: Dict[str, Any]) -> str:
+    branch = str(repo.get("default_branch") or "").strip()
+    return branch or "-"
+
+
 def _build_local_state_records(root: str, max_depth: int, include_hidden: bool, fetch: bool) -> List[Dict[str, str]]:
     records: List[Dict[str, str]] = []
     for path in find_repos(root, max_depth, include_hidden):
@@ -2778,7 +2814,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             else:
                 state = "in-sync"
                 action = "-"
-        latest_branch = "-"
+        latest_branch = _detect_latest_branch(path) if path else "-"
         prs = "-"
         if include_prs and provider == "github":
             host, owner, repo_name = _origin_owner_repo(origin)
@@ -2798,7 +2834,8 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
                         pr_cache[cache_key] = []
                 repo_prs = pr_cache.get(cache_key, [])
                 if repo_prs:
-                    latest_branch = str(repo_prs[0].get("head_ref") or "-")
+                    if latest_branch == "-":
+                        latest_branch = str(repo_prs[0].get("head_ref") or "-")
                     prs = ",".join(str(pr.get("number")) for pr in repo_prs[:8] if pr.get("number") is not None) or "-"
         plan_rows.append(
             {
@@ -2832,7 +2869,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
                 "up": "-",
                 "clean": "-",
                 "action": "clone",
-                "latest_branch": "-",
+                "latest_branch": _remote_latest_branch_hint(repo),
                 "prs": "-",
                 "path": dest,
             }
@@ -2854,9 +2891,9 @@ def cmd_fleet_plan(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    columns = ["repo", "state", "up", "clean", "action"]
+    columns = ["repo", "state", "up", "clean", "action", "latest_branch"]
     if getattr(args, "with_prs", False):
-        columns.extend(["latest_branch", "prs"])
+        columns.append("prs")
     columns.append("path")
     print(render_table(rows, columns))
     if rows:
