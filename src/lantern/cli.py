@@ -1045,7 +1045,7 @@ def _fleet_action_parts_for_row(
         if latest and latest != "-":
             parts.append(f"checkout-latest:{latest}")
         else:
-            parts.append("checkout-latest:none")
+            parts.append("checkout-latest:skip-no-latest")
     if not parts:
         parts.append("skip")
     return parts
@@ -1680,7 +1680,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if fleet_action == "smart_sync":
                 preset_items: List[Tuple[str, str]] = [
                     ("fast_pull", "Fast Pull (pull behind repos)"),
-                    ("branch_rollout", "Branch Rollout (checkout/update branch)"),
+                    ("branch_rollout", "Latest Branch Rollout (checkout/update latest detected branch)"),
                     ("pr_rollout", "PR Rollout (checkout PR branch)"),
                     ("full_reconcile", "Full Reconcile (clone/pull/push)"),
                 ]
@@ -2973,11 +2973,11 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             row=row,
             clone_missing=args.clone_missing,
             pull_behind=args.pull_behind,
-                push_ahead=args.push_ahead,
-                checkout_branch=checkout_branch,
-                checkout_pr=checkout_pr,
-                checkout_latest_branch=checkout_latest_branch,
-            )
+            push_ahead=args.push_ahead,
+            checkout_branch=checkout_branch,
+            checkout_pr=checkout_pr,
+            checkout_latest_branch=checkout_latest_branch,
+        )
         clone_ok = state != "missing-local"
         if state == "missing-local" and args.clone_missing:
             if args.dry_run:

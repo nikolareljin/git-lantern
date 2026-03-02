@@ -35,7 +35,7 @@ def test_fleet_action_parts_reports_missing_latest_branch():
         checkout_pr="",
         checkout_latest_branch=True,
     )
-    assert parts == ["checkout-latest:none"]
+    assert parts == ["checkout-latest:skip-no-latest"]
 
 
 def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):
@@ -69,4 +69,3 @@ def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):
     err = capsys.readouterr().err
     assert rc == 1
     assert "Use only one checkout mode" in err
-
