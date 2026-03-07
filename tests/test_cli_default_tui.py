@@ -8,7 +8,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from lantern import cli
+from lantern import cli  # noqa: E402
 
 
 def test_main_defaults_to_tui_when_no_subcommand(monkeypatch):
