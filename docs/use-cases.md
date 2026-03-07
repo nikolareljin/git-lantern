@@ -10,13 +10,14 @@ Lantern provides a full interactive TUI (terminal user interface) powered by the
 ### Launching TUI Mode
 
 ```bash
+lantern
 lantern --tui
 lantern -t
 ```
 
 ### TUI Workflow: First-Time Setup
 
-1. **Launch TUI**: `lantern --tui`
+1. **Launch TUI**: `lantern` (or `lantern --tui`)
 2. **Configure servers**: Select `config` > `setup`
 3. **Add a server**: Choose from presets (github.com, gitlab.com, bitbucket.org) or add a custom server
 4. **Enter credentials**: Provide your username and optionally your API token
@@ -30,7 +31,7 @@ Now all repository operations will use your configured root directory automatica
 
 Once configured, a typical session looks like:
 
-1. **Launch TUI**: `lantern --tui`
+1. **Launch TUI**: `lantern` (or `lantern --tui`)
 2. **Check status**: Select `status` to see all repos with branch divergence info
 3. **Reconcile repos**: Select `fleet` > `apply all` to clone missing and sync behind/ahead repos
 4. **Deep inspect a repo**: Select `lazygit` to open a selected repository in lazygit
@@ -39,7 +40,7 @@ Once configured, a typical session looks like:
 
 ### TUI Workflow: Cloning from a Git Server
 
-1. **Launch TUI**: `lantern --tui`
+1. **Launch TUI**: `lantern` (or `lantern --tui`)
 2. **Clone repos**: Select `forge` > "Clone repositories from list"
 3. **Auto list handling**: Lantern auto-uses an existing repo-list JSON, or auto-generates it if missing
 4. **Choose clone directory**: Defaults to your session root

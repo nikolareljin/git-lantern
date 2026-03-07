@@ -115,6 +115,7 @@ Requires the `dialog` CLI tool to be installed.
 Launch lantern in interactive TUI mode with:
 
 ```bash
+lantern
 lantern --tui
 lantern -t
 ```

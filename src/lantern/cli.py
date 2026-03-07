@@ -4581,14 +4581,8 @@ def main() -> None:
         argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
-    # Handle global --tui mode only when no subcommand is requested.
-    # Some subcommands also use a --tui flag for their own interactive flows.
-    if args.tui and not args.command:
-        raise SystemExit(cmd_tui(args))
-
-    # If no command specified, show help
+    # No subcommand defaults to TUI (same behavior as explicit `lantern tui`).
     if not args.command:
-        parser.print_help()
-        raise SystemExit(0)
+        raise SystemExit(cmd_tui(args))
 
     raise SystemExit(args.func(args))

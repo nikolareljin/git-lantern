@@ -41,7 +41,8 @@ Commands (jump to detailed guides):
 - `lantern forge snippets ...` -> `docs/use-cases.md#list-snippets-githubgitlabbitbucket`
 - `lantern config export/import/path` -> `docs/use-cases.md#server-config-github-gitlab-bitbucket`
 - `lantern config setup` - Interactive server configuration (TUI)
-- `lantern --tui` / `lantern -t` - Interactive TUI mode for all operations
+- `lantern` - Interactive TUI mode (default when no subcommand is provided)
+- `lantern --tui` / `lantern -t` - Interactive TUI mode (explicit)
 
 Quick examples:
 ```bash
@@ -81,6 +82,7 @@ Lantern includes an interactive TUI mode using the `dialog` CLI. This provides a
 
 ```bash
 # Launch TUI mode
+lantern
 lantern --tui
 lantern -t
 
