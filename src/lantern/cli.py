@@ -1377,7 +1377,7 @@ def _persist_scan_json_path(scan_path: str) -> Optional[str]:
 def cmd_tui(args: argparse.Namespace) -> int:
     """Main TUI interface for lantern."""
     if not _dialog_available():
-        print("dialog is required for --tui mode.", file=sys.stderr)
+        print("dialog is required for TUI mode.", file=sys.stderr)
         print("Install it with: apt install dialog (Debian/Ubuntu) or brew install dialog (macOS)", file=sys.stderr)
         return 1
 
@@ -4279,6 +4279,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Launch interactive TUI mode using dialog",
     )
     sub = parser.add_subparsers(dest="command", required=False)
+
+    tui = sub.add_parser("tui", help="launch interactive TUI mode using dialog")
+    tui.set_defaults(func=cmd_tui)
 
     servers = sub.add_parser("servers", help="list configured git servers")
     servers.set_defaults(func=cmd_servers)
