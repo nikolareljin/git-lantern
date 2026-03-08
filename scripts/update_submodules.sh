@@ -8,18 +8,34 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if ! git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "error: $ROOT_DIR is not a git worktree" >&2
+    exit 1
+fi
+
 if [[ ! -f "$ROOT_DIR/.gitmodules" ]]; then
     echo "No .gitmodules found; nothing to update."
     exit 0
 fi
 
 configured_paths=()
+git_config_output=""
+if ! git_config_output="$(git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>&1)"; then
+    git_config_status=$?
+    if [[ "$git_config_status" -eq 1 ]]; then
+        echo "No configured submodules found in .gitmodules."
+        exit 0
+    fi
+    echo "error: failed to read submodule paths from .gitmodules:" >&2
+    echo "$git_config_output" >&2
+    exit "$git_config_status"
+fi
+
 while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     configured_paths+=("$path")
 done < <(
-    git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
-    | awk '{print $2}' || true
+    printf '%s\n' "$git_config_output" | awk '{print $2}'
 )
 
 if [[ "${#configured_paths[@]}" -eq 0 ]]; then
