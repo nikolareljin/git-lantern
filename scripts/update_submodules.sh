@@ -8,6 +8,42 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-git -C "$ROOT_DIR" submodule sync --recursive
-git -C "$ROOT_DIR" submodule update --init --recursive
+if [[ ! -f "$ROOT_DIR/.gitmodules" ]]; then
+    echo "No .gitmodules found; nothing to update."
+    exit 0
+fi
+
+mapfile -t configured_paths < <(
+    git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
+    | awk '{print $2}'
+)
+
+if [[ "${#configured_paths[@]}" -eq 0 ]]; then
+    echo "No configured submodules found in .gitmodules."
+    exit 0
+fi
+
+mapfile -t gitlink_paths < <(
+    git -C "$ROOT_DIR" ls-files -s \
+    | awk '$1=="160000"{print $4}'
+)
+
+for gitlink_path in "${gitlink_paths[@]}"; do
+    found=0
+    for configured_path in "${configured_paths[@]}"; do
+        if [[ "$gitlink_path" == "$configured_path" ]]; then
+            found=1
+            break
+        fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+        echo "warning: skipping stale gitlink not present in .gitmodules: $gitlink_path" >&2
+    fi
+done
+
+for path in "${configured_paths[@]}"; do
+    git -C "$ROOT_DIR" submodule sync -- "$path"
+    git -C "$ROOT_DIR" submodule update --init --recursive -- "$path"
+done
+
 echo "Submodules updated."
