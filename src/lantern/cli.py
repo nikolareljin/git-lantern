@@ -4281,6 +4281,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=False)
 
     tui = sub.add_parser("tui", help="launch interactive TUI mode using dialog")
+    tui.add_argument(
+        "--tui-root",
+        dest="tui_root",
+        default="",
+        help="workspace root override for TUI session (stored root is used when omitted)",
+    )
     tui.set_defaults(func=cmd_tui)
 
     servers = sub.add_parser("servers", help="list configured git servers")

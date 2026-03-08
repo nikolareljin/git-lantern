@@ -116,6 +116,7 @@ Launch lantern in interactive TUI mode with:
 
 ```bash
 lantern
+lantern tui
 lantern --tui
 lantern -t
 ```

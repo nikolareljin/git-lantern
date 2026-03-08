@@ -46,6 +46,14 @@ def test_parser_supports_explicit_tui_subcommand():
     assert args.func == cli.cmd_tui
 
 
+def test_parser_supports_tui_subcommand_tui_root_flag():
+    parser = cli.build_parser()
+    args = parser.parse_args(["tui", "--tui-root", "/tmp/workspace"])
+    assert args.command == "tui"
+    assert args.tui_root == "/tmp/workspace"
+    assert args.func == cli.cmd_tui
+
+
 def test_main_dispatches_explicit_tui_subcommand(monkeypatch):
     monkeypatch.setattr(cli, "load_dotenv", lambda: None)
 
