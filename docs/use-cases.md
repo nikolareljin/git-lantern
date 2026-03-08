@@ -208,6 +208,7 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 Live table of repo status.
 ```bash
 lantern status --root ~/workspace --fetch
+lantern status --root ~/workspace --fetch --with-prs
 ```
 
 ### `lantern lazygit`
