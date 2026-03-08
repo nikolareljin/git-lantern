@@ -42,6 +42,17 @@ for gitlink_path in "${gitlink_paths[@]}"; do
 done
 
 for path in "${configured_paths[@]}"; do
+    found=0
+    for gitlink_path in "${gitlink_paths[@]}"; do
+        if [[ "$path" == "$gitlink_path" ]]; then
+            found=1
+            break
+        fi
+    done
+    if [[ "$found" -eq 0 ]]; then
+        echo "warning: skipping stale .gitmodules entry not present in index: $path" >&2
+        continue
+    fi
     git -C "$ROOT_DIR" submodule sync --recursive -- "$path"
     git -C "$ROOT_DIR" submodule update --init --recursive -- "$path"
 done
