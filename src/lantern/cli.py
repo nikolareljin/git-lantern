@@ -1377,7 +1377,7 @@ def _persist_scan_json_path(scan_path: str) -> Optional[str]:
 def cmd_tui(args: argparse.Namespace) -> int:
     """Main TUI interface for lantern."""
     if not _dialog_available():
-        print("dialog is required for --tui mode.", file=sys.stderr)
+        print("dialog is required for TUI mode.", file=sys.stderr)
         print("Install it with: apt install dialog (Debian/Ubuntu) or brew install dialog (macOS)", file=sys.stderr)
         return 1
 
@@ -4266,19 +4266,26 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    def add_tui_root_argument(target_parser: argparse.ArgumentParser) -> None:
+        target_parser.add_argument(
+            "--tui-root",
+            dest="tui_root",
+            default="",
+            help="workspace root override for TUI session (stored root is used when omitted)",
+        )
+
     parser = argparse.ArgumentParser(prog="lantern")
-    parser.add_argument(
-        "--tui-root",
-        dest="tui_root",
-        default="",
-        help="workspace root override for TUI session (stored root is used when omitted)",
-    )
+    add_tui_root_argument(parser)
     parser.add_argument(
         "--tui", "-t",
         action="store_true",
         help="Launch interactive TUI mode using dialog",
     )
     sub = parser.add_subparsers(dest="command", required=False)
+
+    tui = sub.add_parser("tui", help="launch interactive TUI mode using dialog")
+    add_tui_root_argument(tui)
+    tui.set_defaults(func=cmd_tui)
 
     servers = sub.add_parser("servers", help="list configured git servers")
     servers.set_defaults(func=cmd_servers)
@@ -4581,14 +4588,8 @@ def main() -> None:
         argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
-    # Handle global --tui mode only when no subcommand is requested.
-    # Some subcommands also use a --tui flag for their own interactive flows.
-    if args.tui and not args.command:
-        raise SystemExit(cmd_tui(args))
-
-    # If no command specified, show help
+    # No subcommand defaults to TUI (same behavior as explicit `lantern tui`).
     if not args.command:
-        parser.print_help()
-        raise SystemExit(0)
+        raise SystemExit(cmd_tui(args))
 
     raise SystemExit(args.func(args))
