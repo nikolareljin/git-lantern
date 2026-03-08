@@ -13,7 +13,11 @@ if [[ ! -f "$ROOT_DIR/.gitmodules" ]]; then
     exit 0
 fi
 
-mapfile -t configured_paths < <(
+configured_paths=()
+while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    configured_paths+=("$path")
+done < <(
     git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
     | awk '{print $2}' || true
 )
@@ -23,7 +27,11 @@ if [[ "${#configured_paths[@]}" -eq 0 ]]; then
     exit 0
 fi
 
-mapfile -t gitlink_paths < <(
+gitlink_paths=()
+while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    gitlink_paths+=("$path")
+done < <(
     git -C "$ROOT_DIR" ls-files -s \
     | awk '$1=="160000"{print $4}'
 )
