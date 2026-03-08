@@ -15,7 +15,7 @@ fi
 
 mapfile -t configured_paths < <(
     git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
-    | awk '{print $2}'
+    | awk '{print $2}' || true
 )
 
 if [[ "${#configured_paths[@]}" -eq 0 ]]; then
@@ -42,7 +42,7 @@ for gitlink_path in "${gitlink_paths[@]}"; do
 done
 
 for path in "${configured_paths[@]}"; do
-    git -C "$ROOT_DIR" submodule sync -- "$path"
+    git -C "$ROOT_DIR" submodule sync --recursive -- "$path"
     git -C "$ROOT_DIR" submodule update --init --recursive -- "$path"
 done
 

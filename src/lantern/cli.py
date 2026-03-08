@@ -4266,13 +4266,16 @@ def cmd_github_gists_create(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    def add_tui_root_argument(target_parser: argparse.ArgumentParser) -> None:
+        target_parser.add_argument(
+            "--tui-root",
+            dest="tui_root",
+            default="",
+            help="workspace root override for TUI session (stored root is used when omitted)",
+        )
+
     parser = argparse.ArgumentParser(prog="lantern")
-    parser.add_argument(
-        "--tui-root",
-        dest="tui_root",
-        default="",
-        help="workspace root override for TUI session (stored root is used when omitted)",
-    )
+    add_tui_root_argument(parser)
     parser.add_argument(
         "--tui", "-t",
         action="store_true",
@@ -4281,12 +4284,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=False)
 
     tui = sub.add_parser("tui", help="launch interactive TUI mode using dialog")
-    tui.add_argument(
-        "--tui-root",
-        dest="tui_root",
-        default="",
-        help="workspace root override for TUI session (stored root is used when omitted)",
-    )
+    add_tui_root_argument(tui)
     tui.set_defaults(func=cmd_tui)
 
     servers = sub.add_parser("servers", help="list configured git servers")
