@@ -20,7 +20,7 @@ fi
 
 configured_paths=()
 git_config_output=""
-if ! git_config_output="$(git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>&1)"; then
+git_config_output="$(git -C "$ROOT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>&1)" || {
     git_config_status=$?
     if [[ "$git_config_status" -eq 1 ]]; then
         echo "No configured submodules found in .gitmodules."
@@ -29,6 +29,10 @@ if ! git_config_output="$(git -C "$ROOT_DIR" config -f .gitmodules --get-regexp 
     echo "error: failed to read submodule paths from .gitmodules:" >&2
     echo "$git_config_output" >&2
     exit "$git_config_status"
+}
+if [[ -z "$git_config_output" ]]; then
+    echo "No configured submodules found in .gitmodules."
+    exit 0
 fi
 
 while IFS= read -r path; do
