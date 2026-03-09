@@ -55,6 +55,7 @@ lantern fleet apply --root ~/workspace --server github.com --clone-missing --pul
 lantern fleet logs --latest
 lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
+lantern status --root ~/workspace --fetch --with-prs
 lantern sync --root ~/workspace --pull --only-clean --only-upstream
 lantern todo issues --dry-run
 lantern todo issues --label todo --label backlog

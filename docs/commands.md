@@ -339,15 +339,19 @@ lantern scan --root ~/workspace --output data/repos.json --fetch
 **What it does**:
 - Runs the same scan logic as `lantern scan`.
 - Prints a table with the most relevant status columns.
+- Detects `latest_branch` per repository.
+- Optionally includes `latest_pr` numbers for GitHub repositories with `--with-prs`.
 
 **Output columns**:
-- `name`, `branch`, `upstream`, `up`, `main_ref`, `main`.
+- `name`, `branch`, `upstream`, `up`, `main_ref`, `main`, `latest_branch`, `latest_pr`.
 - `up` and `main` are shown as `N↑/M↓` for ahead/behind counts.
 - `≡` means no divergence (`0↑/0↓`) and is shown only when both ahead and behind counts are zero.
+- `latest_pr` is `-` when PR lookup is disabled or unavailable.
 
 **Example**:
 ```bash
 lantern status --root ~/workspace
+lantern status --root ~/workspace --with-prs
 ```
 
 ### `lantern lazygit`
