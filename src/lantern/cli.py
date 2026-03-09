@@ -2625,13 +2625,21 @@ def cmd_status(args: argparse.Namespace) -> int:
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
     records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos, args.fetch, "status")]
     include_prs = bool(getattr(args, "with_prs", False))
-    stale_days = int(getattr(args, "pr_stale_days", 30) or 30)
+    raw_stale_days = getattr(args, "pr_stale_days", None)
+    stale_days = int(30 if raw_stale_days is None else raw_stale_days)
     provider = ""
     base_url = ""
     token = ""
+    configured_host = ""
+    known_github_hosts: Set[str] = {"github.com", "www.github.com"}
     if include_prs:
         provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
         provider = provider.lower()
+        if base_url:
+            try:
+                configured_host = (urllib.parse.urlparse(base_url).hostname or "").lower()
+            except Exception:
+                configured_host = ""
     pr_cache: Dict[str, List[Dict[str, Any]]] = {}
     enriched_records: List[Dict[str, str]] = []
     for record in records:
@@ -2641,8 +2649,19 @@ def cmd_status(args: argparse.Namespace) -> int:
         latest_pr = "-"
         if include_prs and provider == "github":
             origin = str(record.get("origin") or "")
-            _host, owner, repo_name = _origin_owner_repo(origin)
-            if owner and repo_name:
+            origin_host, owner, repo_name = _origin_owner_repo(origin)
+            origin_host = (origin_host or "").lower()
+            host_matches = False
+            if configured_host:
+                if origin_host == configured_host:
+                    host_matches = True
+                elif configured_host == "api.github.com" and origin_host in known_github_hosts:
+                    host_matches = True
+            else:
+                if origin_host in known_github_hosts:
+                    host_matches = True
+
+            if host_matches and owner and repo_name:
                 cache_key = f"{owner}/{repo_name}"
                 if cache_key not in pr_cache:
                     try:
@@ -2653,7 +2672,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                             stale_days=stale_days,
                             base_url=base_url or None,
                         )
-                    except Exception:
+                    except Exception as exc:
+                        print(
+                            f"warning: failed to fetch pull requests for {cache_key}: {exc}",
+                            file=sys.stderr,
+                        )
                         pr_cache[cache_key] = []
                 repo_prs = pr_cache.get(cache_key, [])
                 if repo_prs:
