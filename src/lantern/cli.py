@@ -2631,7 +2631,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     base_url = ""
     token = ""
     configured_host = ""
-    known_github_hosts: Set[str] = {"github.com", "www.github.com"}
+    known_github_hosts: Set[str] = {"github.com", "www.github.com", "ssh.github.com"}
     if include_prs:
         provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
         provider = provider.lower()
@@ -2674,7 +2674,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                         )
                     except Exception as exc:
                         print(
-                            f"warning: failed to fetch pull requests for {cache_key}: {exc}",
+                            f"Warning: failed to fetch pull requests for {cache_key}: {exc}",
                             file=sys.stderr,
                         )
                         pr_cache[cache_key] = []

@@ -269,4 +269,4 @@ def test_cmd_status_warns_when_pr_lookup_fails(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert rc == 0
-    assert "warning: failed to fetch pull requests for owner/repo: boom" in captured.err
+    assert "Warning: failed to fetch pull requests for owner/repo: boom" in captured.err
