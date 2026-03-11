@@ -53,10 +53,6 @@ lantern fleet apply --root ~/workspace --server github.com --clone-missing --pul
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --checkout-latest-branch
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
 lantern fleet logs --latest
-
-Selection tips:
-- Use `--repos repo-a,repo-b` for explicit multi-repo actions.
-- When names are ambiguous, pass full repo paths instead of short names.
 lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern status --root ~/workspace --fetch --with-prs
@@ -68,6 +64,10 @@ lantern forge list --server github.com --org my-org --org platform --with-user -
 lantern forge clone --server github.com --input data/github.json --root ~/workspace
 lantern forge gists list --server github.com --output data/gists.json
 ```
+
+Selection tips:
+- Use `--repos repo-a,repo-b` for explicit multi-repo actions.
+- When names are ambiguous, pass full repo paths instead of short names.
 
 ## Environment
 

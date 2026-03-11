@@ -3,10 +3,10 @@ import json
 from lantern import cli
 
 
-def test_resolve_selected_records_returns_all_when_filter_empty():
+def test_resolve_selected_records_returns_all_when_filter_empty(tmp_path):
     records = [
-        {"name": "alpha", "path": "/tmp/a"},
-        {"name": "beta", "path": "/tmp/b"},
+        {"name": "alpha", "path": str(tmp_path / "alpha")},
+        {"name": "beta", "path": str(tmp_path / "beta")},
     ]
 
     selected, error = cli._resolve_selected_records(records, "")
@@ -15,20 +15,20 @@ def test_resolve_selected_records_returns_all_when_filter_empty():
     assert selected == records
 
 
-def test_resolve_selected_records_accepts_unique_names_and_full_paths():
+def test_resolve_selected_records_accepts_unique_names_and_full_paths(tmp_path):
     records = [
-        {"name": "alpha", "path": "/tmp/a"},
-        {"name": "beta", "path": "/tmp/b"},
+        {"name": "alpha", "path": str(tmp_path / "alpha")},
+        {"name": "beta", "path": str(tmp_path / "beta")},
     ]
 
-    selected, error = cli._resolve_selected_records(records, "alpha,/tmp/b")
+    selected, error = cli._resolve_selected_records(records, f"alpha,{tmp_path / 'beta'}")
 
     assert error is None
     assert selected == [records[0], records[1]]
 
 
-def test_resolve_selected_records_reports_missing_repo():
-    records = [{"name": "alpha", "path": "/tmp/a"}]
+def test_resolve_selected_records_reports_missing_repo(tmp_path):
+    records = [{"name": "alpha", "path": str(tmp_path / "alpha")}]
 
     selected, error = cli._resolve_selected_records(records, "missing")
 
@@ -36,10 +36,10 @@ def test_resolve_selected_records_reports_missing_repo():
     assert error == "Repository not found: missing"
 
 
-def test_resolve_selected_records_reports_ambiguous_name():
+def test_resolve_selected_records_reports_ambiguous_name(tmp_path):
     records = [
-        {"name": "alpha", "path": "/tmp/a1"},
-        {"name": "alpha", "path": "/tmp/a2"},
+        {"name": "alpha", "path": str(tmp_path / "alpha-1")},
+        {"name": "alpha", "path": str(tmp_path / "alpha-2")},
     ]
 
     selected, error = cli._resolve_selected_records(records, "alpha")
@@ -48,31 +48,31 @@ def test_resolve_selected_records_reports_ambiguous_name():
     assert error == "Repository name is ambiguous: alpha. Use full path."
 
 
-def test_apply_bulk_action_update_respects_only_clean():
+def test_apply_bulk_action_update_respects_only_clean(tmp_path):
     records = [
-        {"name": "alpha", "path": "/tmp/a", "upstream": "origin/main", "clean": "no"},
+        {"name": "alpha", "path": str(tmp_path / "alpha"), "upstream": "origin/main", "clean": "no"},
     ]
 
     results = cli._apply_bulk_action(records, action="update", dry_run=False, only_clean=True)
 
     assert results == [
-        {"repo": "alpha", "action": "update", "result": "skip-dirty", "path": "/tmp/a"}
+        {"repo": "alpha", "action": "update", "result": "skip-dirty", "path": str(tmp_path / "alpha")}
     ]
 
 
-def test_apply_bulk_action_update_skips_missing_upstream():
+def test_apply_bulk_action_update_skips_missing_upstream(tmp_path):
     records = [
-        {"name": "alpha", "path": "/tmp/a", "upstream": "", "clean": "yes"},
+        {"name": "alpha", "path": str(tmp_path / "alpha"), "upstream": "", "clean": "yes"},
     ]
 
     results = cli._apply_bulk_action(records, action="update", dry_run=False, only_clean=False)
 
     assert results == [
-        {"repo": "alpha", "action": "update", "result": "skip-no-upstream", "path": "/tmp/a"}
+        {"repo": "alpha", "action": "update", "result": "skip-no-upstream", "path": str(tmp_path / "alpha")}
     ]
 
 
-def test_apply_bulk_action_checkout_main_uses_remote_main_ref(monkeypatch):
+def test_apply_bulk_action_checkout_main_uses_remote_main_ref(monkeypatch, tmp_path):
     seen_ops = []
     monkeypatch.setattr(cli, "_remote_main_ref", lambda _path: "origin/main")
     monkeypatch.setattr(
@@ -82,14 +82,19 @@ def test_apply_bulk_action_checkout_main_uses_remote_main_ref(monkeypatch):
     )
 
     results = cli._apply_bulk_action(
-        [{"name": "alpha", "path": "/tmp/a", "upstream": "origin/main", "clean": "yes"}],
+        [{"name": "alpha", "path": str(tmp_path / "alpha"), "upstream": "origin/main", "clean": "yes"}],
         action="checkout-main",
         dry_run=False,
         only_clean=False,
     )
 
     assert results == [
-        {"repo": "alpha", "action": "checkout-main", "result": "ok:main <= origin/main", "path": "/tmp/a"}
+        {
+            "repo": "alpha",
+            "action": "checkout-main",
+            "result": "ok:main <= origin/main",
+            "path": str(tmp_path / "alpha"),
+        }
     ]
     assert seen_ops == [
         ["fetch", "--prune"],
@@ -98,10 +103,22 @@ def test_apply_bulk_action_checkout_main_uses_remote_main_ref(monkeypatch):
     ]
 
 
-def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch):
+def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_path):
     rows = [
-        {"repo": "beta", "state": "behind-remote", "clean": "yes", "path": "/tmp/b", "latest_branch": "release/b"},
-        {"repo": "alpha", "state": "in-sync", "clean": "yes", "path": "/tmp/a", "latest_branch": "release/a"},
+        {
+            "repo": "beta",
+            "state": "behind-remote",
+            "clean": "yes",
+            "path": str(tmp_path / "beta"),
+            "latest_branch": "release/b",
+        },
+        {
+            "repo": "alpha",
+            "state": "in-sync",
+            "clean": "yes",
+            "path": str(tmp_path / "alpha"),
+            "latest_branch": "release/a",
+        },
     ]
     captured = {}
 
@@ -137,14 +154,22 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch):
     assert "Checkout branch: release/x" in captured["textbox"][1]
 
 
-def test_confirm_fleet_apply_selection_returns_empty_when_user_cancels(monkeypatch):
+def test_confirm_fleet_apply_selection_returns_empty_when_user_cancels(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "render_table", lambda *_args, **_kwargs: "table")
     monkeypatch.setattr(cli, "_dialog_textbox_from_text", lambda *args: None)
     monkeypatch.setattr(cli, "_dialog_checklist", lambda *_args: [])
 
     selected = cli._fleet_preflight_confirm(
         title="Fleet Apply",
-        rows=[{"repo": "alpha", "state": "in-sync", "clean": "yes", "path": "/tmp/a", "latest_branch": "main"}],
+        rows=[
+            {
+                "repo": "alpha",
+                "state": "in-sync",
+                "clean": "yes",
+                "path": str(tmp_path / "alpha"),
+                "latest_branch": "main",
+            }
+        ],
         clone_missing=False,
         pull_behind=False,
         push_ahead=False,
