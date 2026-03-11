@@ -89,6 +89,11 @@ def test_cmd_fleet_apply_uses_latest_branch_hint_in_dry_run(monkeypatch, capsys)
         ),
     )
     monkeypatch.setattr(cli, "_is_valid_git_branch_name", lambda _branch: True)
+    monkeypatch.setattr(
+        cli.git,
+        "get_working_tree_state",
+        lambda _path: (_ for _ in ()).throw(AssertionError("dry-run should not inspect worktree state")),
+    )
     args = _make_apply_args(checkout_latest_branch=True)
 
     rc = cli.cmd_fleet_apply(args)

@@ -3180,21 +3180,9 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 action_records.append({"action": checkout_action, "status": "invalid-branch"})
                 effective_branch = ""
         if effective_branch:
-            worktree_state = None
-            if checkout_latest_branch and os.path.isdir(path):
-                worktree_state = git.get_working_tree_state(path)
             if args.only_clean and row.get("clean") == "no":
                 statuses.append(f"{checkout_action}:{effective_branch}:skip-dirty")
                 action_records.append({"action": checkout_action, "status": "skip-dirty", "branch": effective_branch})
-            elif checkout_latest_branch and worktree_state and not worktree_state.get("allows_checkout_latest", False):
-                statuses.append(f"{checkout_action}:{effective_branch}:skip-dirty-tracked")
-                action_records.append(
-                    {
-                        "action": checkout_action,
-                        "status": "skip-dirty-tracked",
-                        "branch": effective_branch,
-                    }
-                )
             elif not clone_ok and not args.dry_run:
                 statuses.append(f"{checkout_action}:{effective_branch}:skip-not-cloned")
                 action_records.append({"action": checkout_action, "status": "skip-not-cloned", "branch": effective_branch})
@@ -3202,31 +3190,44 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append(f"{checkout_action}:{effective_branch}:dry-run")
                 action_records.append({"action": checkout_action, "status": "dry-run", "branch": effective_branch})
             else:
-                _run_git_op(path, ["fetch", "--prune"])
-                remote_ref = f"origin/{effective_branch}"
-                has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
-                if not has_remote:
-                    statuses.append(f"{checkout_action}:{effective_branch}:skip-no-remote")
-                    action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": effective_branch})
+                worktree_state = None
+                if checkout_latest_branch and clone_ok and os.path.isdir(path):
+                    worktree_state = git.get_working_tree_state(path)
+                if checkout_latest_branch and worktree_state and not worktree_state.get("allows_checkout_latest", False):
+                    statuses.append(f"{checkout_action}:{effective_branch}:skip-dirty-tracked")
+                    action_records.append(
+                        {
+                            "action": checkout_action,
+                            "status": "skip-dirty-tracked",
+                            "branch": effective_branch,
+                        }
+                    )
                 else:
-                    has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
-                    if has_local:
-                        rc_checkout = _run_git_op(path, ["checkout", effective_branch])
+                    _run_git_op(path, ["fetch", "--prune"])
+                    remote_ref = f"origin/{effective_branch}"
+                    has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
+                    if not has_remote:
+                        statuses.append(f"{checkout_action}:{effective_branch}:skip-no-remote")
+                        action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": effective_branch})
                     else:
-                        rc_checkout = _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
-                    rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
-                    ok = rc_checkout == 0 and rc_pull == 0
-                    statuses.append(f"{checkout_action}:{effective_branch}:{'ok' if ok else 'fail'}")
-                    action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": effective_branch})
-                    if not ok:
-                        rollback = _attempt_repo_rollback(path, original_head, original_branch)
-                        action_records.append(
-                            {
-                                "action": "rollback",
-                                "status": rollback.get("restored", "no"),
-                                "detail": rollback.get("steps", "none"),
-                            }
-                        )
+                        has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
+                        if has_local:
+                            rc_checkout = _run_git_op(path, ["checkout", effective_branch])
+                        else:
+                            rc_checkout = _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
+                        rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
+                        ok = rc_checkout == 0 and rc_pull == 0
+                        statuses.append(f"{checkout_action}:{effective_branch}:{'ok' if ok else 'fail'}")
+                        action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": effective_branch})
+                        if not ok:
+                            rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                            action_records.append(
+                                {
+                                    "action": "rollback",
+                                    "status": rollback.get("restored", "no"),
+                                    "detail": rollback.get("steps", "none"),
+                                }
+                            )
 
         if not statuses:
             statuses = ["skip"]
