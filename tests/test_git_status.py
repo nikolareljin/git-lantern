@@ -18,10 +18,12 @@ def test_get_working_tree_state_reports_clean(monkeypatch):
     state = git.get_working_tree_state("/tmp/repo")
 
     assert state == {
+        "status_ok": True,
         "is_clean": True,
         "has_untracked": False,
         "has_tracked_changes": False,
         "allows_checkout_latest": True,
+        "error": "",
     }
 
 
@@ -40,10 +42,12 @@ def test_get_working_tree_state_allows_untracked_only(monkeypatch):
     state = git.get_working_tree_state("/tmp/repo")
 
     assert state == {
+        "status_ok": True,
         "is_clean": False,
         "has_untracked": True,
         "has_tracked_changes": False,
         "allows_checkout_latest": True,
+        "error": "",
     }
 
 
@@ -62,10 +66,12 @@ def test_get_working_tree_state_blocks_tracked_changes(monkeypatch):
     state = git.get_working_tree_state("/tmp/repo")
 
     assert state == {
+        "status_ok": True,
         "is_clean": False,
         "has_untracked": True,
         "has_tracked_changes": True,
         "allows_checkout_latest": False,
+        "error": "",
     }
 
 
@@ -84,8 +90,10 @@ def test_get_working_tree_state_treats_git_failures_as_unsafe(monkeypatch):
     state = git.get_working_tree_state("/tmp/repo")
 
     assert state == {
+        "status_ok": False,
         "is_clean": False,
         "has_untracked": False,
-        "has_tracked_changes": True,
-        "allows_checkout_latest": False,
+        "has_tracked_changes": False,
+        "allows_checkout_latest": None,
+        "error": "git status failed",
     }

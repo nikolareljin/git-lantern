@@ -85,23 +85,27 @@ def is_clean(repo_path: str) -> bool:
     return status_output == ""
 
 
-def get_working_tree_state(repo_path: str) -> Dict[str, bool]:
+def get_working_tree_state(repo_path: str) -> Dict[str, object]:
     """Classify whether a repo is clean, untracked-only, or has tracked changes."""
     result = _run_git_capture(repo_path, ["status", "--porcelain"])
     status_output = result.stdout.strip()
     if result.returncode != 0:
         return {
+            "status_ok": False,
             "is_clean": False,
             "has_untracked": False,
-            "has_tracked_changes": True,
-            "allows_checkout_latest": False,
+            "has_tracked_changes": False,
+            "allows_checkout_latest": None,
+            "error": "git status failed",
         }
     if not status_output:
         return {
+            "status_ok": True,
             "is_clean": True,
             "has_untracked": False,
             "has_tracked_changes": False,
             "allows_checkout_latest": True,
+            "error": "",
         }
 
     has_untracked = False
@@ -116,10 +120,12 @@ def get_working_tree_state(repo_path: str) -> Dict[str, bool]:
         has_tracked_changes = True
 
     return {
+        "status_ok": True,
         "is_clean": False,
         "has_untracked": has_untracked,
         "has_tracked_changes": has_tracked_changes,
         "allows_checkout_latest": not has_tracked_changes,
+        "error": "",
     }
 
 
