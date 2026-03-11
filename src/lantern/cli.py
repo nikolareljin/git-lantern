@@ -3245,7 +3245,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 worktree_state = None
                 if checkout_latest_branch and clone_ok and os.path.isdir(path):
                     worktree_state = git.get_working_tree_state(path)
-                if checkout_latest_branch and worktree_state:
+                if checkout_latest_branch and worktree_state is not None:
                     allows_checkout_latest = worktree_state.get("allows_checkout_latest")
                     if allows_checkout_latest is False:
                         statuses.append(f"{checkout_action}:{effective_branch}:skip-dirty-tracked")
