@@ -18,6 +18,7 @@ All notable changes to git-lantern are documented in this file.
 - Updated CLI documentation and quick examples in `README.md` for TODO-to-issues workflows.
 - Changed `fleet plan` output to always include a `latest_branch` column; `prs` is still shown only with `--with-prs`.
 - Changed `lantern` default invocation behavior to launch TUI when no subcommand is provided (same as `lantern tui`).
+- Changed `fleet apply --checkout-latest-branch` to allow repos with untracked-only files while skipping repos that have tracked working tree changes.
 
 ## [0.2.0] - 2026-02-28
 

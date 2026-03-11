@@ -81,6 +81,36 @@ def is_clean(repo_path: str) -> bool:
     return status_output == ""
 
 
+def get_working_tree_state(repo_path: str) -> Dict[str, bool]:
+    """Classify whether a repo is clean, untracked-only, or has tracked changes."""
+    status_output = run_git(repo_path, ["status", "--porcelain"])
+    if not status_output:
+        return {
+            "is_clean": True,
+            "has_untracked": False,
+            "has_tracked_changes": False,
+            "allows_checkout_latest": True,
+        }
+
+    has_untracked = False
+    has_tracked_changes = False
+    for raw_line in status_output.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        if line.startswith("??"):
+            has_untracked = True
+            continue
+        has_tracked_changes = True
+
+    return {
+        "is_clean": False,
+        "has_untracked": has_untracked,
+        "has_tracked_changes": has_tracked_changes,
+        "allows_checkout_latest": not has_tracked_changes,
+    }
+
+
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:
     counts = run_git(repo_path, ["rev-list", "--left-right", "--count", f"{left}...{right}"])
     if not counts:
