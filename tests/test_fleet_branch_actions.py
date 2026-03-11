@@ -288,6 +288,7 @@ def test_checkout_remote_branch_short_circuits_when_fetch_fails(monkeypatch):
 
 def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
     seen_args = []
+    seen_ops = []
 
     def _fake_run_git(_path, args):
         seen_args.append(args)
@@ -297,7 +298,11 @@ def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
             return ""
         return ""
 
-    monkeypatch.setattr(cli, "_run_git_op", lambda _path, _args, quiet=True: 0)
+    monkeypatch.setattr(
+        cli,
+        "_run_git_op",
+        lambda _path, args, quiet=True: (seen_ops.append(args), 0)[1],
+    )
     monkeypatch.setattr(cli.git, "run_git", _fake_run_git)
 
     statuses, records = cli._checkout_remote_branch(
@@ -317,3 +322,4 @@ def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
         }
     ]
     assert ["rev-parse", "--verify", "refs/heads/feature/latest"] in seen_args
+    assert ["pull", "--ff-only", "origin", "feature/latest"] in seen_ops
