@@ -95,5 +95,5 @@ def test_get_working_tree_state_treats_git_failures_as_unsafe(monkeypatch):
         "has_untracked": False,
         "has_tracked_changes": False,
         "allows_checkout_latest": None,
-        "error": "git status failed",
+        "error": "git status failed; fatal; exit=128",
     }

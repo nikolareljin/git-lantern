@@ -406,6 +406,45 @@ def _attempt_repo_rollback(path: str, original_head: str, original_branch: str) 
     }
 
 
+def _checkout_remote_branch(
+    path: str,
+    branch: str,
+    checkout_action: str,
+    original_head: str,
+    original_branch: str,
+) -> Tuple[List[str], List[Dict[str, str]]]:
+    statuses: List[str] = []
+    action_records: List[Dict[str, str]] = []
+
+    _run_git_op(path, ["fetch", "--prune"])
+    remote_ref = f"origin/{branch}"
+    has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
+    if not has_remote:
+        statuses.append(f"{checkout_action}:{branch}:skip-no-remote")
+        action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": branch})
+        return statuses, action_records
+
+    has_local = bool(git.run_git(path, ["rev-parse", "--verify", branch]))
+    if has_local:
+        rc_checkout = _run_git_op(path, ["checkout", branch])
+    else:
+        rc_checkout = _run_git_op(path, ["checkout", "-b", branch, "--track", remote_ref])
+    rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
+    ok = rc_checkout == 0 and rc_pull == 0
+    statuses.append(f"{checkout_action}:{branch}:{'ok' if ok else 'fail'}")
+    action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": branch})
+    if not ok:
+        rollback = _attempt_repo_rollback(path, original_head, original_branch)
+        action_records.append(
+            {
+                "action": "rollback",
+                "status": rollback.get("restored", "no"),
+                "detail": rollback.get("steps", "none"),
+            }
+        )
+    return statuses, action_records
+
+
 def _remote_main_ref(path: str) -> str:
     refs = git.get_default_branch_refs(path)
     if "origin" in refs:
@@ -3216,57 +3255,25 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                             record["detail"] = error_detail
                         action_records.append(record)
                     else:
-                        _run_git_op(path, ["fetch", "--prune"])
-                        remote_ref = f"origin/{effective_branch}"
-                        has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
-                        if not has_remote:
-                            statuses.append(f"{checkout_action}:{effective_branch}:skip-no-remote")
-                            action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": effective_branch})
-                        else:
-                            has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
-                            if has_local:
-                                rc_checkout = _run_git_op(path, ["checkout", effective_branch])
-                            else:
-                                rc_checkout = _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
-                            rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
-                            ok = rc_checkout == 0 and rc_pull == 0
-                            statuses.append(f"{checkout_action}:{effective_branch}:{'ok' if ok else 'fail'}")
-                            action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": effective_branch})
-                            if not ok:
-                                rollback = _attempt_repo_rollback(path, original_head, original_branch)
-                                action_records.append(
-                                    {
-                                        "action": "rollback",
-                                        "status": rollback.get("restored", "no"),
-                                        "detail": rollback.get("steps", "none"),
-                                    }
-                                )
+                        checkout_statuses, checkout_records = _checkout_remote_branch(
+                            path=path,
+                            branch=effective_branch,
+                            checkout_action=checkout_action,
+                            original_head=original_head,
+                            original_branch=original_branch,
+                        )
+                        statuses.extend(checkout_statuses)
+                        action_records.extend(checkout_records)
                 else:
-                    _run_git_op(path, ["fetch", "--prune"])
-                    remote_ref = f"origin/{effective_branch}"
-                    has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
-                    if not has_remote:
-                        statuses.append(f"{checkout_action}:{effective_branch}:skip-no-remote")
-                        action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": effective_branch})
-                    else:
-                        has_local = bool(git.run_git(path, ["rev-parse", "--verify", effective_branch]))
-                        if has_local:
-                            rc_checkout = _run_git_op(path, ["checkout", effective_branch])
-                        else:
-                            rc_checkout = _run_git_op(path, ["checkout", "-b", effective_branch, "--track", remote_ref])
-                        rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
-                        ok = rc_checkout == 0 and rc_pull == 0
-                        statuses.append(f"{checkout_action}:{effective_branch}:{'ok' if ok else 'fail'}")
-                        action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": effective_branch})
-                        if not ok:
-                            rollback = _attempt_repo_rollback(path, original_head, original_branch)
-                            action_records.append(
-                                {
-                                    "action": "rollback",
-                                    "status": rollback.get("restored", "no"),
-                                    "detail": rollback.get("steps", "none"),
-                                }
-                            )
+                    checkout_statuses, checkout_records = _checkout_remote_branch(
+                        path=path,
+                        branch=effective_branch,
+                        checkout_action=checkout_action,
+                        original_head=original_head,
+                        original_branch=original_branch,
+                    )
+                    statuses.extend(checkout_statuses)
+                    action_records.extend(checkout_records)
 
         if not statuses:
             statuses = ["skip"]

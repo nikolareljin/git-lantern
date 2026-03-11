@@ -8,7 +8,7 @@ def _run_git_capture(repo_path: str, args: list) -> subprocess.CompletedProcess:
         ["git", "-C", repo_path, *args],
         check=False,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         text=True,
     )
 
@@ -90,13 +90,18 @@ def get_working_tree_state(repo_path: str) -> Dict[str, object]:
     result = _run_git_capture(repo_path, ["status", "--porcelain"])
     status_output = result.stdout.strip()
     if result.returncode != 0:
+        error_parts = ["git status failed"]
+        stderr_text = str(result.stderr or "").strip()
+        if stderr_text:
+            error_parts.append(stderr_text)
+        error_parts.append(f"exit={result.returncode}")
         return {
             "status_ok": False,
             "is_clean": False,
             "has_untracked": False,
             "has_tracked_changes": False,
             "allows_checkout_latest": None,
-            "error": "git status failed",
+            "error": "; ".join(error_parts),
         }
     if not status_output:
         return {
