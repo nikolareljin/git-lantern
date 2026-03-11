@@ -65,6 +65,10 @@ lantern forge clone --server github.com --input data/github.json --root ~/worksp
 lantern forge gists list --server github.com --output data/gists.json
 ```
 
+Selection tips:
+- Use `--repos repo-a,repo-b` for explicit multi-repo actions.
+- When names are ambiguous, pass full repo paths instead of short names.
+
 ## Environment
 
 Create `.env` from `.env.example` if you want API access. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` or `~/.git-lantern/config.json`.
