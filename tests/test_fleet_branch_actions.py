@@ -262,3 +262,58 @@ def test_cmd_fleet_apply_skips_latest_checkout_when_git_status_fails(monkeypatch
     out = capsys.readouterr().out
     assert rc == 0
     assert "checkout-latest:feature/latest:skip-git-error" in out
+
+
+def test_checkout_remote_branch_short_circuits_when_fetch_fails(monkeypatch):
+    monkeypatch.setattr(cli, "_run_git_op", lambda _path, args, quiet=True: 1 if args == ["fetch", "--prune"] else 0)
+
+    statuses, records = cli._checkout_remote_branch(
+        path="/tmp/demo",
+        branch="feature/latest",
+        checkout_action="checkout-latest",
+        original_head="abc123",
+        original_branch="main",
+    )
+
+    assert statuses == ["checkout-latest:feature/latest:skip-git-error"]
+    assert records == [
+        {
+            "action": "checkout-latest",
+            "status": "skip-git-error",
+            "branch": "feature/latest",
+            "detail": "git fetch failed",
+        }
+    ]
+
+
+def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
+    seen_args = []
+
+    def _fake_run_git(_path, args):
+        seen_args.append(args)
+        if args == ["rev-parse", "--verify", "origin/feature/latest"]:
+            return "origin/feature/latest"
+        if args == ["rev-parse", "--verify", "refs/heads/feature/latest"]:
+            return ""
+        return ""
+
+    monkeypatch.setattr(cli, "_run_git_op", lambda _path, _args, quiet=True: 0)
+    monkeypatch.setattr(cli.git, "run_git", _fake_run_git)
+
+    statuses, records = cli._checkout_remote_branch(
+        path="/tmp/demo",
+        branch="feature/latest",
+        checkout_action="checkout-latest",
+        original_head="abc123",
+        original_branch="main",
+    )
+
+    assert statuses == ["checkout-latest:feature/latest:ok"]
+    assert records == [
+        {
+            "action": "checkout-latest",
+            "status": "ok",
+            "branch": "feature/latest",
+        }
+    ]
+    assert ["rev-parse", "--verify", "refs/heads/feature/latest"] in seen_args

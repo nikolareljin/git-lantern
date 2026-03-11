@@ -416,7 +416,19 @@ def _checkout_remote_branch(
     statuses: List[str] = []
     action_records: List[Dict[str, str]] = []
 
-    _run_git_op(path, ["fetch", "--prune"])
+    rc_fetch = _run_git_op(path, ["fetch", "--prune"])
+    if rc_fetch != 0:
+        statuses.append(f"{checkout_action}:{branch}:skip-git-error")
+        action_records.append(
+            {
+                "action": checkout_action,
+                "status": "skip-git-error",
+                "branch": branch,
+                "detail": "git fetch failed",
+            }
+        )
+        return statuses, action_records
+
     remote_ref = f"origin/{branch}"
     has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
     if not has_remote:
@@ -424,7 +436,8 @@ def _checkout_remote_branch(
         action_records.append({"action": checkout_action, "status": "skip-no-remote", "branch": branch})
         return statuses, action_records
 
-    has_local = bool(git.run_git(path, ["rev-parse", "--verify", branch]))
+    local_ref = f"refs/heads/{branch}"
+    has_local = bool(git.run_git(path, ["rev-parse", "--verify", local_ref]))
     if has_local:
         rc_checkout = _run_git_op(path, ["checkout", branch])
     else:
