@@ -5,9 +5,9 @@ from lantern import git
 
 def test_get_working_tree_state_reports_clean(monkeypatch):
     monkeypatch.setattr(
-        git,
-        "_run_git_capture",
-        lambda _repo_path, _args: subprocess.CompletedProcess(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["git", "status", "--porcelain"],
             returncode=0,
             stdout="",
@@ -29,9 +29,9 @@ def test_get_working_tree_state_reports_clean(monkeypatch):
 
 def test_get_working_tree_state_allows_untracked_only(monkeypatch):
     monkeypatch.setattr(
-        git,
-        "_run_git_capture",
-        lambda _repo_path, _args: subprocess.CompletedProcess(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["git", "status", "--porcelain"],
             returncode=0,
             stdout="?? notes.txt\n?? tmp/cache.json",
@@ -53,9 +53,9 @@ def test_get_working_tree_state_allows_untracked_only(monkeypatch):
 
 def test_get_working_tree_state_blocks_tracked_changes(monkeypatch):
     monkeypatch.setattr(
-        git,
-        "_run_git_capture",
-        lambda _repo_path, _args: subprocess.CompletedProcess(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["git", "status", "--porcelain"],
             returncode=0,
             stdout=" M src/lantern/cli.py\n?? notes.txt",
@@ -77,9 +77,9 @@ def test_get_working_tree_state_blocks_tracked_changes(monkeypatch):
 
 def test_get_working_tree_state_treats_git_failures_as_unsafe(monkeypatch):
     monkeypatch.setattr(
-        git,
-        "_run_git_capture",
-        lambda _repo_path, _args: subprocess.CompletedProcess(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["git", "status", "--porcelain"],
             returncode=128,
             stdout="",

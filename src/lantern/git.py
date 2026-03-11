@@ -3,18 +3,14 @@ import subprocess
 from typing import Dict, Optional, Tuple
 
 
-def _run_git_capture(repo_path: str, args: list) -> subprocess.CompletedProcess:
-    return subprocess.run(
+def run_git(repo_path: str, args: list) -> str:
+    result = subprocess.run(
         ["git", "-C", repo_path, *args],
         check=False,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
-
-
-def run_git(repo_path: str, args: list) -> str:
-    result = _run_git_capture(repo_path, args)
     return result.stdout.strip()
 
 
@@ -87,7 +83,13 @@ def is_clean(repo_path: str) -> bool:
 
 def get_working_tree_state(repo_path: str) -> Dict[str, object]:
     """Classify whether a repo is clean, untracked-only, or has tracked changes."""
-    result = _run_git_capture(repo_path, ["status", "--porcelain"])
+    result = subprocess.run(
+        ["git", "-C", repo_path, "status", "--porcelain"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     status_output = result.stdout.strip()
     if result.returncode != 0:
         error_parts = ["git status failed"]

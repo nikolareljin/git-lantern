@@ -442,7 +442,7 @@ def _checkout_remote_branch(
         rc_checkout = _run_git_op(path, ["checkout", branch])
     else:
         rc_checkout = _run_git_op(path, ["checkout", "-b", branch, "--track", remote_ref])
-    rc_pull = _run_git_op(path, ["pull", "--ff-only"]) if rc_checkout == 0 else 1
+    rc_pull = _run_git_op(path, ["pull", "--ff-only", "origin", branch]) if rc_checkout == 0 else 1
     ok = rc_checkout == 0 and rc_pull == 0
     statuses.append(f"{checkout_action}:{branch}:{'ok' if ok else 'fail'}")
     action_records.append({"action": checkout_action, "status": "ok" if ok else "fail", "branch": branch})
