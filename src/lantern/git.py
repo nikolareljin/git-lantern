@@ -81,6 +81,61 @@ def is_clean(repo_path: str) -> bool:
     return status_output == ""
 
 
+def get_working_tree_state(repo_path: str) -> Dict[str, object]:
+    """Classify whether a repo is clean, untracked-only, or has tracked changes."""
+    result = subprocess.run(
+        ["git", "-C", repo_path, "status", "--porcelain"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    status_output = result.stdout.strip()
+    if result.returncode != 0:
+        error_parts = ["git status failed"]
+        stderr_text = str(result.stderr or "").strip()
+        if stderr_text:
+            error_parts.append(stderr_text)
+        error_parts.append(f"exit={result.returncode}")
+        return {
+            "status_ok": False,
+            "is_clean": False,
+            "has_untracked": False,
+            "has_tracked_changes": False,
+            "allows_checkout_latest": None,
+            "error": "; ".join(error_parts),
+        }
+    if not status_output:
+        return {
+            "status_ok": True,
+            "is_clean": True,
+            "has_untracked": False,
+            "has_tracked_changes": False,
+            "allows_checkout_latest": True,
+            "error": "",
+        }
+
+    has_untracked = False
+    has_tracked_changes = False
+    for raw_line in status_output.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        if line.startswith("??"):
+            has_untracked = True
+            continue
+        has_tracked_changes = True
+
+    return {
+        "status_ok": True,
+        "is_clean": False,
+        "has_untracked": has_untracked,
+        "has_tracked_changes": has_tracked_changes,
+        "allows_checkout_latest": not has_tracked_changes,
+        "error": "",
+    }
+
+
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:
     counts = run_git(repo_path, ["rev-list", "--left-right", "--count", f"{left}...{right}"])
     if not counts:
