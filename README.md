@@ -119,6 +119,7 @@ Git Lantern
 │   ├── snippets      - List/download gists and snippets
 │   └── gist_create   - Create a gist (GitHub only)
 ├── report       - Export scan results (CSV/JSON/MD)
+├── about        - Project info and profile links
 ├── command      - Run any `lantern ...` command
 └── exit         - Exit (clears screen)
 ```

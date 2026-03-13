@@ -82,3 +82,28 @@ def test_main_dispatches_explicit_tui_subcommand(monkeypatch):
         assert exc.code == 0
 
     assert called["args"].command == "tui"
+
+
+def test_cmd_tui_about_dialog(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_init", lambda: (20, 84))
+    monkeypatch.setattr(cli.lantern_config, "load_config", lambda: {
+        "workspace_root": str(tmp_path),
+        "scan_json_path": str(tmp_path / "repos.json"),
+    })
+    monkeypatch.setattr(cli.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
+
+    choices = iter(["about", "exit"])
+    monkeypatch.setattr(cli, "_dialog_menu", lambda *_args, **_kwargs: next(choices))
+
+    captured = {}
+
+    def _fake_about(height=12, width=76):
+        captured["size"] = (height, width)
+
+    monkeypatch.setattr(cli, "_show_about_dialog", _fake_about)
+
+    rc = cli.cmd_tui(SimpleNamespace(tui_root=""))
+
+    assert rc == 0
+    assert captured["size"] == (20, 84)

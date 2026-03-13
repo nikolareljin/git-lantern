@@ -9,6 +9,10 @@ All notable changes to git-lantern are documented in this file.
 - Changed `fleet apply --checkout-latest-branch` to allow repos with untracked-only files while skipping repos that have tracked working tree changes.
 - Added regression coverage for repo selection, bulk fleet helpers, confirm-selection dialogs, and fleet log summaries around manual checkout and multi-repo flows.
 
+### Added
+
+- Added an `About` entry to the interactive TUI with GitHub and LinkedIn profile links.
+
 ## [0.3.0] - 2026-03-02
 
 ### Added

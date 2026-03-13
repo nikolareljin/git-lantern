@@ -339,6 +339,19 @@ def _dialog_infobox(title: str, text: str, height: int = 10, width: int = 70) ->
     subprocess.run(cmd, check=False)
 
 
+def _show_about_dialog(height: int = 12, width: int = 76) -> None:
+    """Show the project/about dialog."""
+    _dialog_msgbox(
+        "About Git Lantern",
+        "git-lantern is a local and forge-aware repository visibility toolkit with an interactive dialog TUI.\n\n"
+        "Author profiles\n"
+        "GitHub: https://github.com/nikolareljin\n"
+        "LinkedIn: https://www.linkedin.com/in/nikolareljin",
+        height,
+        width,
+    )
+
+
 def _lazygit_path() -> Optional[str]:
     return shutil.which("lazygit")
 
@@ -1517,6 +1530,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("duplicates", "Find duplicate repositories"),
             ("forge", "Git forge operations (list/clone)"),
             ("report", "Export report (CSV/JSON/MD)"),
+            ("about", "About"),
             ("command", "Run any lantern CLI command"),
             ("exit", "Exit"),
         ]
@@ -1533,6 +1547,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
             # Clear screen on exit
             subprocess.run(["clear"], check=False)
             break
+
+        if action == "about":
+            _show_about_dialog(height, width)
+            continue
 
         if action == "settings":
             hidden_label = "ON" if session["include_hidden"] else "OFF"
