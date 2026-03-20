@@ -4,10 +4,11 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-03-20
+
 ### Changed
 
-- Changed `fleet apply --checkout-latest-branch` to allow repos with untracked-only files while skipping repos that have tracked working tree changes.
-- Added regression coverage for repo selection, bulk fleet helpers, confirm-selection dialogs, and fleet log summaries around manual checkout and multi-repo flows.
+- Changed `lantern todo issues --todo-file ...` duplicate detection to fingerprint existing issues by normalized title plus body across all issue states, so re-importing `TODO.txt` will not recreate already closed issues.
 
 ## [0.3.0] - 2026-03-02
 

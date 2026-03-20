@@ -10,7 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
 
 
 TODO_START = "[TODO]"
@@ -120,7 +120,9 @@ def run_gh_json(command: Sequence[str]) -> object:
     return json.loads(result.stdout)
 
 
-def fetch_existing_issues(repo: Optional[str], limit: int) -> Tuple[set, set]:
+def fetch_existing_issues(
+    repo: Optional[str], limit: int
+) -> Tuple[Set[str], Set[str], Set[Tuple[str, str]]]:
     cmd = [
         "gh",
         "issue",
@@ -140,8 +142,9 @@ def fetch_existing_issues(repo: Optional[str], limit: int) -> Tuple[set, set]:
         raise ValueError(
             f"Unexpected gh issue payload type: {type(issues).__name__}. Expected a JSON list."
         )
-    title_set = set()
-    description_set = set()
+    title_set: Set[str] = set()
+    description_set: Set[str] = set()
+    fingerprint_set: Set[Tuple[str, str]] = set()
     for issue in issues:
         if not isinstance(issue, dict):
             raise ValueError(
@@ -153,7 +156,9 @@ def fetch_existing_issues(repo: Optional[str], limit: int) -> Tuple[set, set]:
             title_set.add(title)
         if body:
             description_set.add(body)
-    return title_set, description_set
+        if title and body:
+            fingerprint_set.add((title, body))
+    return title_set, description_set, fingerprint_set
 
 
 def build_issue_body(item: TodoItem) -> str:
@@ -162,10 +167,19 @@ def build_issue_body(item: TodoItem) -> str:
     return item.description
 
 
-def is_duplicate(item: TodoItem, seen_titles: set, seen_descriptions: set) -> bool:
+def is_duplicate(
+    item: TodoItem,
+    seen_titles: Set[str],
+    seen_descriptions: Set[str],
+    seen_fingerprints: Set[Tuple[str, str]],
+) -> bool:
     normalized_title = normalize_text(item.title)
     normalized_description = normalize_text(build_issue_body(item))
-    return normalized_title in seen_titles or normalized_description in seen_descriptions
+    return (
+        (normalized_title, normalized_description) in seen_fingerprints
+        or normalized_title in seen_titles
+        or normalized_description in seen_descriptions
+    )
 
 
 def create_issue(
@@ -197,7 +211,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Create GitHub issues from TODO.txt in the current repository while "
-            "skipping duplicates by title or description."
+            "skipping duplicates by title or description, including closed issues."
         )
     )
     parser.add_argument(
@@ -244,7 +258,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     try:
-        seen_titles, seen_descriptions = fetch_existing_issues(args.repo, args.limit)
+        seen_titles, seen_descriptions, seen_fingerprints = fetch_existing_issues(
+            args.repo, args.limit
+        )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -264,7 +280,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     created = 0
     skipped = 0
     for item in items:
-        if is_duplicate(item, seen_titles, seen_descriptions):
+        if is_duplicate(item, seen_titles, seen_descriptions, seen_fingerprints):
             print(f"[SKIPPED] Duplicate title/description: {item.title}")
             skipped += 1
             continue
@@ -282,7 +298,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             continue
 
         seen_titles.add(normalize_text(item.title))
-        seen_descriptions.add(normalize_text(build_issue_body(item)))
+        normalized_description = normalize_text(build_issue_body(item))
+        seen_descriptions.add(normalized_description)
+        seen_fingerprints.add((normalize_text(item.title), normalized_description))
         created += 1
 
     print(f"Done. Created: {created}, Skipped duplicates: {skipped}, Parsed: {len(items)}")
