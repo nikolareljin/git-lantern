@@ -8,7 +8,7 @@ All notable changes to git-lantern are documented in this file.
 
 ### Changed
 
-- Changed `lantern todo issues --todo-file ...` duplicate detection to fingerprint existing issues by normalized title plus body across all issue states, so re-importing `TODO.txt` will not recreate already closed issues.
+- Changed `lantern todo issues --todo-file ...` duplicate detection to match existing issues by normalized title plus body fingerprint across all issue states, so re-importing `TODO.txt` will not recreate already closed issues.
 - Corrected release metadata for the patch line so `VERSION`, `pyproject.toml`, and the version bump helper all agree on `0.3.3`.
 
 ## [0.3.0] - 2026-03-02

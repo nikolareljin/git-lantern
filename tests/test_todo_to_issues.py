@@ -49,7 +49,7 @@ Line three
     assert items[0].description == "Line one\nLine two\n\nLine three"
 
 
-def test_is_duplicate_by_title_or_description():
+def test_is_duplicate_requires_matching_title_and_description():
     item = todo_issues.TodoItem(
         item_id="001",
         title="Detect branch",
@@ -57,21 +57,14 @@ def test_is_duplicate_by_title_or_description():
     )
     body = todo_issues.build_issue_body(item)
 
-    title_hit = todo_issues.is_duplicate(
+    assert not todo_issues.is_duplicate(
         item,
-        {todo_issues.normalize_text("detect BRANCH")},
-        set(),
-        set(),
+        {(todo_issues.normalize_text("detect BRANCH"), todo_issues.normalize_text("other body"))},
     )
-    assert title_hit
-
-    description_hit = todo_issues.is_duplicate(
+    assert not todo_issues.is_duplicate(
         item,
-        set(),
-        {todo_issues.normalize_text(body)},
-        set(),
+        {(todo_issues.normalize_text("other title"), todo_issues.normalize_text(body))},
     )
-    assert description_hit
 
 
 def test_is_duplicate_by_closed_issue_fingerprint():
@@ -84,8 +77,6 @@ def test_is_duplicate_by_closed_issue_fingerprint():
 
     assert todo_issues.is_duplicate(
         item,
-        set(),
-        set(),
         {(todo_issues.normalize_text(item.title), body)},
     )
 
@@ -128,15 +119,13 @@ def test_fetch_existing_issues_tracks_closed_issue_fingerprints(monkeypatch):
         ],
     )
 
-    seen_titles, seen_descriptions, seen_fingerprints = todo_issues.fetch_existing_issues(
+    seen_fingerprints = todo_issues.fetch_existing_issues(
         repo=None,
         limit=10,
     )
 
     normalized_title = todo_issues.normalize_text("Sync TODO import")
     normalized_body = todo_issues.normalize_text("ID: 002\n\nAvoid recreating closed issues")
-    assert normalized_title in seen_titles
-    assert normalized_body in seen_descriptions
     assert (normalized_title, normalized_body) in seen_fingerprints
 
 
@@ -222,11 +211,7 @@ def test_main_skips_closed_issue_duplicate_by_matching_title_and_description(
     monkeypatch.setattr(
         todo_issues,
         "fetch_existing_issues",
-        lambda *_args, **_kwargs: (
-            set(),
-            set(),
-            {(normalized_title, normalized_body)},
-        ),
+        lambda *_args, **_kwargs: {(normalized_title, normalized_body)},
     )
 
     create_calls = []
@@ -241,4 +226,4 @@ def test_main_skips_closed_issue_duplicate_by_matching_title_and_description(
 
     assert rc == 0
     assert not create_calls
-    assert "[SKIPPED] Duplicate title/description: Sync TODO import" in captured.out
+    assert "[SKIPPED] Duplicate title/body fingerprint: Sync TODO import" in captured.out

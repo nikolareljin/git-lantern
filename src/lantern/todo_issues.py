@@ -120,9 +120,7 @@ def run_gh_json(command: Sequence[str]) -> object:
     return json.loads(result.stdout)
 
 
-def fetch_existing_issues(
-    repo: Optional[str], limit: int
-) -> Tuple[Set[str], Set[str], Set[Tuple[str, str]]]:
+def fetch_existing_issues(repo: Optional[str], limit: int) -> Set[Tuple[str, str]]:
     cmd = [
         "gh",
         "issue",
@@ -142,8 +140,6 @@ def fetch_existing_issues(
         raise ValueError(
             f"Unexpected gh issue payload type: {type(issues).__name__}. Expected a JSON list."
         )
-    title_set: Set[str] = set()
-    description_set: Set[str] = set()
     fingerprint_set: Set[Tuple[str, str]] = set()
     for issue in issues:
         if not isinstance(issue, dict):
@@ -152,13 +148,9 @@ def fetch_existing_issues(
             )
         title = normalize_text(issue.get("title") or "")
         body = normalize_text(issue.get("body") or "")
-        if title:
-            title_set.add(title)
-        if body:
-            description_set.add(body)
         if title and body:
             fingerprint_set.add((title, body))
-    return title_set, description_set, fingerprint_set
+    return fingerprint_set
 
 
 def build_issue_body(item: TodoItem) -> str:
@@ -169,17 +161,11 @@ def build_issue_body(item: TodoItem) -> str:
 
 def is_duplicate(
     item: TodoItem,
-    seen_titles: Set[str],
-    seen_descriptions: Set[str],
     seen_fingerprints: Set[Tuple[str, str]],
 ) -> bool:
     normalized_title = normalize_text(item.title)
     normalized_description = normalize_text(build_issue_body(item))
-    return (
-        (normalized_title, normalized_description) in seen_fingerprints
-        or normalized_title in seen_titles
-        or normalized_description in seen_descriptions
-    )
+    return (normalized_title, normalized_description) in seen_fingerprints
 
 
 def create_issue(
@@ -211,7 +197,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Create GitHub issues from TODO.txt in the current repository while "
-            "skipping duplicates by title or description, including closed issues."
+            "skipping duplicates by normalized title and body fingerprint, "
+            "including closed issues."
         )
     )
     parser.add_argument(
@@ -258,9 +245,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     try:
-        seen_titles, seen_descriptions, seen_fingerprints = fetch_existing_issues(
-            args.repo, args.limit
-        )
+        seen_fingerprints = fetch_existing_issues(args.repo, args.limit)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -280,8 +265,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     created = 0
     skipped = 0
     for item in items:
-        if is_duplicate(item, seen_titles, seen_descriptions, seen_fingerprints):
-            print(f"[SKIPPED] Duplicate title/description: {item.title}")
+        if is_duplicate(item, seen_fingerprints):
+            print(f"[SKIPPED] Duplicate title/body fingerprint: {item.title}")
             skipped += 1
             continue
 
@@ -297,9 +282,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(stderr, file=sys.stderr)
             continue
 
-        seen_titles.add(normalize_text(item.title))
         normalized_description = normalize_text(build_issue_body(item))
-        seen_descriptions.add(normalized_description)
         seen_fingerprints.add((normalize_text(item.title), normalized_description))
         created += 1
 
