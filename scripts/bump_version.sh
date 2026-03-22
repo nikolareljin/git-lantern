@@ -63,7 +63,7 @@ with open(version_path, "w", encoding="utf-8") as handle:
 with open(pyproject_path, "r", encoding="utf-8") as handle:
     content = handle.read()
 
-content, count = re.subn(r'version = "\\d+\\.\\d+\\.\\d+"', f'version = "{new_version}"', content, count=1)
+content, count = re.subn(r'version = "[0-9]+\.[0-9]+\.[0-9]+"', f'version = "{new_version}"', content, count=1)
 if count == 0:
     raise SystemExit("Failed to update version in pyproject.toml")
 

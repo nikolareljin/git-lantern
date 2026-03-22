@@ -49,7 +49,7 @@ Line three
     assert items[0].description == "Line one\nLine two\n\nLine three"
 
 
-def test_is_duplicate_by_title_or_description():
+def test_is_duplicate_requires_matching_title_and_description():
     item = todo_issues.TodoItem(
         item_id="001",
         title="Detect branch",
@@ -57,19 +57,28 @@ def test_is_duplicate_by_title_or_description():
     )
     body = todo_issues.build_issue_body(item)
 
-    title_hit = todo_issues.is_duplicate(
+    assert not todo_issues.is_duplicate(
         item,
-        {todo_issues.normalize_text("detect BRANCH")},
-        set(),
+        {(todo_issues.normalize_text("detect BRANCH"), todo_issues.normalize_text("other body"))},
     )
-    assert title_hit
+    assert not todo_issues.is_duplicate(
+        item,
+        {(todo_issues.normalize_text("other title"), todo_issues.normalize_text(body))},
+    )
 
-    description_hit = todo_issues.is_duplicate(
-        item,
-        set(),
-        {todo_issues.normalize_text(body)},
+
+def test_is_duplicate_by_closed_issue_fingerprint():
+    item = todo_issues.TodoItem(
+        item_id="002",
+        title="Sync TODO import",
+        description="Avoid recreating closed issues",
     )
-    assert description_hit
+    body = todo_issues.normalize_text(todo_issues.build_issue_body(item))
+
+    assert todo_issues.is_duplicate(
+        item,
+        {(todo_issues.normalize_text(item.title), body)},
+    )
 
 
 def test_extract_todo_block_malformed_order_falls_back():
@@ -94,6 +103,38 @@ def test_fetch_existing_issues_rejects_non_list_payload(monkeypatch):
         assert "Expected a JSON list" in str(exc)
     else:
         raise AssertionError("Expected ValueError for non-list gh payload")
+
+
+def test_fetch_existing_issues_tracks_closed_issue_fingerprints(monkeypatch):
+    captured_cmd = {}
+
+    def _fake_run_gh_json(cmd):
+        captured_cmd["value"] = cmd
+        return [
+            {
+                "number": 17,
+                "title": "Sync TODO import",
+                "body": "ID: 002\n\nAvoid recreating closed issues",
+                "state": "CLOSED",
+            }
+        ]
+
+    monkeypatch.setattr(
+        todo_issues,
+        "run_gh_json",
+        _fake_run_gh_json,
+    )
+
+    seen_fingerprints = todo_issues.fetch_existing_issues(
+        repo=None,
+        limit=10,
+    )
+
+    normalized_title = todo_issues.normalize_text("Sync TODO import")
+    normalized_body = todo_issues.normalize_text("ID: 002\n\nAvoid recreating closed issues")
+    assert "--state" in captured_cmd["value"]
+    assert "all" in captured_cmd["value"]
+    assert (normalized_title, normalized_body) in seen_fingerprints
 
 
 def test_run_gh_json_reports_missing_gh(monkeypatch):
@@ -153,3 +194,44 @@ def test_main_executes_as_module_smoke(tmp_path):
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert result.returncode == 0
+
+
+def test_main_skips_closed_issue_duplicate_by_matching_title_and_body_fingerprint(
+    tmp_path, monkeypatch, capsys
+):
+    todo_file = tmp_path / "TODO.txt"
+    todo_file.write_text(
+        "\n".join(
+            [
+                "[TODO]",
+                "ID: 002",
+                "Title: Sync TODO import",
+                "Description: Avoid recreating closed issues",
+                "[/TODO]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    normalized_title = todo_issues.normalize_text("Sync TODO import")
+    normalized_body = todo_issues.normalize_text("ID: 002\n\nAvoid recreating closed issues")
+
+    monkeypatch.setattr(
+        todo_issues,
+        "fetch_existing_issues",
+        lambda *_args, **_kwargs: {(normalized_title, normalized_body)},
+    )
+
+    create_calls = []
+    monkeypatch.setattr(
+        todo_issues,
+        "create_issue",
+        lambda *args, **kwargs: create_calls.append((args, kwargs)),
+    )
+
+    rc = todo_issues.main(["--todo-file", str(todo_file)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert not create_calls
+    assert "[SKIPPED] Duplicate title/body fingerprint: Sync TODO import" in captured.out
