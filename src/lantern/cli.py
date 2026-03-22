@@ -1925,7 +1925,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     selected_tags = _dialog_checklist("Smart Sync", "Select repositories to process:", checklist_items, height, width)
                     if not selected_tags:
                         continue
-                    selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in set(selected_tags)]
+                    selected_tag_set = set(selected_tags)
+                    selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in selected_tag_set]
 
                 if not selected_rows:
                     _dialog_msgbox("Smart Sync", "No repositories selected.", height, width)
@@ -2146,13 +2147,14 @@ def cmd_tui(args: argparse.Namespace) -> int:
                             checkout_latest_branch=True,
                         )
                         if branch_transition != "-":
-                            branches_segment = f" | branches:{branch_transition}"
+                            branches_segment = f" | branches: {branch_transition}"
                     desc = f"{repo_name} [{row.get('state')}] -> {plan_desc}{branches_segment} | prs:{prs}"
                     checklist_items.append((tag, desc, repo_name in default_selected))
                 selected_tags = _dialog_checklist("Fleet Apply", "Select repos to process:", checklist_items, height, width)
                 if not selected_tags:
                     continue
-                selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in set(selected_tags)]
+                selected_tag_set = set(selected_tags)
+                selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in selected_tag_set]
                 if not selected_rows:
                     continue
 
