@@ -1183,7 +1183,7 @@ def _fleet_preflight_confirm(
             "repo": entry["repo"],
             "state": entry["state"],
             "plan": entry["plan"],
-            "branch": entry["branch_transition"],
+            "branches": entry["branch_transition"],
             "clean": entry["clean"],
             "path": entry["path"],
         }
@@ -1207,7 +1207,7 @@ def _fleet_preflight_confirm(
     summary_header.append("Planned actions by repository:")
     summary_text = "\n".join(summary_header) + "\n\n" + render_table(
         summary_rows,
-        ["repo", "state", "plan", "branch", "clean", "path"],
+        ["repo", "state", "plan", "branches", "clean", "path"],
     )
     _dialog_textbox_from_text(title, summary_text, height, width)
 
