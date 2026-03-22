@@ -1138,6 +1138,24 @@ def _fleet_latest_branch_display(row: Dict[str, str]) -> str:
     return f"{current} -> {latest}"
 
 
+def _fleet_checkout_transition_display(
+    row: Dict[str, str],
+    checkout_branch: str,
+    checkout_pr: str,
+    checkout_latest_branch: bool,
+) -> str:
+    current = str(row.get("branch") or "").strip() or "-"
+    if str(row.get("state") or "").strip() == "missing-local":
+        current = "(missing)"
+    if checkout_latest_branch:
+        return _fleet_latest_branch_display(row)
+    if checkout_branch:
+        return f"{current} -> {checkout_branch}"
+    if checkout_pr:
+        return f"{current} -> pr-{checkout_pr}"
+    return "-"
+
+
 def _fleet_preflight_confirm(
     title: str,
     rows: List[Dict[str, str]],
@@ -1171,7 +1189,12 @@ def _fleet_preflight_confirm(
                 "repo": str(row.get("repo") or ""),
                 "state": str(row.get("state") or "-"),
                 "plan": plan,
-                "branch_transition": _fleet_latest_branch_display(row),
+                "branch_transition": _fleet_checkout_transition_display(
+                    row,
+                    checkout_branch=checkout_branch,
+                    checkout_pr=checkout_pr,
+                    checkout_latest_branch=checkout_latest_branch,
+                ),
                 "clean": str(row.get("clean") or "-"),
                 "path": str(row.get("path") or ""),
             }
@@ -1216,7 +1239,9 @@ def _fleet_preflight_confirm(
     for idx, entry in enumerate(prepared, start=1):
         tag = str(idx)
         idx_to_row[tag] = entry["row"]
-        desc = f"{entry['repo']} [{entry['state']}] -> {entry['plan']} | branches: {entry['branch_transition']}"
+        desc = f"{entry['repo']} [{entry['state']}] -> {entry['plan']}"
+        if entry['branch_transition'] != '-':
+            desc += f" | branches: {entry['branch_transition']}"
         checklist_items.append((tag, desc, True))
     selected_tags = _dialog_checklist(
         title,
@@ -1884,7 +1909,16 @@ def cmd_tui(args: argparse.Namespace) -> int:
                                 checkout_latest_branch=preview_checkout_latest_branch,
                             )
                         )
-                        desc = f"{repo_name} [{state}] -> {plan_desc} | branches: {_fleet_latest_branch_display(row)}"
+                        branches_info = ""
+                        branch_transition = _fleet_checkout_transition_display(
+                            row,
+                            checkout_branch=preview_checkout_branch,
+                            checkout_pr=preview_checkout_pr,
+                            checkout_latest_branch=preview_checkout_latest_branch,
+                        )
+                        if branch_transition != '-':
+                            branches_info = f" | branches: {branch_transition}"
+                        desc = f"{repo_name} [{state}] -> {plan_desc}{branches_info}"
                         checklist_items.append((tag, desc, repo_name in default_selected))
                     selected_tags = _dialog_checklist("Smart Sync", "Select repositories to process:", checklist_items, height, width)
                     if not selected_tags:
@@ -2098,12 +2132,20 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     repo_name = str(row.get("repo") or "")
                     idx_to_row[tag] = row
                     prs = str(row.get("prs") or "-")
-                    latest_display = _fleet_latest_branch_display(row)
                     plan_desc = str(row.get("action") or "-")
+                    branches_segment = ""
                     if apply_mode == "latest":
                         latest = str(row.get("latest_branch") or "-")
                         plan_desc = f"checkout-latest:{latest}" if latest and latest != "-" else "checkout-latest:skip-no-latest"
-                    desc = f"{repo_name} [{row.get('state')}] -> {plan_desc} | branches:{latest_display} | prs:{prs}"
+                        branch_transition = _fleet_checkout_transition_display(
+                            row,
+                            checkout_branch="",
+                            checkout_pr="",
+                            checkout_latest_branch=True,
+                        )
+                        if branch_transition != "-":
+                            branches_segment = f" | branches:{branch_transition}"
+                    desc = f"{repo_name} [{row.get('state')}] -> {plan_desc}{branches_segment} | prs:{prs}"
                     checklist_items.append((tag, desc, repo_name in default_selected))
                 selected_tags = _dialog_checklist("Fleet Apply", "Select repos to process:", checklist_items, height, width)
                 if not selected_tags:
@@ -3154,6 +3196,9 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         target_rows = _fleet_apply_candidates_for_mode(rows, "latest", include_missing_local=args.clone_missing)
     else:
         target_rows = [row for row in rows if not selected or row["repo"] in selected]
+    if checkout_latest_branch and not selected and not target_rows:
+        print("No repositories have actionable latest-branch updates.")
+        return 0
     results: List[Dict[str, str]] = []
     detailed_results: List[Dict[str, Any]] = []
     total_targets = len(target_rows)

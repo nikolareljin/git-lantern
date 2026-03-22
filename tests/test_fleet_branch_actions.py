@@ -464,3 +464,31 @@ def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
     ]
     assert ["rev-parse", "--verify", "refs/heads/feature/latest"] in seen_args
     assert ["pull", "--ff-only", "origin", "feature/latest"] in seen_ops
+
+
+def test_fleet_checkout_transition_display_uses_latest_branch_only_when_requested():
+    row = {"state": "in-sync", "branch": "main", "latest_branch": "release/latest"}
+
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=True) == "main -> release/latest"
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="release/x", checkout_pr="", checkout_latest_branch=False) == "main -> release/x"
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="77", checkout_latest_branch=False) == "main -> pr-77"
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=False) == "-"
+
+
+def test_cmd_fleet_apply_reports_no_actionable_latest_branch_updates(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [{"repo": "demo", "state": "in-sync", "path": "/tmp/demo", "clean": "yes", "branch": "release/latest", "latest_branch": "release/latest", "action": "-"}],
+            {},
+        ),
+    )
+
+    rc = cli.cmd_fleet_apply(_make_apply_args(checkout_latest_branch=True))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No repositories have actionable latest-branch updates." in out
