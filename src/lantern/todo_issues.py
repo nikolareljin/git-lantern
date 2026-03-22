@@ -164,8 +164,8 @@ def is_duplicate(
     seen_fingerprints: Set[Tuple[str, str]],
 ) -> bool:
     normalized_title = normalize_text(item.title)
-    normalized_description = normalize_text(build_issue_body(item))
-    return (normalized_title, normalized_description) in seen_fingerprints
+    normalized_body = normalize_text(build_issue_body(item))
+    return (normalized_title, normalized_body) in seen_fingerprints
 
 
 def create_issue(
@@ -282,8 +282,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(stderr, file=sys.stderr)
             continue
 
-        normalized_description = normalize_text(build_issue_body(item))
-        seen_fingerprints.add((normalize_text(item.title), normalized_description))
+        normalized_body = normalize_text(build_issue_body(item))
+        seen_fingerprints.add((normalize_text(item.title), normalized_body))
         created += 1
 
     print(f"Done. Created: {created}, Skipped duplicates: {skipped}, Parsed: {len(items)}")

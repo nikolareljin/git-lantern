@@ -196,7 +196,7 @@ def test_main_executes_as_module_smoke(tmp_path):
     assert result.returncode == 0
 
 
-def test_main_skips_closed_issue_duplicate_by_matching_title_and_description(
+def test_main_skips_closed_issue_duplicate_by_matching_title_and_body_fingerprint(
     tmp_path, monkeypatch, capsys
 ):
     todo_file = tmp_path / "TODO.txt"
