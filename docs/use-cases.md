@@ -175,7 +175,7 @@ lantern fleet apply --root ~/workspace --server github.com --clone-missing --pul
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --clone-missing --pull-behind --push-ahead
 
 # 5) Refresh only repos with actionable latest-branch updates
-lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch
+lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --clone-missing
 
 # 6) Refresh the latest branches for an explicit repo subset
 lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --repos repo1,repo2
@@ -198,8 +198,8 @@ In TUI (`lantern --tui`):
 8. run apply and review short completion summary with path to full JSON log
 
 Latest-branch refresh behavior:
-- Lantern only auto-selects repos whose detected latest branch is actionable: missing locally, different from the current branch, or behind on that same latest branch.
-- You can still narrow or override the scope with `--repos` or the TUI checklist.
+- Lantern auto-selects repos whose detected latest branch is actionable: different from the current branch, or behind on that same latest branch. Missing-local repos join that set when `--clone-missing` is enabled.
+- You can still narrow or override the scope with `--repos` or the TUI checklist. In TUI latest-refresh selection, actionable repos are prechecked but you can add or remove repos before apply.
 - Latest-branch checkout skips tracked uncommitted changes, but untracked-only files do not block the checkout.
 
 For full CLI parity inside TUI, use `command` and enter any lantern args directly.

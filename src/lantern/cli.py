@@ -1116,7 +1116,7 @@ def _fleet_action_parts_for_row(
     return parts
 
 
-def _fleet_latest_branch_is_actionable(row: Dict[str, str]) -> bool:
+def _fleet_latest_branch_is_actionable(row: Dict[str, str], include_missing_local: bool = True) -> bool:
     latest = str(row.get("latest_branch") or "").strip()
     if not latest or latest == "-":
         return False
@@ -1124,7 +1124,7 @@ def _fleet_latest_branch_is_actionable(row: Dict[str, str]) -> bool:
     state = str(row.get("state") or "").strip()
     current = str(row.get("branch") or "").strip()
     if state == "missing-local":
-        return True
+        return include_missing_local
     if current and current != latest:
         return True
     return state == "behind-remote" and current == latest
@@ -1300,12 +1300,16 @@ def _fleet_logs_dir(root: str) -> str:
     return os.path.join(root, "data", "fleet-logs")
 
 
-def _fleet_apply_candidates_for_mode(rows: List[Dict[str, str]], apply_mode: str) -> List[Dict[str, str]]:
+def _fleet_apply_candidates_for_mode(
+    rows: List[Dict[str, str]],
+    apply_mode: str,
+    include_missing_local: bool = True,
+) -> List[Dict[str, str]]:
     mode = str(apply_mode or "").strip().lower()
     if mode in {"branch", "pr"}:
         return list(rows)
     if mode == "latest":
-        return [r for r in rows if _fleet_latest_branch_is_actionable(r)]
+        return [r for r in rows if _fleet_latest_branch_is_actionable(r, include_missing_local=include_missing_local)]
     return [r for r in rows if r.get("action") in {"clone", "pull", "push"}]
 
 
@@ -1826,14 +1830,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 if preset == "fast_pull":
                     candidates = [r for r in smart_rows if str(r.get("state") or "") == "behind-remote"]
+                    selectable_rows = list(candidates)
                 elif preset == "full_reconcile":
                     candidates = [r for r in smart_rows if str(r.get("action") or "") in {"clone", "pull", "push"}]
+                    selectable_rows = list(candidates)
                 elif preset == "branch_rollout":
                     candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
+                    selectable_rows = list(smart_rows)
                 else:
                     candidates = list(smart_rows)
+                    selectable_rows = list(candidates)
 
-                if not candidates:
+                if not selectable_rows:
                     _dialog_msgbox("Smart Sync", "No repositories match the selected preset.", height, width)
                     continue
 
@@ -1858,11 +1866,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     selected_rows = [r for r in selected_rows if str(r.get("clean") or "") in {"yes", "-"}]
                 elif scope == "select":
                     checklist_items: List[Tuple[str, str, bool]] = []
-                    idx_to_repo: Dict[str, str] = {}
-                    for i, row in enumerate(candidates, start=1):
+                    idx_to_row: Dict[str, Dict[str, str]] = {}
+                    default_selected = {str(row.get("repo") or "") for row in candidates}
+                    for i, row in enumerate(selectable_rows, start=1):
                         tag = str(i)
                         repo_name = str(row.get("repo") or "")
-                        idx_to_repo[tag] = repo_name
+                        idx_to_row[tag] = row
                         state = str(row.get("state") or "-")
                         plan_desc = ", ".join(
                             _fleet_action_parts_for_row(
@@ -1876,12 +1885,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                             )
                         )
                         desc = f"{repo_name} [{state}] -> {plan_desc} | branches: {_fleet_latest_branch_display(row)}"
-                        checklist_items.append((tag, desc, True))
+                        checklist_items.append((tag, desc, repo_name in default_selected))
                     selected_tags = _dialog_checklist("Smart Sync", "Select repositories to process:", checklist_items, height, width)
                     if not selected_tags:
                         continue
-                    selected_repos = {idx_to_repo[tag] for tag in selected_tags if tag in idx_to_repo}
-                    selected_rows = [r for r in candidates if str(r.get("repo") or "") in selected_repos]
+                    selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in set(selected_tags)]
 
                 if not selected_rows:
                     _dialog_msgbox("Smart Sync", "No repositories selected.", height, width)
@@ -2069,21 +2077,26 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
 
             actionable = _fleet_apply_candidates_for_mode(rows, apply_mode)
-            if not actionable:
+            selectable_rows = list(actionable)
+            if apply_mode == "latest" and fleet_action == "apply_select":
+                selectable_rows = list(rows)
+            if not actionable and not selectable_rows:
                 _dialog_msgbox("Fleet", "No actionable repositories in current plan.", height, width)
                 continue
 
+            preview_rows = actionable if apply_mode != "latest" or fleet_action != "apply_select" else selectable_rows
             preview_cols = ["repo", "state", "branch", "action", "latest_branch", "prs"]
-            _dialog_textbox_from_text("Fleet Context", render_table(actionable, preview_cols), height, width)
+            _dialog_textbox_from_text("Fleet Context", render_table(preview_rows, preview_cols), height, width)
 
             selected_rows = actionable
             if fleet_action == "apply_select":
                 checklist_items: List[Tuple[str, str, bool]] = []
-                idx_to_repo: Dict[str, str] = {}
-                for i, row in enumerate(actionable, start=1):
+                idx_to_row: Dict[str, Dict[str, str]] = {}
+                default_selected = {str(row.get("repo") or "") for row in actionable}
+                for i, row in enumerate(selectable_rows, start=1):
                     tag = str(i)
                     repo_name = str(row.get("repo") or "")
-                    idx_to_repo[tag] = repo_name
+                    idx_to_row[tag] = row
                     prs = str(row.get("prs") or "-")
                     latest_display = _fleet_latest_branch_display(row)
                     plan_desc = str(row.get("action") or "-")
@@ -2091,14 +2104,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         latest = str(row.get("latest_branch") or "-")
                         plan_desc = f"checkout-latest:{latest}" if latest and latest != "-" else "checkout-latest:skip-no-latest"
                     desc = f"{repo_name} [{row.get('state')}] -> {plan_desc} | branches:{latest_display} | prs:{prs}"
-                    checklist_items.append((tag, desc, True))
+                    checklist_items.append((tag, desc, repo_name in default_selected))
                 selected_tags = _dialog_checklist("Fleet Apply", "Select repos to process:", checklist_items, height, width)
                 if not selected_tags:
                     continue
-                selected_repos = {idx_to_repo[tag] for tag in selected_tags if tag in idx_to_repo}
-                if not selected_repos:
+                selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in set(selected_tags)]
+                if not selected_rows:
                     continue
-                selected_rows = [r for r in actionable if str(r.get("repo") or "") in selected_repos]
 
             checkout_pr = ""
             checkout_branch = ""
@@ -3139,7 +3151,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
 
     selected = _parse_repo_filter(args.repos)
     if checkout_latest_branch and not selected:
-        target_rows = _fleet_apply_candidates_for_mode(rows, "latest")
+        target_rows = _fleet_apply_candidates_for_mode(rows, "latest", include_missing_local=args.clone_missing)
     else:
         target_rows = [row for row in rows if not selected or row["repo"] in selected]
     results: List[Dict[str, str]] = []
