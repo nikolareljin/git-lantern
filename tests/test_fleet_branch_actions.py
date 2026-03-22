@@ -475,6 +475,12 @@ def test_fleet_checkout_transition_display_uses_latest_branch_only_when_requeste
     assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=False) == "-"
 
 
+def test_fleet_checkout_transition_display_hides_missing_latest_branch():
+    row = {"state": "in-sync", "branch": "main", "latest_branch": "-"}
+
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=True) == "-"
+
+
 def test_cmd_fleet_apply_reports_no_actionable_latest_branch_updates(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))

@@ -1131,7 +1131,9 @@ def _fleet_latest_branch_is_actionable(row: Dict[str, str], include_missing_loca
 
 
 def _fleet_latest_branch_display(row: Dict[str, str]) -> str:
-    latest = str(row.get("latest_branch") or "").strip() or "-"
+    latest = str(row.get("latest_branch") or "").strip()
+    if not latest or latest == "-":
+        return "-"
     current = str(row.get("branch") or "").strip() or "-"
     if str(row.get("state") or "").strip() == "missing-local":
         return f"(missing) -> {latest}"
