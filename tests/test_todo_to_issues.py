@@ -106,17 +106,23 @@ def test_fetch_existing_issues_rejects_non_list_payload(monkeypatch):
 
 
 def test_fetch_existing_issues_tracks_closed_issue_fingerprints(monkeypatch):
-    monkeypatch.setattr(
-        todo_issues,
-        "run_gh_json",
-        lambda _cmd: [
+    captured_cmd = {}
+
+    def _fake_run_gh_json(cmd):
+        captured_cmd["value"] = cmd
+        return [
             {
                 "number": 17,
                 "title": "Sync TODO import",
                 "body": "ID: 002\n\nAvoid recreating closed issues",
                 "state": "CLOSED",
             }
-        ],
+        ]
+
+    monkeypatch.setattr(
+        todo_issues,
+        "run_gh_json",
+        _fake_run_gh_json,
     )
 
     seen_fingerprints = todo_issues.fetch_existing_issues(
@@ -126,6 +132,8 @@ def test_fetch_existing_issues_tracks_closed_issue_fingerprints(monkeypatch):
 
     normalized_title = todo_issues.normalize_text("Sync TODO import")
     normalized_body = todo_issues.normalize_text("ID: 002\n\nAvoid recreating closed issues")
+    assert "--state" in captured_cmd["value"]
+    assert "all" in captured_cmd["value"]
     assert (normalized_title, normalized_body) in seen_fingerprints
 
 
