@@ -1116,6 +1116,48 @@ def _fleet_action_parts_for_row(
     return parts
 
 
+def _fleet_latest_branch_is_actionable(row: Dict[str, str], include_missing_local: bool = True) -> bool:
+    latest = str(row.get("latest_branch") or "").strip()
+    if not latest or latest == "-":
+        return False
+
+    state = str(row.get("state") or "").strip()
+    current = str(row.get("branch") or "").strip()
+    if state == "missing-local":
+        return include_missing_local
+    if current and current != latest:
+        return True
+    return state == "behind-remote" and current == latest
+
+
+def _fleet_latest_branch_display(row: Dict[str, str]) -> str:
+    latest = str(row.get("latest_branch") or "").strip()
+    if not latest or latest == "-":
+        return "-"
+    current = str(row.get("branch") or "").strip() or "-"
+    if str(row.get("state") or "").strip() == "missing-local":
+        return f"(missing) -> {latest}"
+    return f"{current} -> {latest}"
+
+
+def _fleet_checkout_transition_display(
+    row: Dict[str, str],
+    checkout_branch: str,
+    checkout_pr: str,
+    checkout_latest_branch: bool,
+) -> str:
+    current = str(row.get("branch") or "").strip() or "-"
+    if str(row.get("state") or "").strip() == "missing-local":
+        current = "(missing)"
+    if checkout_latest_branch:
+        return _fleet_latest_branch_display(row)
+    if checkout_branch:
+        return f"{current} -> {checkout_branch}"
+    if checkout_pr:
+        return f"{current} -> pr-{checkout_pr}"
+    return "-"
+
+
 def _fleet_preflight_confirm(
     title: str,
     rows: List[Dict[str, str]],
@@ -1149,6 +1191,12 @@ def _fleet_preflight_confirm(
                 "repo": str(row.get("repo") or ""),
                 "state": str(row.get("state") or "-"),
                 "plan": plan,
+                "branch_transition": _fleet_checkout_transition_display(
+                    row,
+                    checkout_branch=checkout_branch,
+                    checkout_pr=checkout_pr,
+                    checkout_latest_branch=checkout_latest_branch,
+                ),
                 "clean": str(row.get("clean") or "-"),
                 "path": str(row.get("path") or ""),
             }
@@ -1160,6 +1208,7 @@ def _fleet_preflight_confirm(
             "repo": entry["repo"],
             "state": entry["state"],
             "plan": entry["plan"],
+            "branches": entry["branch_transition"],
             "clean": entry["clean"],
             "path": entry["path"],
         }
@@ -1183,7 +1232,7 @@ def _fleet_preflight_confirm(
     summary_header.append("Planned actions by repository:")
     summary_text = "\n".join(summary_header) + "\n\n" + render_table(
         summary_rows,
-        ["repo", "state", "plan", "clean", "path"],
+        ["repo", "state", "plan", "branches", "clean", "path"],
     )
     _dialog_textbox_from_text(title, summary_text, height, width)
 
@@ -1193,6 +1242,8 @@ def _fleet_preflight_confirm(
         tag = str(idx)
         idx_to_row[tag] = entry["row"]
         desc = f"{entry['repo']} [{entry['state']}] -> {entry['plan']}"
+        if entry['branch_transition'] != '-':
+            desc += f" | branches: {entry['branch_transition']}"
         checklist_items.append((tag, desc, True))
     selected_tags = _dialog_checklist(
         title,
@@ -1276,10 +1327,16 @@ def _fleet_logs_dir(root: str) -> str:
     return os.path.join(root, "data", "fleet-logs")
 
 
-def _fleet_apply_candidates_for_mode(rows: List[Dict[str, str]], apply_mode: str) -> List[Dict[str, str]]:
+def _fleet_apply_candidates_for_mode(
+    rows: List[Dict[str, str]],
+    apply_mode: str,
+    include_missing_local: bool = True,
+) -> List[Dict[str, str]]:
     mode = str(apply_mode or "").strip().lower()
-    if mode in {"branch", "pr", "latest"}:
+    if mode in {"branch", "pr"}:
         return list(rows)
+    if mode == "latest":
+        return [r for r in rows if _fleet_latest_branch_is_actionable(r, include_missing_local=include_missing_local)]
     return [r for r in rows if r.get("action") in {"clone", "pull", "push"}]
 
 
@@ -1800,18 +1857,27 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 if preset == "fast_pull":
                     candidates = [r for r in smart_rows if str(r.get("state") or "") == "behind-remote"]
+                    selectable_rows = list(candidates)
                 elif preset == "full_reconcile":
                     candidates = [r for r in smart_rows if str(r.get("action") or "") in {"clone", "pull", "push"}]
+                    selectable_rows = list(candidates)
+                elif preset == "branch_rollout":
+                    candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
+                    selectable_rows = list(smart_rows)
                 else:
-                    candidates = [
-                        r
-                        for r in smart_rows
-                        if str(r.get("state") or "") in {"in-sync", "behind-remote", "ahead-remote", "diverged", "missing-local"}
-                    ]
+                    candidates = list(smart_rows)
+                    selectable_rows = list(candidates)
 
-                if not candidates:
+                if not selectable_rows:
                     _dialog_msgbox("Smart Sync", "No repositories match the selected preset.", height, width)
                     continue
+
+                clone_missing = preset != "fast_pull"
+                pull_behind = True
+                include_push = False
+                preview_checkout_branch = ""
+                preview_checkout_pr = ""
+                preview_checkout_latest_branch = preset == "branch_rollout"
 
                 scope_items: List[Tuple[str, str]] = [
                     ("all", "All actionable repositories"),
@@ -1827,20 +1893,40 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     selected_rows = [r for r in selected_rows if str(r.get("clean") or "") in {"yes", "-"}]
                 elif scope == "select":
                     checklist_items: List[Tuple[str, str, bool]] = []
-                    idx_to_repo: Dict[str, str] = {}
-                    for i, row in enumerate(candidates, start=1):
+                    idx_to_row: Dict[str, Dict[str, str]] = {}
+                    default_selected = {str(row.get("repo") or "") for row in candidates}
+                    for i, row in enumerate(selectable_rows, start=1):
                         tag = str(i)
                         repo_name = str(row.get("repo") or "")
-                        idx_to_repo[tag] = repo_name
+                        idx_to_row[tag] = row
                         state = str(row.get("state") or "-")
-                        action_name = str(row.get("action") or "-")
-                        desc = f"{repo_name} [{state}] -> {action_name}"
-                        checklist_items.append((tag, desc, True))
+                        plan_desc = ", ".join(
+                            _fleet_action_parts_for_row(
+                                row=row,
+                                clone_missing=clone_missing,
+                                pull_behind=pull_behind,
+                                push_ahead=include_push,
+                                checkout_branch=preview_checkout_branch,
+                                checkout_pr=preview_checkout_pr,
+                                checkout_latest_branch=preview_checkout_latest_branch,
+                            )
+                        )
+                        branches_info = ""
+                        branch_transition = _fleet_checkout_transition_display(
+                            row,
+                            checkout_branch=preview_checkout_branch,
+                            checkout_pr=preview_checkout_pr,
+                            checkout_latest_branch=preview_checkout_latest_branch,
+                        )
+                        if branch_transition != '-':
+                            branches_info = f" | branches: {branch_transition}"
+                        desc = f"{repo_name} [{state}] -> {plan_desc}{branches_info}"
+                        checklist_items.append((tag, desc, repo_name in default_selected))
                     selected_tags = _dialog_checklist("Smart Sync", "Select repositories to process:", checklist_items, height, width)
                     if not selected_tags:
                         continue
-                    selected_repos = {idx_to_repo[tag] for tag in selected_tags if tag in idx_to_repo}
-                    selected_rows = [r for r in candidates if str(r.get("repo") or "") in selected_repos]
+                    selected_tag_set = set(selected_tags)
+                    selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in selected_tag_set]
 
                 if not selected_rows:
                     _dialog_msgbox("Smart Sync", "No repositories selected.", height, width)
@@ -1876,7 +1962,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
                     only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
 
-                include_push = False
                 if preset == "full_reconcile":
                     push_choice = _dialog_menu(
                         "Push Mode",
@@ -1894,20 +1979,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 apply_cmd = [sys.executable, "-m", "lantern", "fleet", "apply", *common_opts]
                 apply_cmd.append("--fetch")
-                clone_missing = False
-                pull_behind = False
                 if preset == "fast_pull":
-                    pull_behind = True
                     apply_cmd.append("--pull-behind")
                 elif preset == "full_reconcile":
-                    clone_missing = True
-                    pull_behind = True
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                     if include_push:
                         apply_cmd.append("--push-ahead")
                 else:
-                    clone_missing = True
-                    pull_behind = True
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                 if checkout_branch:
                     apply_cmd.extend(["--checkout-branch", checkout_branch])
@@ -2036,32 +2114,49 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
 
             actionable = _fleet_apply_candidates_for_mode(rows, apply_mode)
-            if not actionable:
+            selectable_rows = list(actionable)
+            if apply_mode == "latest" and fleet_action == "apply_select":
+                selectable_rows = list(rows)
+            if not actionable and not selectable_rows:
                 _dialog_msgbox("Fleet", "No actionable repositories in current plan.", height, width)
                 continue
 
-            preview_cols = ["repo", "state", "action", "latest_branch", "prs"]
-            _dialog_textbox_from_text("Fleet Context", render_table(actionable, preview_cols), height, width)
+            preview_rows = actionable if apply_mode != "latest" or fleet_action != "apply_select" else selectable_rows
+            preview_cols = ["repo", "state", "branch", "action", "latest_branch", "prs"]
+            _dialog_textbox_from_text("Fleet Context", render_table(preview_rows, preview_cols), height, width)
 
             selected_rows = actionable
             if fleet_action == "apply_select":
                 checklist_items: List[Tuple[str, str, bool]] = []
-                idx_to_repo: Dict[str, str] = {}
-                for i, row in enumerate(actionable, start=1):
+                idx_to_row: Dict[str, Dict[str, str]] = {}
+                default_selected = {str(row.get("repo") or "") for row in actionable}
+                for i, row in enumerate(selectable_rows, start=1):
                     tag = str(i)
                     repo_name = str(row.get("repo") or "")
-                    idx_to_repo[tag] = repo_name
+                    idx_to_row[tag] = row
                     prs = str(row.get("prs") or "-")
-                    latest = str(row.get("latest_branch") or "-")
-                    desc = f"{repo_name} [{row.get('state')}] -> {row.get('action')} | latest:{latest} | prs:{prs}"
-                    checklist_items.append((tag, desc, True))
+                    plan_desc = str(row.get("action") or "-")
+                    branches_segment = ""
+                    if apply_mode == "latest":
+                        latest = str(row.get("latest_branch") or "-")
+                        plan_desc = f"checkout-latest:{latest}" if latest and latest != "-" else "checkout-latest:skip-no-latest"
+                        branch_transition = _fleet_checkout_transition_display(
+                            row,
+                            checkout_branch="",
+                            checkout_pr="",
+                            checkout_latest_branch=True,
+                        )
+                        if branch_transition != "-":
+                            branches_segment = f" | branches: {branch_transition}"
+                    desc = f"{repo_name} [{row.get('state')}] -> {plan_desc}{branches_segment} | prs:{prs}"
+                    checklist_items.append((tag, desc, repo_name in default_selected))
                 selected_tags = _dialog_checklist("Fleet Apply", "Select repos to process:", checklist_items, height, width)
                 if not selected_tags:
                     continue
-                selected_repos = {idx_to_repo[tag] for tag in selected_tags if tag in idx_to_repo}
-                if not selected_repos:
+                selected_tag_set = set(selected_tags)
+                selected_rows = [idx_to_row[tag] for tag in sorted(idx_to_row.keys(), key=lambda value: int(value)) if tag in selected_tag_set]
+                if not selected_rows:
                     continue
-                selected_rows = [r for r in actionable if str(r.get("repo") or "") in selected_repos]
 
             checkout_pr = ""
             checkout_branch = ""
@@ -2991,6 +3086,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             {
                 "repo": rec.get("name", os.path.basename(path)),
                 "state": state,
+                "branch": str(rec.get("branch") or "-"),
                 "up": str(rec.get("up") or "-"),
                 "clean": str(rec.get("clean") or "no"),
                 "action": action,
@@ -3016,6 +3112,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             {
                 "repo": name,
                 "state": "missing-local",
+                "branch": "-",
                 "up": "-",
                 "clean": "-",
                 "action": "clone",
@@ -3099,7 +3196,13 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             clone_sources[name] = src
 
     selected = _parse_repo_filter(args.repos)
-    target_rows = [row for row in rows if not selected or row["repo"] in selected]
+    if checkout_latest_branch and not selected:
+        target_rows = _fleet_apply_candidates_for_mode(rows, "latest", include_missing_local=args.clone_missing)
+    else:
+        target_rows = [row for row in rows if not selected or row["repo"] in selected]
+    if checkout_latest_branch and not selected and not target_rows:
+        print("No repositories have actionable latest-branch updates.")
+        return 0
     results: List[Dict[str, str]] = []
     detailed_results: List[Dict[str, Any]] = []
     total_targets = len(target_rows)

@@ -69,6 +69,29 @@ def test_fleet_action_parts_reports_missing_latest_branch():
     assert parts == ["checkout-latest:skip-no-latest"]
 
 
+def test_fleet_latest_branch_is_actionable_only_for_real_rollout_candidates():
+    assert cli._fleet_latest_branch_is_actionable({"state": "missing-local", "branch": "-", "latest_branch": "release/1.0"}) is True
+    assert cli._fleet_latest_branch_is_actionable({"state": "missing-local", "branch": "-", "latest_branch": "release/1.0"}, include_missing_local=False) is False
+    assert cli._fleet_latest_branch_is_actionable({"state": "in-sync", "branch": "main", "latest_branch": "release/1.0"}) is True
+    assert cli._fleet_latest_branch_is_actionable({"state": "behind-remote", "branch": "release/1.0", "latest_branch": "release/1.0"}) is True
+    assert cli._fleet_latest_branch_is_actionable({"state": "in-sync", "branch": "release/1.0", "latest_branch": "release/1.0"}) is False
+    assert cli._fleet_latest_branch_is_actionable({"state": "ahead-remote", "branch": "release/1.0", "latest_branch": "release/1.0"}) is False
+    assert cli._fleet_latest_branch_is_actionable({"state": "in-sync", "branch": "main", "latest_branch": "-"}) is False
+
+
+def test_fleet_apply_candidates_for_latest_filters_to_actionable_rows():
+    rows = [
+        {"repo": "alpha", "state": "in-sync", "branch": "main", "latest_branch": "release/1.0", "action": "-"},
+        {"repo": "beta", "state": "in-sync", "branch": "release/1.0", "latest_branch": "release/1.0", "action": "-"},
+        {"repo": "gamma", "state": "behind-remote", "branch": "release/2.0", "latest_branch": "release/2.0", "action": "pull"},
+        {"repo": "delta", "state": "missing-local", "branch": "-", "latest_branch": "release/3.0", "action": "clone"},
+    ]
+
+    selected = cli._fleet_apply_candidates_for_mode(rows, "latest")
+
+    assert [row["repo"] for row in selected] == ["alpha", "gamma", "delta"]
+
+
 def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):
     args = _make_apply_args(checkout_branch="main", checkout_latest_branch=True)
     rc = cli.cmd_fleet_apply(args)
@@ -84,7 +107,7 @@ def test_cmd_fleet_apply_uses_latest_branch_hint_in_dry_run(monkeypatch, capsys)
         cli,
         "_fleet_plan_records",
         lambda _args, payload=None: (
-            [{"repo": "demo", "state": "in-sync", "path": "/tmp/demo", "clean": "yes", "latest_branch": "feature/latest", "action": "-"}],
+            [{"repo": "demo", "state": "in-sync", "path": "/tmp/demo", "clean": "yes", "branch": "main", "latest_branch": "feature/latest", "action": "-"}],
             {},
         ),
     )
@@ -110,11 +133,11 @@ def test_cmd_fleet_apply_skips_when_latest_branch_missing(monkeypatch, capsys):
         cli,
         "_fleet_plan_records",
         lambda _args, payload=None: (
-            [{"repo": "demo", "state": "in-sync", "path": "/tmp/demo", "clean": "yes", "latest_branch": "-", "action": "-"}],
+            [{"repo": "demo", "state": "in-sync", "path": "/tmp/demo", "clean": "yes", "branch": "main", "latest_branch": "-", "action": "-"}],
             {},
         ),
     )
-    args = _make_apply_args(checkout_latest_branch=True)
+    args = _make_apply_args(checkout_latest_branch=True, repos="demo")
 
     rc = cli.cmd_fleet_apply(args)
 
@@ -139,6 +162,7 @@ def test_cmd_fleet_apply_allows_latest_checkout_with_untracked_only(monkeypatch,
                     "state": "in-sync",
                     "path": str(repo_path),
                     "clean": "yes",
+                    "branch": "main",
                     "latest_branch": "feature/latest",
                     "action": "-",
                 }
@@ -190,6 +214,7 @@ def test_cmd_fleet_apply_skips_latest_checkout_with_tracked_changes(monkeypatch,
                     "state": "in-sync",
                     "path": str(repo_path),
                     "clean": "yes",
+                    "branch": "main",
                     "latest_branch": "feature/latest",
                     "action": "-",
                 }
@@ -235,6 +260,7 @@ def test_cmd_fleet_apply_skips_latest_checkout_when_git_status_fails(monkeypatch
                     "state": "in-sync",
                     "path": str(repo_path),
                     "clean": "yes",
+                    "branch": "main",
                     "latest_branch": "feature/latest",
                     "action": "-",
                 }
@@ -286,6 +312,121 @@ def test_checkout_remote_branch_short_circuits_when_fetch_fails(monkeypatch):
     ]
 
 
+def test_cmd_fleet_apply_checkout_latest_branch_skips_missing_local_without_clone(monkeypatch, tmp_path, capsys):
+    alpha = tmp_path / "alpha"
+    gamma = tmp_path / "gamma"
+    alpha.mkdir()
+    gamma.mkdir()
+    seen = []
+
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: "\n".join(row["result"] for row in rows))
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [
+                {"repo": "alpha", "state": "in-sync", "path": str(alpha), "clean": "yes", "branch": "main", "latest_branch": "release/1.0", "action": "-"},
+                {"repo": "beta", "state": "missing-local", "path": str(tmp_path / "beta"), "clean": "-", "branch": "-", "latest_branch": "release/2.0", "action": "clone"},
+                {"repo": "gamma", "state": "behind-remote", "path": str(gamma), "clean": "yes", "branch": "release/3.0", "latest_branch": "release/3.0", "action": "pull"},
+            ],
+            {},
+        ),
+    )
+    monkeypatch.setattr(cli, "_is_valid_git_branch_name", lambda _branch: True)
+    monkeypatch.setattr(
+        cli.git,
+        "get_working_tree_state",
+        lambda _path: {
+            "status_ok": True,
+            "is_clean": True,
+            "has_untracked": False,
+            "has_tracked_changes": False,
+            "allows_checkout_latest": True,
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_checkout_remote_branch",
+        lambda path, branch, checkout_action, original_head, original_branch: (
+            [f"{checkout_action}:{branch}:ok"],
+            seen.append((path, branch, checkout_action)) or [{"action": checkout_action, "status": "ok", "branch": branch}],
+        ),
+    )
+    args = _make_apply_args(checkout_latest_branch=True, dry_run=False)
+
+    rc = cli.cmd_fleet_apply(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert seen == [
+        (str(alpha), "release/1.0", "checkout-latest"),
+        (str(gamma), "release/3.0", "checkout-latest"),
+    ]
+    assert "release/2.0" not in out
+
+
+def test_cmd_fleet_apply_checkout_latest_branch_targets_only_actionable_rows_when_no_filter(monkeypatch, tmp_path, capsys):
+    alpha = tmp_path / "alpha"
+    beta = tmp_path / "beta"
+    gamma = tmp_path / "gamma"
+    alpha.mkdir()
+    beta.mkdir()
+    gamma.mkdir()
+    seen = []
+
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: "\n".join(row["result"] for row in rows))
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [
+                {"repo": "alpha", "state": "in-sync", "path": str(alpha), "clean": "yes", "branch": "main", "latest_branch": "release/1.0", "action": "-"},
+                {"repo": "beta", "state": "in-sync", "path": str(beta), "clean": "yes", "branch": "release/1.0", "latest_branch": "release/1.0", "action": "-"},
+                {"repo": "gamma", "state": "behind-remote", "path": str(gamma), "clean": "yes", "branch": "release/2.0", "latest_branch": "release/2.0", "action": "pull"},
+            ],
+            {},
+        ),
+    )
+    monkeypatch.setattr(cli, "_is_valid_git_branch_name", lambda _branch: True)
+    monkeypatch.setattr(
+        cli.git,
+        "get_working_tree_state",
+        lambda _path: {
+            "status_ok": True,
+            "is_clean": True,
+            "has_untracked": False,
+            "has_tracked_changes": False,
+            "allows_checkout_latest": True,
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_checkout_remote_branch",
+        lambda path, branch, checkout_action, original_head, original_branch: (
+            [f"{checkout_action}:{branch}:ok"],
+            seen.append((path, branch, checkout_action)) or [{"action": checkout_action, "status": "ok", "branch": branch}],
+        ),
+    )
+    args = _make_apply_args(checkout_latest_branch=True, dry_run=False)
+
+    rc = cli.cmd_fleet_apply(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert seen == [
+        (str(alpha), "release/1.0", "checkout-latest"),
+        (str(gamma), "release/2.0", "checkout-latest"),
+    ]
+    assert "checkout-latest:release/1.0:ok" in out
+    assert "checkout-latest:release/2.0:ok" in out
+
+
 def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
     seen_args = []
     seen_ops = []
@@ -323,3 +464,37 @@ def test_checkout_remote_branch_verifies_local_branch_ref(monkeypatch):
     ]
     assert ["rev-parse", "--verify", "refs/heads/feature/latest"] in seen_args
     assert ["pull", "--ff-only", "origin", "feature/latest"] in seen_ops
+
+
+def test_fleet_checkout_transition_display_uses_latest_branch_only_when_requested():
+    row = {"state": "in-sync", "branch": "main", "latest_branch": "release/latest"}
+
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=True) == "main -> release/latest"
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="release/x", checkout_pr="", checkout_latest_branch=False) == "main -> release/x"
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="77", checkout_latest_branch=False) == "main -> pr-77"
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=False) == "-"
+
+
+def test_fleet_checkout_transition_display_hides_missing_latest_branch():
+    row = {"state": "in-sync", "branch": "main", "latest_branch": "-"}
+
+    assert cli._fleet_checkout_transition_display(row, checkout_branch="", checkout_pr="", checkout_latest_branch=True) == "-"
+
+
+def test_cmd_fleet_apply_reports_no_actionable_latest_branch_updates(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [{"repo": "demo", "state": "in-sync", "path": "/tmp/demo", "clean": "yes", "branch": "release/latest", "latest_branch": "release/latest", "action": "-"}],
+            {},
+        ),
+    )
+
+    rc = cli.cmd_fleet_apply(_make_apply_args(checkout_latest_branch=True))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No repositories have actionable latest-branch updates." in out

@@ -108,6 +108,7 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_pat
         {
             "repo": "beta",
             "state": "behind-remote",
+            "branch": "main",
             "clean": "yes",
             "path": str(tmp_path / "beta"),
             "latest_branch": "release/b",
@@ -115,6 +116,7 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_pat
         {
             "repo": "alpha",
             "state": "in-sync",
+            "branch": "release/a",
             "clean": "yes",
             "path": str(tmp_path / "alpha"),
             "latest_branch": "release/a",
@@ -147,9 +149,11 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_pat
 
     assert [row["repo"] for row in selected] == ["alpha"]
     summary_rows, columns = captured["table"]
-    assert columns == ["repo", "state", "plan", "clean", "path"]
+    assert columns == ["repo", "state", "plan", "branches", "clean", "path"]
     assert [row["repo"] for row in summary_rows] == ["alpha", "beta"]
     assert summary_rows[0]["plan"] == "checkout:release/x"
+    assert summary_rows[0]["branches"] == "release/a -> release/x"
+    assert summary_rows[1]["branches"] == "main -> release/x"
     assert "Repos selected: 2" in captured["textbox"][1]
     assert "Checkout branch: release/x" in captured["textbox"][1]
 
@@ -212,3 +216,45 @@ def test_fleet_short_summary_counts_checkout_pr_updates(tmp_path):
     assert "Repos updated: 2" in summary
     assert "Branch updates: 1" in summary
     assert "- alpha:pr-77" in summary
+
+
+def test_fleet_preflight_confirm_uses_pr_checkout_transition(monkeypatch, tmp_path):
+    rows = [
+        {
+            "repo": "alpha",
+            "state": "in-sync",
+            "branch": "main",
+            "clean": "yes",
+            "path": str(tmp_path / "alpha"),
+            "latest_branch": "release/a",
+        }
+    ]
+    captured = {}
+
+    def _render(summary_rows, columns):
+        captured["table"] = (summary_rows, columns)
+        return "table"
+
+    monkeypatch.setattr(cli, "render_table", _render)
+    monkeypatch.setattr(cli, "_dialog_textbox_from_text", lambda *args: captured.setdefault("textbox", args))
+    monkeypatch.setattr(cli, "_dialog_checklist", lambda *_args: ["1"])
+
+    selected = cli._fleet_preflight_confirm(
+        title="Fleet Apply",
+        rows=rows,
+        clone_missing=False,
+        pull_behind=False,
+        push_ahead=False,
+        checkout_branch="",
+        checkout_pr="77",
+        checkout_latest_branch=False,
+        dry_run=False,
+        only_clean=False,
+        height=20,
+        width=80,
+    )
+
+    assert [row["repo"] for row in selected] == ["alpha"]
+    summary_rows, _columns = captured["table"]
+    assert summary_rows[0]["branches"] == "main -> pr-77"
+    assert "Checkout PR: 77" in captured["textbox"][1]
