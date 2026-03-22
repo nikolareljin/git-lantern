@@ -108,6 +108,7 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_pat
         {
             "repo": "beta",
             "state": "behind-remote",
+            "branch": "main",
             "clean": "yes",
             "path": str(tmp_path / "beta"),
             "latest_branch": "release/b",
@@ -115,6 +116,7 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_pat
         {
             "repo": "alpha",
             "state": "in-sync",
+            "branch": "release/a",
             "clean": "yes",
             "path": str(tmp_path / "alpha"),
             "latest_branch": "release/a",
@@ -147,9 +149,11 @@ def test_confirm_fleet_apply_selection_returns_checked_rows(monkeypatch, tmp_pat
 
     assert [row["repo"] for row in selected] == ["alpha"]
     summary_rows, columns = captured["table"]
-    assert columns == ["repo", "state", "plan", "clean", "path"]
+    assert columns == ["repo", "state", "plan", "branch", "clean", "path"]
     assert [row["repo"] for row in summary_rows] == ["alpha", "beta"]
     assert summary_rows[0]["plan"] == "checkout:release/x"
+    assert summary_rows[0]["branch"] == "release/a -> release/a"
+    assert summary_rows[1]["branch"] == "main -> release/b"
     assert "Repos selected: 2" in captured["textbox"][1]
     assert "Checkout branch: release/x" in captured["textbox"][1]
 

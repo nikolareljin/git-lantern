@@ -51,6 +51,7 @@ lantern fleet plan --root ~/workspace --server github.com --fetch
 lantern fleet plan --root ~/workspace --server github.com --org my-org --with-user
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --checkout-latest-branch
+lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --repos owner/repo-a,owner/repo-b
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
 lantern fleet logs --latest
 lantern lazygit --root ~/workspace --select
@@ -67,6 +68,8 @@ lantern forge gists list --server github.com --output data/gists.json
 
 Selection tips:
 - Use `--repos repo-a,repo-b` for explicit multi-repo actions.
+- `--checkout-latest-branch` now auto-targets only repos whose detected latest branch would actually change something, while still letting you override the scope with `--repos`.
+- Latest-branch checkout skips repos with tracked uncommitted changes, but it still allows untracked-only worktrees.
 - When names are ambiguous, pass full repo paths instead of short names.
 
 ## Environment

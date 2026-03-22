@@ -4,6 +4,15 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added selective latest-branch fleet refresh planning so Lantern can focus branch refreshes on repos where the detected latest branch is actually actionable.
+
+### Changed
+
+- Changed `fleet apply --checkout-latest-branch` and the TUI latest-branch rollout flows to show current-to-latest branch transitions, allow explicit repo selection, and preserve untracked-only worktrees while still blocking tracked uncommitted changes.
+
+
 ## [0.3.3] - 2026-03-20
 
 ### Changed

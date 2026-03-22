@@ -1116,6 +1116,28 @@ def _fleet_action_parts_for_row(
     return parts
 
 
+def _fleet_latest_branch_is_actionable(row: Dict[str, str]) -> bool:
+    latest = str(row.get("latest_branch") or "").strip()
+    if not latest or latest == "-":
+        return False
+
+    state = str(row.get("state") or "").strip()
+    current = str(row.get("branch") or "").strip()
+    if state == "missing-local":
+        return True
+    if current and current != latest:
+        return True
+    return state == "behind-remote" and current == latest
+
+
+def _fleet_latest_branch_display(row: Dict[str, str]) -> str:
+    latest = str(row.get("latest_branch") or "").strip() or "-"
+    current = str(row.get("branch") or "").strip() or "-"
+    if str(row.get("state") or "").strip() == "missing-local":
+        return f"(missing) -> {latest}"
+    return f"{current} -> {latest}"
+
+
 def _fleet_preflight_confirm(
     title: str,
     rows: List[Dict[str, str]],
@@ -1149,6 +1171,7 @@ def _fleet_preflight_confirm(
                 "repo": str(row.get("repo") or ""),
                 "state": str(row.get("state") or "-"),
                 "plan": plan,
+                "branch_transition": _fleet_latest_branch_display(row),
                 "clean": str(row.get("clean") or "-"),
                 "path": str(row.get("path") or ""),
             }
@@ -1160,6 +1183,7 @@ def _fleet_preflight_confirm(
             "repo": entry["repo"],
             "state": entry["state"],
             "plan": entry["plan"],
+            "branch": entry["branch_transition"],
             "clean": entry["clean"],
             "path": entry["path"],
         }
@@ -1183,7 +1207,7 @@ def _fleet_preflight_confirm(
     summary_header.append("Planned actions by repository:")
     summary_text = "\n".join(summary_header) + "\n\n" + render_table(
         summary_rows,
-        ["repo", "state", "plan", "clean", "path"],
+        ["repo", "state", "plan", "branch", "clean", "path"],
     )
     _dialog_textbox_from_text(title, summary_text, height, width)
 
@@ -1192,7 +1216,7 @@ def _fleet_preflight_confirm(
     for idx, entry in enumerate(prepared, start=1):
         tag = str(idx)
         idx_to_row[tag] = entry["row"]
-        desc = f"{entry['repo']} [{entry['state']}] -> {entry['plan']}"
+        desc = f"{entry['repo']} [{entry['state']}] -> {entry['plan']} | branches: {entry['branch_transition']}"
         checklist_items.append((tag, desc, True))
     selected_tags = _dialog_checklist(
         title,
@@ -1278,8 +1302,10 @@ def _fleet_logs_dir(root: str) -> str:
 
 def _fleet_apply_candidates_for_mode(rows: List[Dict[str, str]], apply_mode: str) -> List[Dict[str, str]]:
     mode = str(apply_mode or "").strip().lower()
-    if mode in {"branch", "pr", "latest"}:
+    if mode in {"branch", "pr"}:
         return list(rows)
+    if mode == "latest":
+        return [r for r in rows if _fleet_latest_branch_is_actionable(r)]
     return [r for r in rows if r.get("action") in {"clone", "pull", "push"}]
 
 
@@ -1802,16 +1828,21 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     candidates = [r for r in smart_rows if str(r.get("state") or "") == "behind-remote"]
                 elif preset == "full_reconcile":
                     candidates = [r for r in smart_rows if str(r.get("action") or "") in {"clone", "pull", "push"}]
+                elif preset == "branch_rollout":
+                    candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
                 else:
-                    candidates = [
-                        r
-                        for r in smart_rows
-                        if str(r.get("state") or "") in {"in-sync", "behind-remote", "ahead-remote", "diverged", "missing-local"}
-                    ]
+                    candidates = list(smart_rows)
 
                 if not candidates:
                     _dialog_msgbox("Smart Sync", "No repositories match the selected preset.", height, width)
                     continue
+
+                clone_missing = preset != "fast_pull"
+                pull_behind = True
+                include_push = False
+                preview_checkout_branch = ""
+                preview_checkout_pr = ""
+                preview_checkout_latest_branch = preset == "branch_rollout"
 
                 scope_items: List[Tuple[str, str]] = [
                     ("all", "All actionable repositories"),
@@ -1833,8 +1864,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         repo_name = str(row.get("repo") or "")
                         idx_to_repo[tag] = repo_name
                         state = str(row.get("state") or "-")
-                        action_name = str(row.get("action") or "-")
-                        desc = f"{repo_name} [{state}] -> {action_name}"
+                        plan_desc = ", ".join(
+                            _fleet_action_parts_for_row(
+                                row=row,
+                                clone_missing=clone_missing,
+                                pull_behind=pull_behind,
+                                push_ahead=include_push,
+                                checkout_branch=preview_checkout_branch,
+                                checkout_pr=preview_checkout_pr,
+                                checkout_latest_branch=preview_checkout_latest_branch,
+                            )
+                        )
+                        desc = f"{repo_name} [{state}] -> {plan_desc} | branches: {_fleet_latest_branch_display(row)}"
                         checklist_items.append((tag, desc, True))
                     selected_tags = _dialog_checklist("Smart Sync", "Select repositories to process:", checklist_items, height, width)
                     if not selected_tags:
@@ -1876,7 +1917,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
                     only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
 
-                include_push = False
                 if preset == "full_reconcile":
                     push_choice = _dialog_menu(
                         "Push Mode",
@@ -1894,20 +1934,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 apply_cmd = [sys.executable, "-m", "lantern", "fleet", "apply", *common_opts]
                 apply_cmd.append("--fetch")
-                clone_missing = False
-                pull_behind = False
                 if preset == "fast_pull":
-                    pull_behind = True
                     apply_cmd.append("--pull-behind")
                 elif preset == "full_reconcile":
-                    clone_missing = True
-                    pull_behind = True
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                     if include_push:
                         apply_cmd.append("--push-ahead")
                 else:
-                    clone_missing = True
-                    pull_behind = True
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                 if checkout_branch:
                     apply_cmd.extend(["--checkout-branch", checkout_branch])
@@ -2040,7 +2073,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 _dialog_msgbox("Fleet", "No actionable repositories in current plan.", height, width)
                 continue
 
-            preview_cols = ["repo", "state", "action", "latest_branch", "prs"]
+            preview_cols = ["repo", "state", "branch", "action", "latest_branch", "prs"]
             _dialog_textbox_from_text("Fleet Context", render_table(actionable, preview_cols), height, width)
 
             selected_rows = actionable
@@ -2052,8 +2085,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     repo_name = str(row.get("repo") or "")
                     idx_to_repo[tag] = repo_name
                     prs = str(row.get("prs") or "-")
-                    latest = str(row.get("latest_branch") or "-")
-                    desc = f"{repo_name} [{row.get('state')}] -> {row.get('action')} | latest:{latest} | prs:{prs}"
+                    latest_display = _fleet_latest_branch_display(row)
+                    plan_desc = str(row.get("action") or "-")
+                    if apply_mode == "latest":
+                        latest = str(row.get("latest_branch") or "-")
+                        plan_desc = f"checkout-latest:{latest}" if latest and latest != "-" else "checkout-latest:skip-no-latest"
+                    desc = f"{repo_name} [{row.get('state')}] -> {plan_desc} | branches:{latest_display} | prs:{prs}"
                     checklist_items.append((tag, desc, True))
                 selected_tags = _dialog_checklist("Fleet Apply", "Select repos to process:", checklist_items, height, width)
                 if not selected_tags:
@@ -2991,6 +3028,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             {
                 "repo": rec.get("name", os.path.basename(path)),
                 "state": state,
+                "branch": str(rec.get("branch") or "-"),
                 "up": str(rec.get("up") or "-"),
                 "clean": str(rec.get("clean") or "no"),
                 "action": action,
@@ -3016,6 +3054,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             {
                 "repo": name,
                 "state": "missing-local",
+                "branch": "-",
                 "up": "-",
                 "clean": "-",
                 "action": "clone",
@@ -3099,7 +3138,10 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             clone_sources[name] = src
 
     selected = _parse_repo_filter(args.repos)
-    target_rows = [row for row in rows if not selected or row["repo"] in selected]
+    if checkout_latest_branch and not selected:
+        target_rows = _fleet_apply_candidates_for_mode(rows, "latest")
+    else:
+        target_rows = [row for row in rows if not selected or row["repo"] in selected]
     results: List[Dict[str, str]] = []
     detailed_results: List[Dict[str, Any]] = []
     total_targets = len(target_rows)
