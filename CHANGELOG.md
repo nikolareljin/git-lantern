@@ -4,6 +4,14 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+## [0.4.1] - 2026-03-23
+
+### Fixed
+
+- Fixed `auto-tag` so merges of `release/x.y.z` branches to `main` can still derive the release version even when GitHub does not associate the merge commit with the PR immediately; the workflow now falls back to parsing the merge commit message before tagging.
+- Corrected the missing `0.4.0` tag by tagging the merged `release/0.4.0` commit on `main` and keeping future patch/minor releases on the repaired auto-tag path.
+
 ## [0.4.0] - 2026-03-22
 
 ### Added
