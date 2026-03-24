@@ -6,7 +6,7 @@ from lantern import cli
 def test_detect_latest_branch_prefers_origin_refs(monkeypatch):
     def _fake_run_git(_path, args):
         if args[-1] == "refs/remotes/origin":
-            return "origin/HEAD\norigin/feature-latest\norigin/main"
+            return "refs/remotes/origin/HEAD\nrefs/remotes/origin/feature-latest\nrefs/remotes/origin/main"
         return ""
 
     monkeypatch.setattr(cli.git, "run_git", _fake_run_git)
@@ -19,12 +19,23 @@ def test_detect_latest_branch_falls_back_to_local_refs(monkeypatch):
         if args[-1] == "refs/remotes/origin":
             return ""
         if args[-1] == "refs/heads":
-            return "dev\nmain"
+            return "refs/heads/dev\nrefs/heads/main"
         return ""
 
     monkeypatch.setattr(cli.git, "run_git", _fake_run_git)
 
     assert cli._detect_latest_branch("/tmp/repo") == "dev"
+
+
+def test_detect_latest_branch_ignores_short_origin_head_symbolic_name(monkeypatch):
+    def _fake_run_git(_path, args):
+        if args[-1] == "refs/remotes/origin":
+            return "origin\norigin/release/0.4.2\norigin/main"
+        return ""
+
+    monkeypatch.setattr(cli.git, "run_git", _fake_run_git)
+
+    assert cli._detect_latest_branch("/tmp/repo") == "release/0.4.2"
 
 
 def test_cmd_fleet_plan_always_includes_latest_branch_column(monkeypatch, capsys):
@@ -49,4 +60,3 @@ def test_cmd_fleet_plan_always_includes_latest_branch_column(monkeypatch, capsys
     out = capsys.readouterr().out
     assert rc == 0
     assert "latest_branch" in out
-
