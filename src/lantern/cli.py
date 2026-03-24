@@ -485,30 +485,41 @@ def _remote_main_ref(path: str) -> str:
 
 def _detect_latest_branch(path: str) -> str:
     """Detect latest branch by most recent commit date, preferring origin refs."""
+    def _remote_branch_candidate(ref: str) -> str:
+        candidate = str(ref or "").strip()
+        if not candidate:
+            return ""
+        if candidate in {"origin", "origin/HEAD", "refs/remotes/origin/HEAD"}:
+            return ""
+        if candidate.startswith("refs/remotes/origin/"):
+            return candidate[len("refs/remotes/origin/") :]
+        if candidate.startswith("origin/"):
+            return candidate.split("/", 1)[1]
+        return ""
+
     remote_refs = str(
         git.run_git(
             path,
-            ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/remotes/origin"],
+            ["for-each-ref", "--sort=-committerdate", "--format=%(refname)", "refs/remotes/origin"],
         )
         or ""
     )
     for ref in remote_refs.splitlines():
-        candidate = ref.strip()
-        if not candidate or candidate == "origin/HEAD":
-            continue
-        if candidate.startswith("origin/"):
-            return candidate.split("/", 1)[1]
-        return candidate
+        candidate = _remote_branch_candidate(ref)
+        if candidate:
+            return candidate
 
     local_refs = str(
         git.run_git(
             path,
-            ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"],
+            ["for-each-ref", "--sort=-committerdate", "--format=%(refname)", "refs/heads"],
         )
         or ""
     )
     for ref in local_refs.splitlines():
         candidate = ref.strip()
+        if candidate.startswith("refs/heads/"):
+            candidate = candidate[len("refs/heads/") :]
         if candidate:
             return candidate
     return "-"

@@ -5,6 +5,13 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 - No unreleased changes yet.
+## [0.4.2] - 2026-03-24
+
+### Fixed
+
+- Fixed latest-branch detection so the symbolic `origin/HEAD` ref is ignored during fleet refresh planning instead of being misread as a real branch named `origin`.
+- Corrected `fleet apply --checkout-latest-branch` and related status/plan flows to target the real most-recent branch candidate, preventing false `checkout-latest:origin:skip-no-remote` rollouts.
+
 ## [0.4.1] - 2026-03-23
 
 ### Fixed
