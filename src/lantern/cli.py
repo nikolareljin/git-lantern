@@ -3037,8 +3037,10 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
 def _fleet_missing_local_destination(root: str, repo_name: str) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
-    repo_dir = normalized.replace("/", "__")
-    if repo_dir in {"", "."}:
+    if normalized in {"", "."}:
+        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
+    repo_dir = urllib.parse.quote(normalized, safe="")
+    if not repo_dir:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
     return os.path.join(root, repo_dir)
 

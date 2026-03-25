@@ -126,18 +126,22 @@ def test_fleet_plan_records_clones_missing_local_repo_into_flat_namespaced_path(
             "action": "clone",
             "latest_branch": "-",
             "prs": "-",
-            "path": str(tmp_path / "my-namespace__my-repo"),
+            "path": str(tmp_path / "my-namespace%2Fmy-repo"),
         }
     ]
 
 def test_fleet_missing_local_destination_preserves_namespace_uniqueness():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/org-a__service'
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/org-b__service'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/org-a%2Fservice'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/org-b%2Fservice'
 
 
 def test_fleet_missing_local_destination_normalizes_trailing_separators():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org__repo'
-    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org__repo'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org%2Frepo'
+    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org%2Frepo'
+
+def test_fleet_missing_local_destination_escapes_literal_separator_markers():
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo') == '/tmp/root/org%2Frepo'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org__repo') == '/tmp/root/org__repo'
 
 
 def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):

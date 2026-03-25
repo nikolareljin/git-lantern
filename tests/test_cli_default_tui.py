@@ -149,3 +149,27 @@ def test_run_lantern_subprocess_can_stream_output_when_requested(monkeypatch):
     assert "stdout" not in captured["kwargs"]
     assert "stderr" not in captured["kwargs"]
     assert "capture_output" not in captured["kwargs"]
+
+
+def test_run_lantern_subprocess_hides_output_when_requested(monkeypatch):
+    captured = {}
+
+    def _fake_run(cmd_args, **kwargs):
+        captured["cmd_args"] = cmd_args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli.subprocess, "run", _fake_run)
+
+    result = cli._run_lantern_subprocess(
+        ["lantern", "fleet", "apply"],
+        20,
+        80,
+        capture=False,
+        show_live_output=False,
+    )
+
+    assert result.returncode == 0
+    assert captured["kwargs"]["stdout"] is cli.subprocess.DEVNULL
+    assert captured["kwargs"]["stderr"] is cli.subprocess.DEVNULL
+    assert "capture_output" not in captured["kwargs"]
