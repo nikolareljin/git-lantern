@@ -92,6 +92,45 @@ def test_fleet_apply_candidates_for_latest_filters_to_actionable_rows():
     assert [row["repo"] for row in selected] == ["alpha", "gamma", "delta"]
 
 
+
+def test_fleet_plan_records_clones_missing_local_repo_into_root_basename(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+
+    args = argparse.Namespace(
+        root=str(tmp_path),
+        max_depth=1,
+        include_hidden=False,
+        fetch=False,
+        with_prs=False,
+        pr_stale_days=30,
+    )
+    payload = {
+        "repos": [
+            {
+                "name": "my-namespace/my-repo",
+                "ssh_url": "git@example.com:my-namespace/my-repo.git",
+            }
+        ]
+    }
+
+    rows, _meta = cli._fleet_plan_records(args, payload=payload)
+
+    assert rows == [
+        {
+            "repo": "my-namespace/my-repo",
+            "state": "missing-local",
+            "branch": "-",
+            "up": "-",
+            "clean": "-",
+            "action": "clone",
+            "latest_branch": "-",
+            "prs": "-",
+            "path": str(tmp_path / "my-repo"),
+        }
+    ]
+
+
 def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):
     args = _make_apply_args(checkout_branch="main", checkout_latest_branch=True)
     rc = cli.cmd_fleet_apply(args)

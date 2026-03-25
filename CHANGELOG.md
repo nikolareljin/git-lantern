@@ -5,6 +5,14 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 - No unreleased changes yet.
+
+## [0.4.3] - 2026-03-24
+
+### Fixed
+
+- Fixed fleet sync and forge clone destination resolution so namespaced remote identifiers such as `my-namespace/my-repo` clone directly into the configured workspace root as `my-repo` instead of creating nested namespace directories.
+- Fixed Smart Sync and Fleet Sync TUI progress dialogs to suppress subprocess output while the modal is visible, preventing clone and checkout text from leaking underneath the active dialog.
+
 ## [0.4.2] - 2026-03-24
 
 ### Fixed
