@@ -819,6 +819,7 @@ def _run_lantern_subprocess(
     height: int,
     width: int,
     capture: bool = True,
+    show_live_output: bool = True,
 ) -> "subprocess.CompletedProcess[str]":
     """Run a lantern subprocess with correct PYTHONPATH and error handling."""
     env: Dict[str, str] = dict(os.environ)
@@ -834,6 +835,9 @@ def _run_lantern_subprocess(
     }
     if capture:
         kwargs["capture_output"] = True
+    elif not show_live_output:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.PIPE
     result = subprocess.run(cmd_args, **kwargs)
     if result.returncode != 0 and capture:
         stderr = (result.stderr or "").strip()
@@ -2035,11 +2039,17 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 _dialog_infobox(
                     "Smart Sync",
-                    "Applying fleet actions...\n\nProgress is shown in terminal.",
+                    "Applying fleet actions...\n\nThis may take a while.",
                     max(8, height // 3),
                     max(60, width // 2),
                 )
-                result = _run_lantern_subprocess(apply_cmd, height, width, capture=False)
+                result = _run_lantern_subprocess(
+                    apply_cmd,
+                    height,
+                    width,
+                    capture=False,
+                    show_live_output=False,
+                )
                 subprocess.run(["clear"], check=False)
                 summary_text = _fleet_short_summary_from_log(log_path)
                 if result.returncode == 0:
@@ -2050,9 +2060,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         width,
                     )
                 else:
+                    error_text = (result.stderr or "").strip()
+                    detail = f"\n\n{error_text}" if error_text else ""
                     _dialog_msgbox(
                         "Smart Sync",
-                        f"{summary_text}\n\nSmart Sync finished with errors.",
+                        f"{summary_text}\n\nSmart Sync finished with errors.{detail}",
                         height,
                         width,
                     )
@@ -2273,8 +2285,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 max(8, height // 3),
                 max(60, width // 2),
             )
-            # Stream progress live for long-running fleet apply operations.
-            result = _run_lantern_subprocess(apply_cmd, height, width, capture=False)
+            result = _run_lantern_subprocess(
+                apply_cmd,
+                height,
+                width,
+                capture=False,
+                show_live_output=False,
+            )
             subprocess.run(["clear"], check=False)
             summary_text = _fleet_short_summary_from_log(log_path)
             if result.returncode == 0:
@@ -2285,9 +2302,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     width,
                 )
             else:
+                error_text = (result.stderr or "").strip()
+                detail = f"\n\n{error_text}" if error_text else ""
                 _dialog_msgbox(
                     "Fleet Sync",
-                    f"{summary_text}\n\nFleet apply finished with errors.",
+                    f"{summary_text}\n\nFleet apply finished with errors.{detail}",
                     height,
                     width,
                 )
@@ -3019,6 +3038,17 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
+def _fleet_missing_local_destination(root: str, repo_name: str) -> str:
+    normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
+    normalized = normalized.replace("\\", "/")
+    if normalized in {"", "."}:
+        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
+    repo_dir = urllib.parse.quote(normalized, safe="")
+    if not repo_dir:
+        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
+    return os.path.join(root, repo_dir)
+
+
 def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
     local_paths = find_repos(args.root, args.max_depth, args.include_hidden)
     local_records: List[Dict[str, str]] = []
@@ -3118,7 +3148,7 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             if name:
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
-        dest = os.path.join(args.root, name)
+        dest = _fleet_missing_local_destination(args.root, name)
         plan_rows.append(
             {
                 "repo": name,
@@ -4063,7 +4093,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
                 if name:
                     print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
                 continue
-            dest = os.path.join(args.root, name)
+            dest = _fleet_missing_local_destination(args.root, name)
             status = "on" if os.path.exists(dest) else "off"
             label = "cloned" if status == "on" else "missing"
             checklist_items.extend([name, label, status])
@@ -4103,7 +4133,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             continue
         if not ssh_url:
             continue
-        dest = os.path.join(args.root, name)
+        dest = _fleet_missing_local_destination(args.root, name)
         if os.path.exists(dest):
             continue
         parent = os.path.dirname(dest)
