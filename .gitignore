@@ -29,3 +29,7 @@ man/lantern.1
 TODO.txt
 
 /ignore/
+
+# Ignore Claude memory files outside the repo root
+CLAUDE.md
+!/CLAUDE.md
