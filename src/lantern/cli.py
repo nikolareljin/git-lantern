@@ -837,7 +837,7 @@ def _run_lantern_subprocess(
         kwargs["capture_output"] = True
     elif not show_live_output:
         kwargs["stdout"] = subprocess.DEVNULL
-        kwargs["stderr"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.PIPE
     result = subprocess.run(cmd_args, **kwargs)
     if result.returncode != 0 and capture:
         stderr = (result.stderr or "").strip()
@@ -2060,9 +2060,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         width,
                     )
                 else:
+                    error_text = (result.stderr or "").strip()
+                    detail = f"\n\n{error_text}" if error_text else ""
                     _dialog_msgbox(
                         "Smart Sync",
-                        f"{summary_text}\n\nSmart Sync finished with errors.",
+                        f"{summary_text}\n\nSmart Sync finished with errors.{detail}",
                         height,
                         width,
                     )
@@ -2300,9 +2302,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     width,
                 )
             else:
+                error_text = (result.stderr or "").strip()
+                detail = f"\n\n{error_text}" if error_text else ""
                 _dialog_msgbox(
                     "Fleet Sync",
-                    f"{summary_text}\n\nFleet apply finished with errors.",
+                    f"{summary_text}\n\nFleet apply finished with errors.{detail}",
                     height,
                     width,
                 )
