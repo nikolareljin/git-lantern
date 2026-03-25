@@ -819,7 +819,7 @@ def _run_lantern_subprocess(
     height: int,
     width: int,
     capture: bool = True,
-    show_live_output: bool = False,
+    show_live_output: bool = True,
 ) -> "subprocess.CompletedProcess[str]":
     """Run a lantern subprocess with correct PYTHONPATH and error handling."""
     env: Dict[str, str] = dict(os.environ)
@@ -3035,7 +3035,11 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _fleet_missing_local_destination(root: str, repo_name: str) -> str:
-    repo_dir = repo_name.strip().rsplit("/", 1)[-1]
+    normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
+    normalized = normalized.replace("\\", "/")
+    repo_dir = normalized.replace("/", "__")
+    if repo_dir in {"", "."}:
+        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
     return os.path.join(root, repo_dir)
 
 

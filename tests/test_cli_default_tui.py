@@ -109,7 +109,7 @@ def test_cmd_tui_about_dialog(monkeypatch, tmp_path):
     assert captured["size"] == (20, 84)
 
 
-def test_run_lantern_subprocess_hides_output_when_not_capturing(monkeypatch):
+def test_run_lantern_subprocess_shows_output_when_not_capturing(monkeypatch):
     captured = {}
 
     def _fake_run(cmd_args, **kwargs):
@@ -122,8 +122,8 @@ def test_run_lantern_subprocess_hides_output_when_not_capturing(monkeypatch):
     result = cli._run_lantern_subprocess(["lantern", "fleet", "apply"], 20, 80, capture=False)
 
     assert result.returncode == 0
-    assert captured["kwargs"]["stdout"] is cli.subprocess.DEVNULL
-    assert captured["kwargs"]["stderr"] is cli.subprocess.DEVNULL
+    assert "stdout" not in captured["kwargs"]
+    assert "stderr" not in captured["kwargs"]
     assert "capture_output" not in captured["kwargs"]
 
 
