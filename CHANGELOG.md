@@ -6,6 +6,25 @@ All notable changes to git-lantern are documented in this file.
 
 - No unreleased changes yet.
 
+## [0.4.4] - 2026-03-26
+
+### Added
+
+- Added `lantern fleet overview` as the primary fleet dashboard snapshot command, with optional JSON export for later reuse.
+- Added `lantern fleet dirty` to list only repositories with tracked local changes for quick pre-signoff review.
+- Added TUI `dashboard` and `dirty_repos` flows so per-repo refresh, latest-branch checkout, publish, and local-review actions can run from the saved fleet snapshot.
+
+### Changed
+
+- Changed `repos`, `status`, `sync`, and TUI fleet flows to reuse the shared fleet snapshot model so local and remote views stay aligned.
+- Changed `fleet apply --snapshot ...` to honor snapshot reuse directly, including cloning missing repositories from the saved snapshot origin URLs without forcing a fresh remote reload.
+- Updated `README.md`, `docs/commands.md`, and `docs/use-cases.md` to document the dashboard-first workflow, snapshot reuse, and tracked-dirty review flow.
+
+### Fixed
+
+- Fixed latest-branch apply paths to avoid an extra fetch when the caller already refreshed refs.
+- Fixed dashboard recommended actions so clean repositories are no longer incorrectly flagged for `review-local`.
+
 ## [0.4.3] - 2026-03-24
 
 ### Fixed

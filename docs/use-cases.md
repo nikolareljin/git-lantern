@@ -32,9 +32,10 @@ Now all repository operations will use your configured root directory automatica
 Once configured, a typical session looks like:
 
 1. **Launch TUI**: `lantern` (or `lantern --tui`)
-2. **Check status**: Select `status` to see all repos with branch divergence info
-3. **Reconcile repos**: Select `fleet` > `apply all` to clone missing and sync behind/ahead repos
-4. **Deep inspect a repo**: Select `lazygit` to open a selected repository in lazygit
+2. **Open dashboard**: Select `dashboard` to build one fleet snapshot and inspect repos row-by-row
+3. **Review dirty repos**: Select `dirty_repos` before signing off to find tracked local changes quickly
+4. **Reconcile repos**: From the dashboard repo action menu, refresh local, publish local, or checkout the latest branch
+5. **Deep inspect a repo**: Use `Review local changes` to open the selected repository in lazygit
 5. **Find a repo**: Select `find` and enter a name filter to locate a specific repo
 6. **Exit**: Select `exit` (screen is cleared automatically)
 
@@ -163,40 +164,47 @@ Use `fleet` as the single command family for multi-repo management:
 - optionally push repos that are ahead.
 
 ```bash
-# 1) Build a full reconciliation plan (from workspace root)
-lantern fleet plan --root ~/workspace --server github.com --fetch
+# 1) Build the primary dashboard snapshot (from workspace root)
+lantern fleet overview --root ~/workspace --server github.com --fetch
+lantern fleet overview --root ~/workspace --server github.com --fetch --with-prs
+lantern fleet overview --root ~/workspace --server github.com --fetch --output data/fleet-snapshots/latest.json
 
-# 2) Apply all actionable changes
+# 2) Apply actionable changes from a saved snapshot
+lantern fleet apply --root ~/workspace --snapshot data/fleet-snapshots/latest.json --clone-missing --pull-behind
+
+# 3) Apply all actionable changes with live refresh
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
 
-# 3) Apply without pushing ahead repos
+# 4) Apply without pushing ahead repos
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean
 
-# 4) Apply only selected repos
+# 5) Apply only selected repos
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --clone-missing --pull-behind --push-ahead
 
-# 5) Refresh only repos with actionable latest-branch updates
+# 6) Refresh only repos with actionable latest-branch updates
 lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --clone-missing
 
-# 6) Refresh the latest branches for an explicit repo subset
+# 7) Refresh the latest branches for an explicit repo subset
 lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --repos repo1,repo2
 
-# 7) Dry run with full JSON report
+# 8) Show tracked local changes only
+lantern fleet dirty --root ~/workspace
+
+# 9) Dry run with full JSON report
 lantern fleet apply --root ~/workspace --server github.com --dry-run --log-json data/fleet-logs/run.json
 
-# 8) Inspect latest report with jq pretty output
+# 10) Inspect latest report with jq pretty output
 lantern fleet logs --latest
 ```
 
 In TUI (`lantern --tui`):
-1. select `fleet`
+1. select `dashboard`
 2. choose server
-3. run `plan` or `apply` (all/selected)
-4. choose push mode (push ahead repos or skip push)
-5. review the full preflight table showing actions that will be executed
-6. for latest-branch refresh, review the current branch to latest branch transition per repo before confirming
-7. confirm the final repo checklist (uncheck repos to exclude)
-8. run apply and review short completion summary with path to full JSON log
+3. decide whether to refresh refs and include PR data
+4. select a repo row from the dashboard
+5. choose `Refresh local`, `Checkout latest branch`, `Publish local`, `Review local changes`, or `Show path`
+6. for dirty worktrees, use `Review local changes` to jump directly into lazygit
+7. use `dirty_repos` when you only want repos with tracked local modifications
 
 Latest-branch refresh behavior:
 - Lantern auto-selects repos whose detected latest branch is actionable: different from the current branch, or behind on that same latest branch. Missing-local repos join that set when `--clone-missing` is enabled.
@@ -222,6 +230,20 @@ Live table of repo status.
 ```bash
 lantern status --root ~/workspace --fetch
 lantern status --root ~/workspace --fetch --with-prs
+```
+
+### `lantern fleet overview`
+Primary fleet dashboard snapshot.
+```bash
+lantern fleet overview --root ~/workspace --server github.com --fetch
+lantern fleet overview --root ~/workspace --server github.com --fetch --with-prs
+lantern fleet overview --root ~/workspace --server github.com --fetch --output data/fleet-snapshots/latest.json
+```
+
+### `lantern fleet dirty`
+Tracked local changes only.
+```bash
+lantern fleet dirty --root ~/workspace
 ```
 
 ### `lantern lazygit`

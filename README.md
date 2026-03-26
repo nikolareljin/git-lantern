@@ -22,6 +22,8 @@ Primary workflows:
 - Server config: `docs/use-cases.md#server-config-github-gitlab-bitbucket`
 
 Commands (jump to detailed guides):
+- `lantern fleet overview` -> primary fleet dashboard snapshot
+- `lantern fleet dirty` -> tracked local changes only
 - `lantern fleet plan` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern fleet apply` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern fleet logs` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
@@ -47,9 +49,13 @@ Commands (jump to detailed guides):
 
 Quick examples:
 ```bash
+lantern fleet overview --root ~/workspace --server github.com --fetch --with-prs
+lantern fleet overview --root ~/workspace --server github.com --fetch --output data/fleet-snapshots/latest.json
+lantern fleet dirty --root ~/workspace
 lantern fleet plan --root ~/workspace --server github.com --fetch
 lantern fleet plan --root ~/workspace --server github.com --org my-org --with-user
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
+lantern fleet apply --root ~/workspace --snapshot data/fleet-snapshots/latest.json --pull-behind
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --checkout-latest-branch
 lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --repos repo-a,repo-b
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
@@ -70,6 +76,8 @@ Selection tips:
 - Use `--repos repo-a,repo-b` for explicit multi-repo actions.
 - `--checkout-latest-branch` now auto-targets only repos whose detected latest branch would actually change something, while still letting you override the scope with `--repos`.
 - Latest-branch checkout skips repos with tracked uncommitted changes, but it still allows untracked-only worktrees.
+- `fleet overview --output ...` stores the collected snapshot so later `fleet apply --snapshot ...` can reuse it without rebuilding context.
+- `fleet dirty` shows only tracked local modifications, which works well as a pre-signoff review list.
 - When names are ambiguous, pass full repo paths instead of short names.
 
 ## Environment
@@ -104,6 +112,8 @@ lantern config setup
 
 ```
 Git Lantern
+├── dashboard    - Primary fleet dashboard with per-repo actions
+├── dirty_repos  - Repos with tracked local changes
 ├── servers      - View configured Git servers
 ├── config       - Server configuration (setup/export/import/path)
 ├── settings     - Session settings (root, depth, hidden, forks)
