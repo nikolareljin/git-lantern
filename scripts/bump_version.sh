@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SCRIPT: bump_version.sh
-# DESCRIPTION: Bump VERSION and synchronize pyproject.toml version.
+# DESCRIPTION: Bump VERSION, which is the single source of truth for package metadata.
 # USAGE: ./scripts/bump_version.sh <major|minor|patch|X.Y.Z>
 # PARAMETERS: One required argument: bump mode or explicit version.
 # EXAMPLE: ./scripts/bump_version.sh patch
@@ -9,7 +9,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/python_helpers.sh"
 VERSION_FILE="$ROOT_DIR/VERSION"
-PYPROJECT="$ROOT_DIR/pyproject.toml"
 
 if [[ ! -f "$VERSION_FILE" ]]; then
   echo "VERSION file not found." >&2
@@ -30,13 +29,12 @@ if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
   exit 1
 fi
 
-"$PYTHON_BIN" - "$VERSION_FILE" "$PYPROJECT" "$input" <<'PY'
+"$PYTHON_BIN" - "$VERSION_FILE" "$input" <<'PY'
 import re
 import sys
 
 version_path = sys.argv[1]
-pyproject_path = sys.argv[2]
-value = sys.argv[3].strip()
+value = sys.argv[2].strip()
 
 with open(version_path, "r", encoding="utf-8") as handle:
     current = handle.read().strip()
@@ -59,16 +57,6 @@ if new_version is None:
 
 with open(version_path, "w", encoding="utf-8") as handle:
     handle.write(new_version + "\n")
-
-with open(pyproject_path, "r", encoding="utf-8") as handle:
-    content = handle.read()
-
-content, count = re.subn(r'version = "[0-9]+\.[0-9]+\.[0-9]+"', f'version = "{new_version}"', content, count=1)
-if count == 0:
-    raise SystemExit("Failed to update version in pyproject.toml")
-
-with open(pyproject_path, "w", encoding="utf-8") as handle:
-    handle.write(content)
 
 print(new_version)
 PY
