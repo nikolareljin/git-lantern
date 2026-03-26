@@ -404,7 +404,7 @@ def test_cmd_fleet_apply_checkout_latest_branch_skips_missing_local_without_clon
     monkeypatch.setattr(
         cli,
         "_checkout_remote_branch",
-        lambda path, branch, checkout_action, original_head, original_branch: (
+        lambda path, branch, checkout_action, original_head, original_branch, fetch_first=False: (
             [f"{checkout_action}:{branch}:ok"],
             seen.append((path, branch, checkout_action)) or [{"action": checkout_action, "status": "ok", "branch": branch}],
         ),
@@ -462,7 +462,7 @@ def test_cmd_fleet_apply_checkout_latest_branch_targets_only_actionable_rows_whe
     monkeypatch.setattr(
         cli,
         "_checkout_remote_branch",
-        lambda path, branch, checkout_action, original_head, original_branch: (
+        lambda path, branch, checkout_action, original_head, original_branch, fetch_first=False: (
             [f"{checkout_action}:{branch}:ok"],
             seen.append((path, branch, checkout_action)) or [{"action": checkout_action, "status": "ok", "branch": branch}],
         ),

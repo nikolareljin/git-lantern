@@ -1432,14 +1432,18 @@ def _tui_load_fleet_snapshot(
     )
     subprocess.run(["clear"], check=False)
     if result.returncode != 0:
+        session["snapshot_fetched"] = False
         stderr = (result.stderr or "").strip()
         _dialog_msgbox("Fleet Dashboard", f"Failed to build fleet snapshot.\n\n{stderr}", height, width)
         return None
     try:
-        return _load_snapshot_payload(snapshot_path)
+        payload = _load_snapshot_payload(snapshot_path)
     except Exception as exc:
+        session["snapshot_fetched"] = False
         _dialog_msgbox("Fleet Dashboard", f"Failed to read fleet snapshot.\n\n{exc}", height, width)
         return None
+    session["snapshot_fetched"] = fetch
+    return payload
 
 
 def _tui_repo_detail_text(row: Dict[str, Any]) -> str:
@@ -1508,6 +1512,8 @@ def _tui_open_repo_actions(
             "--snapshot", snapshot_path,
             "--repos", repo_name,
         ]
+        if bool(session.get("snapshot_fetched")):
+            apply_cmd.append("--fetch")
         if choice == "refresh_local":
             apply_cmd.extend(["--clone-missing", "--pull-behind"])
         elif choice == "checkout_latest":
@@ -2943,16 +2949,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def cmd_repos(args: argparse.Namespace) -> int:
-    snapshot_payload, _meta = _build_fleet_snapshot(args, include_remote=False)
     records = []
-    for snapshot in snapshot_payload.get("repos", []):
-        if not isinstance(snapshot, dict):
-            continue
+    for path in find_repos(args.root, args.max_depth, args.include_hidden):
         records.append(
             {
-                "name": str(snapshot.get("repo") or ""),
-                "path": str(snapshot.get("path") or ""),
-                "origin": str(snapshot.get("origin_url") or "-"),
+                "name": os.path.basename(path),
+                "path": path,
+                "origin": git.get_origin_url(path) or "-",
             }
         )
     records = _sort_records_by_repo_name(records)
@@ -3192,13 +3195,14 @@ def _remote_repo_keys(repo: Dict[str, Any]) -> Set[str]:
 def _fleet_server_context(args: argparse.Namespace) -> Tuple[str, str, str, str, Optional[Dict[str, str]], Dict[str, Any]]:
     env = github.load_env()
     config = lantern_config.load_config()
-    server = lantern_config.get_server(config, args.server)
+    server_name = str(getattr(args, "server", "") or "")
+    server = lantern_config.get_server(config, server_name)
     provider = (server.get("provider") or "github").lower()
     base_url = str(server.get("base_url") or "")
     env_user_key = f"{provider.upper()}_USER"
     env_token_key = f"{provider.upper()}_TOKEN"
-    user = str(args.user or env.get(env_user_key) or server.get("user") or "")
-    token = str(args.token or env.get(env_token_key) or server.get("token") or "")
+    user = str(getattr(args, "user", "") or env.get(env_user_key) or server.get("user") or "")
+    token = str(getattr(args, "token", "") or env.get(env_token_key) or server.get("token") or "")
     auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
     return provider, base_url, user, token, auth, server
 
@@ -3328,7 +3332,9 @@ def _fleet_state_and_action(
 
 def _recommended_actions_for_snapshot(snapshot: Dict[str, Any]) -> List[str]:
     actions: List[str] = []
-    if bool(snapshot.get("local_missing")):
+    local_exists = bool(snapshot.get("local_exists", not bool(snapshot.get("local_missing"))))
+    local_missing = bool(snapshot.get("local_missing"))
+    if local_missing:
         actions.append("clone")
     if str(snapshot.get("tracked_dirty") or "no") == "yes":
         actions.append("review-local")
@@ -3341,7 +3347,7 @@ def _recommended_actions_for_snapshot(snapshot: Dict[str, Any]) -> List[str]:
         actions.append("manual")
     latest_remote = str(snapshot.get("latest_remote_branch") or "-")
     current = str(snapshot.get("current_branch") or "-")
-    if latest_remote not in {"", "-"} and current != latest_remote:
+    if local_exists and not local_missing and latest_remote not in {"", "-"} and current not in {"", "-"} and current != latest_remote:
         actions.append("checkout-latest")
     if not actions:
         actions.append("none")
@@ -3404,7 +3410,8 @@ def _build_fleet_snapshot(
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     local_paths = find_repos(args.root, args.max_depth, args.include_hidden)
     local_records: List[Dict[str, Any]] = []
-    collected_records = _collect_repo_records_with_progress(local_paths, args.fetch, "snapshot")
+    fetch_requested = bool(getattr(args, "fetch", False))
+    collected_records = _collect_repo_records_with_progress(local_paths, fetch_requested, "snapshot")
     for record in collected_records:
         record = add_divergence_fields(dict(record))
         path = str(record.get("path") or "")
@@ -3417,7 +3424,10 @@ def _build_fleet_snapshot(
 
     if payload is None:
         payload = _fleet_load_remote(args) if include_remote else {"repos": []}
-    provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
+    include_prs = bool(getattr(args, "with_prs", False))
+    provider = base_url = token = ""
+    if include_remote or include_prs:
+        provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
     remote_repos = payload.get("repos", []) if isinstance(payload.get("repos"), list) else []
     remote_by_key: Dict[str, Dict[str, Any]] = {}
     for repo in remote_repos:
@@ -3428,7 +3438,6 @@ def _build_fleet_snapshot(
 
     local_by_remote_key: Dict[str, Dict[str, str]] = {}
     pr_cache: Dict[str, List[Dict[str, Any]]] = {}
-    include_prs = bool(getattr(args, "with_prs", False))
     raw_stale_days = getattr(args, "pr_stale_days", 30)
     stale_days = int(30 if raw_stale_days is None else raw_stale_days)
     configured_host = ""
@@ -3568,33 +3577,6 @@ def _rows_from_snapshot_payload(snapshot_payload: Dict[str, Any]) -> List[Dict[s
     return [_snapshot_record_to_plan_row(snapshot) for snapshot in repos if isinstance(snapshot, dict)]
 
 
-def _invoke_checkout_remote_branch(
-    path: str,
-    branch: str,
-    checkout_action: str,
-    original_head: str,
-    original_branch: str,
-    fetch_first: bool,
-) -> Tuple[List[str], List[Dict[str, str]]]:
-    try:
-        return _checkout_remote_branch(
-            path=path,
-            branch=branch,
-            checkout_action=checkout_action,
-            original_head=original_head,
-            original_branch=original_branch,
-            fetch_first=fetch_first,
-        )
-    except TypeError:
-        return _checkout_remote_branch(
-            path=path,
-            branch=branch,
-            checkout_action=checkout_action,
-            original_head=original_head,
-            original_branch=original_branch,
-        )
-
-
 def cmd_fleet_plan(args: argparse.Namespace) -> int:
     print("Building fleet plan... please wait.", file=sys.stderr)
     try:
@@ -3657,7 +3639,6 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
     if getattr(args, "snapshot", "") and not getattr(args, "refresh", False):
         for row in rows:
             name = str(row.get("repo") or "").strip()
-            src = str(row.get("path") or "").strip()
             if name:
                 clone_sources.setdefault(name, "")
         for snapshot in snapshot_payload.get("repos", []) if isinstance(snapshot_payload.get("repos"), list) else []:
@@ -3872,7 +3853,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                             record["detail"] = error_detail
                         action_records.append(record)
                     else:
-                        checkout_statuses, checkout_records = _invoke_checkout_remote_branch(
+                        checkout_statuses, checkout_records = _checkout_remote_branch(
                             path=path,
                             branch=effective_branch,
                             checkout_action=checkout_action,
@@ -3883,7 +3864,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         statuses.extend(checkout_statuses)
                         action_records.extend(checkout_records)
                 else:
-                    checkout_statuses, checkout_records = _invoke_checkout_remote_branch(
+                    checkout_statuses, checkout_records = _checkout_remote_branch(
                         path=path,
                         branch=effective_branch,
                         checkout_action=checkout_action,

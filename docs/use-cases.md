@@ -36,8 +36,8 @@ Once configured, a typical session looks like:
 3. **Review dirty repos**: Select `dirty_repos` before signing off to find tracked local changes quickly
 4. **Reconcile repos**: From the dashboard repo action menu, refresh local, publish local, or checkout the latest branch
 5. **Deep inspect a repo**: Use `Review local changes` to open the selected repository in lazygit
-5. **Find a repo**: Select `find` and enter a name filter to locate a specific repo
-6. **Exit**: Select `exit` (screen is cleared automatically)
+6. **Find a repo**: Select `find` and enter a name filter to locate a specific repo
+7. **Exit**: Select `exit` (screen is cleared automatically)
 
 ### TUI Workflow: Cloning from a Git Server
 
