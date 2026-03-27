@@ -216,6 +216,24 @@ For detailed TUI workflows, see `docs/use-cases.md#interactive-tui-mode`.
 
 ## Unified fleet commands
 
+### `lantern fleet overview`
+
+**Purpose**: build the primary fleet dashboard snapshot in one pass.
+
+**What it does**:
+- scans local repos under `--root`,
+- optionally refreshes remote refs with `--fetch`,
+- compares local repos with remote repos from `--server` or `--input`,
+- annotates each repo with current/default/latest branch info, tracked-dirty state, and open PR numbers,
+- optionally writes the full snapshot JSON with `--output`.
+
+Example:
+```bash
+lantern fleet overview --root ~/workspace --server github.com --fetch
+lantern fleet overview --root ~/workspace --server github.com --fetch --with-prs
+lantern fleet overview --root ~/workspace --server github.com --fetch --output data/fleet-snapshots/latest.json
+```
+
 ### `lantern fleet plan`
 
 **Purpose**: one-table reconciliation across local and remote repositories.
@@ -259,14 +277,31 @@ lantern fleet plan --root ~/workspace --server github.com --fetch --with-prs
 
 **Execution reporting**:
 - `--log-json <path>`: write full execution details to JSON (`options`, per-repo actions/results, branch updates, summary totals)
+- `--snapshot <path>`: reuse a previously generated fleet snapshot instead of rebuilding context
+- `--refresh`: ignore `--snapshot` and rebuild the fleet snapshot before apply
 
 Example:
 ```bash
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --push-ahead --only-clean
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/run.json
+lantern fleet apply --root ~/workspace --snapshot data/fleet-snapshots/latest.json --pull-behind
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --dry-run
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --checkout-branch feature/my-work
 lantern fleet apply --root ~/workspace --server github.com --repos repo1,repo2 --checkout-pr 123
+```
+
+### `lantern fleet dirty`
+
+**Purpose**: quickly list repos with tracked local changes only.
+
+**What it does**:
+- scans local repos under `--root`,
+- excludes untracked-only worktrees,
+- prints repo, current branch, and path for tracked modifications.
+
+Example:
+```bash
+lantern fleet dirty --root ~/workspace
 ```
 
 ### `lantern fleet logs`

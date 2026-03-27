@@ -29,6 +29,8 @@ def _make_apply_args(**overrides):
         log_json="",
         with_prs=False,
         pr_stale_days=30,
+        snapshot="",
+        refresh=False,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -402,7 +404,7 @@ def test_cmd_fleet_apply_checkout_latest_branch_skips_missing_local_without_clon
     monkeypatch.setattr(
         cli,
         "_checkout_remote_branch",
-        lambda path, branch, checkout_action, original_head, original_branch: (
+        lambda path, branch, checkout_action, original_head, original_branch, fetch_first=False: (
             [f"{checkout_action}:{branch}:ok"],
             seen.append((path, branch, checkout_action)) or [{"action": checkout_action, "status": "ok", "branch": branch}],
         ),
@@ -460,7 +462,7 @@ def test_cmd_fleet_apply_checkout_latest_branch_targets_only_actionable_rows_whe
     monkeypatch.setattr(
         cli,
         "_checkout_remote_branch",
-        lambda path, branch, checkout_action, original_head, original_branch: (
+        lambda path, branch, checkout_action, original_head, original_branch, fetch_first=False: (
             [f"{checkout_action}:{branch}:ok"],
             seen.append((path, branch, checkout_action)) or [{"action": checkout_action, "status": "ok", "branch": branch}],
         ),
@@ -550,3 +552,90 @@ def test_cmd_fleet_apply_reports_no_actionable_latest_branch_updates(monkeypatch
     out = capsys.readouterr().out
     assert rc == 0
     assert "No repositories have actionable latest-branch updates." in out
+
+
+def test_cmd_fleet_apply_snapshot_reuse_skips_remote_reload(monkeypatch, tmp_path, capsys):
+    snapshot_path = tmp_path / "fleet-snapshot.json"
+    repo_path = tmp_path / "demo"
+    snapshot_path.write_text(
+        f"""{{
+  "root": "{tmp_path}",
+  "repos": [
+    {{
+      "repo": "demo",
+      "path": "{repo_path}",
+      "state": "in-sync",
+      "current_branch": "main",
+      "current_vs_upstream": "≡",
+      "git_operation_in_progress": "no",
+      "latest_remote_branch": "main",
+      "open_pr_numbers": "-",
+      "origin_url": "git@example.com:demo.git",
+      "primary_action": "-"
+    }}
+  ]
+}}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_fleet_load_remote",
+        lambda _args: (_ for _ in ()).throw(AssertionError("snapshot apply should not reload remote state")),
+    )
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
+
+    rc = cli.cmd_fleet_apply(_make_apply_args(snapshot=str(snapshot_path), root=str(tmp_path)))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "skip" in out
+
+
+def test_cmd_fleet_apply_snapshot_clone_uses_snapshot_origin(monkeypatch, tmp_path, capsys):
+    snapshot_path = tmp_path / "fleet-snapshot.json"
+    repo_path = tmp_path / "demo"
+    snapshot_path.write_text(
+        f"""{{
+  "root": "{tmp_path}",
+  "repos": [
+    {{
+      "repo": "demo",
+      "path": "{repo_path}",
+      "state": "missing-local",
+      "current_branch": "-",
+      "current_vs_upstream": "-",
+      "git_operation_in_progress": "no",
+      "latest_remote_branch": "main",
+      "open_pr_numbers": "-",
+      "origin_url": "git@example.com:demo.git",
+      "primary_action": "clone"
+    }}
+  ]
+}}
+""",
+        encoding="utf-8",
+    )
+    seen = []
+    monkeypatch.setattr(
+        cli,
+        "_fleet_load_remote",
+        lambda _args: (_ for _ in ()).throw(AssertionError("snapshot clone should not reload remote state")),
+    )
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda args, check=False, **kwargs: seen.append(args) or type("Proc", (), {"returncode": 0})(),
+    )
+
+    rc = cli.cmd_fleet_apply(
+        _make_apply_args(snapshot=str(snapshot_path), clone_missing=True, dry_run=False, root=str(tmp_path))
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert seen == [["git", "clone", "git@example.com:demo.git", str(repo_path)]]
+    assert "clone:ok" in out

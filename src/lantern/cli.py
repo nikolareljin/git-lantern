@@ -425,22 +425,24 @@ def _checkout_remote_branch(
     checkout_action: str,
     original_head: str,
     original_branch: str,
+    fetch_first: bool = True,
 ) -> Tuple[List[str], List[Dict[str, str]]]:
     statuses: List[str] = []
     action_records: List[Dict[str, str]] = []
 
-    rc_fetch = _run_git_op(path, ["fetch", "--prune"])
-    if rc_fetch != 0:
-        statuses.append(f"{checkout_action}:{branch}:skip-git-error")
-        action_records.append(
-            {
-                "action": checkout_action,
-                "status": "skip-git-error",
-                "branch": branch,
-                "detail": "git fetch failed",
-            }
-        )
-        return statuses, action_records
+    if fetch_first:
+        rc_fetch = _run_git_op(path, ["fetch", "--prune"])
+        if rc_fetch != 0:
+            statuses.append(f"{checkout_action}:{branch}:skip-git-error")
+            action_records.append(
+                {
+                    "action": checkout_action,
+                    "status": "skip-git-error",
+                    "branch": branch,
+                    "detail": "git fetch failed",
+                }
+            )
+            return statuses, action_records
 
     remote_ref = f"origin/{branch}"
     has_remote = bool(git.run_git(path, ["rev-parse", "--verify", remote_ref]))
@@ -1370,6 +1372,234 @@ def _fleet_log_files(root: str) -> List[str]:
     return files
 
 
+def _fleet_snapshot_path(root: str) -> str:
+    return os.path.join(root, "data", "fleet-snapshots", "latest.json")
+
+
+def _tui_common_fleet_opts(session: Dict[str, Any], server: str) -> List[str]:
+    opts = [
+        "--root", session["root"],
+        "--max-depth", str(session["max_depth"]),
+        "--server", server,
+    ]
+    if session["include_hidden"]:
+        opts.append("--include-hidden")
+    if session["include_forks"]:
+        opts.append("--include-forks")
+    return opts
+
+
+def _tui_select_server(config: Dict[str, Any], height: int, width: int) -> Optional[str]:
+    server_records = lantern_config.list_servers(config)
+    default_server = lantern_config.get_server_name(config, "")
+    if not server_records:
+        return default_server or ""
+    existing_names = {str(rec.get("name") or "") for rec in server_records}
+    default_tag = "__default__"
+    while default_tag in existing_names:
+        default_tag = f"_{default_tag}_"
+    server_items = [(default_tag, f"Use default ({default_server})")]
+    server_items.extend([(rec["name"], rec["provider"]) for rec in server_records])
+    server_choice = _dialog_menu("Fleet Server", "Choose server for remote comparison:", server_items, height, width)
+    if not server_choice:
+        return None
+    return default_server if server_choice == default_tag else server_choice
+
+
+def _tui_load_fleet_snapshot(
+    session: Dict[str, Any],
+    server: str,
+    fetch: bool,
+    include_prs: bool,
+    height: int,
+    width: int,
+) -> Optional[Dict[str, Any]]:
+    snapshot_path = _fleet_snapshot_path(session["root"])
+    overview_cmd = [sys.executable, "-m", "lantern", "fleet", "overview", *_tui_common_fleet_opts(session, server)]
+    if fetch:
+        overview_cmd.append("--fetch")
+    if include_prs:
+        overview_cmd.append("--with-prs")
+    overview_cmd.extend(["--output", snapshot_path])
+    _dialog_infobox(
+        "Fleet Dashboard",
+        "Refreshing fleet snapshot...\n\nPlease wait.",
+        max(8, height // 3),
+        max(60, width // 2),
+    )
+    result = _run_lantern_subprocess(
+        overview_cmd,
+        height,
+        width,
+        capture=False,
+        show_live_output=False,
+    )
+    subprocess.run(["clear"], check=False)
+    if result.returncode != 0:
+        session["snapshot_fetched"] = False
+        stderr = (result.stderr or "").strip()
+        _dialog_msgbox("Fleet Dashboard", f"Failed to build fleet snapshot.\n\n{stderr}", height, width)
+        return None
+    try:
+        payload = _load_snapshot_payload(snapshot_path)
+    except Exception as exc:
+        session["snapshot_fetched"] = False
+        _dialog_msgbox("Fleet Dashboard", f"Failed to read fleet snapshot.\n\n{exc}", height, width)
+        return None
+    session["snapshot_fetched"] = fetch
+    return payload
+
+
+def _tui_repo_detail_text(row: Dict[str, Any]) -> str:
+    return (
+        f"Repo: {row.get('repo', '-')}\n"
+        f"Path: {row.get('path', '-')}\n"
+        f"State: {row.get('state', '-')}\n"
+        f"Default: {row.get('default_branch', '-')}\n"
+        f"Current: {row.get('current_branch', '-')}\n"
+        f"Upstream: {row.get('upstream_branch', '-')}\n"
+        f"Sync: {row.get('current_vs_upstream', '-')}\n"
+        f"Latest: {row.get('latest_remote_branch', '-')}\n"
+        f"Tracked dirty: {row.get('tracked_dirty', 'no')}\n"
+        f"PRs: {row.get('open_pr_numbers', '-')}\n"
+        f"Recommended: {row.get('recommended_actions', '-')}"
+    )
+
+
+def _tui_open_repo_actions(
+    row: Dict[str, Any],
+    session: Dict[str, Any],
+    server: str,
+    snapshot_path: str,
+    height: int,
+    width: int,
+) -> None:
+    repo_name = str(row.get("repo") or "")
+    repo_path = str(row.get("path") or "")
+    while True:
+        actions: List[Tuple[str, str]] = [
+            ("refresh_local", "Refresh local (clone missing / pull behind)"),
+            ("checkout_latest", "Checkout latest branch"),
+            ("publish_local", "Publish local branch if ahead"),
+            ("review_local", "Review local changes in lazygit"),
+            ("show_path", "Show repository path"),
+            ("back", "Back to dashboard"),
+        ]
+        choice = _dialog_menu(
+            f"Repo Actions: {repo_name}",
+            _tui_repo_detail_text(row),
+            actions,
+            height,
+            width,
+        )
+        if not choice or choice == "back":
+            return
+        if choice == "show_path":
+            _dialog_msgbox("Repository Path", repo_path, height, width)
+            continue
+        if choice == "review_local":
+            if not _lazygit_path():
+                _dialog_msgbox(
+                    "lazygit",
+                    f"lazygit is not installed.\n\nRepository path:\n{repo_path}",
+                    height,
+                    width,
+                )
+                continue
+            subprocess.run(["clear"], check=False)
+            _launch_lazygit(repo_path)
+            continue
+
+        apply_cmd = [
+            sys.executable, "-m", "lantern", "fleet", "apply",
+            *_tui_common_fleet_opts(session, server),
+            "--snapshot", snapshot_path,
+            "--repos", repo_name,
+        ]
+        if bool(session.get("snapshot_fetched")):
+            apply_cmd.append("--fetch")
+        if choice == "refresh_local":
+            apply_cmd.extend(["--clone-missing", "--pull-behind"])
+        elif choice == "checkout_latest":
+            apply_cmd.append("--checkout-latest-branch")
+        elif choice == "publish_local":
+            apply_cmd.append("--push-ahead")
+        log_path = _fleet_log_path(session["root"])
+        apply_cmd.extend(["--log-json", log_path])
+        _dialog_infobox(
+            "Fleet Action",
+            f"Applying action for {repo_name}...\n\nPlease wait.",
+            max(8, height // 3),
+            max(60, width // 2),
+        )
+        result = _run_lantern_subprocess(
+            apply_cmd,
+            height,
+            width,
+            capture=False,
+            show_live_output=False,
+        )
+        subprocess.run(["clear"], check=False)
+        summary_text = _fleet_short_summary_from_log(log_path)
+        if result.returncode == 0:
+            _dialog_msgbox("Fleet Action", summary_text, height, width)
+        else:
+            error_text = (result.stderr or "").strip()
+            detail = f"\n\n{error_text}" if error_text else ""
+            _dialog_msgbox("Fleet Action", f"{summary_text}\n\nAction finished with errors.{detail}", height, width)
+
+
+def _handle_tui_dashboard_action(
+    session: Dict[str, Any],
+    height: int,
+    width: int,
+    dirty_only: bool = False,
+) -> None:
+    if not _validate_session_root(session["root"], height, width):
+        return
+    config = lantern_config.load_config()
+    server = _tui_select_server(config, height, width)
+    if server is None:
+        return
+    fetch = _dialog_yesno("Refresh", "Run git fetch before building the dashboard snapshot?", height, width)
+    include_prs = False if dirty_only else _dialog_yesno("PR Info", "Include fresh open PR numbers in the dashboard?", height, width)
+    snapshot_payload = _tui_load_fleet_snapshot(session, server, fetch, include_prs, height, width)
+    if not snapshot_payload:
+        return
+    snapshot_path = _fleet_snapshot_path(session["root"])
+    rows = [row for row in snapshot_payload.get("repos", []) if isinstance(row, dict)]
+    if dirty_only:
+        rows = [row for row in rows if str(row.get("tracked_dirty") or "no") == "yes"]
+    if not rows:
+        title = "Dirty Repositories" if dirty_only else "Fleet Dashboard"
+        _dialog_msgbox(title, "No repositories matched the current dashboard view.", height, width)
+        return
+    menu_items: List[Tuple[str, str]] = []
+    tag_to_row: Dict[str, Dict[str, Any]] = {}
+    for idx, row in enumerate(rows, start=1):
+        tag = str(idx)
+        tag_to_row[tag] = row
+        desc = (
+            f"{row.get('repo', '-')}"
+            f" | state={row.get('state', '-')}"
+            f" | current={row.get('current_branch', '-')}"
+            f" | latest={row.get('latest_remote_branch', '-')}"
+            f" | dirty={row.get('tracked_dirty', 'no')}"
+            f" | prs={row.get('open_pr_numbers', '-')}"
+        )
+        menu_items.append((tag, desc))
+    selected = _dialog_menu(
+        "Dirty Repositories" if dirty_only else "Fleet Dashboard",
+        "Select a repository to inspect and act on:",
+        menu_items,
+        height,
+        width,
+    )
+    if not selected or selected not in tag_to_row:
+        return
+    _tui_open_repo_actions(tag_to_row[selected], session, server, snapshot_path, height, width)
+
+
 def cmd_fleet_logs(args: argparse.Namespace) -> int:
     log_path = str(args.input or "").strip()
     if not log_path:
@@ -1588,6 +1818,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
             f"Scan JSON: {session['scan_path']}"
         )
         menu_items: List[Tuple[str, str]] = [
+            ("dashboard", "Fleet dashboard (recommended)"),
+            ("dirty_repos", "Repos with tracked local changes"),
             ("servers", "List configured Git servers"),
             ("config", "Server configuration"),
             ("settings", "Session settings"),
@@ -1622,6 +1854,14 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
         if action == "about":
             _show_about_dialog(height, width)
+            continue
+
+        if action == "dashboard":
+            _handle_tui_dashboard_action(session, height, width, dirty_only=False)
+            continue
+
+        if action == "dirty_repos":
+            _handle_tui_dashboard_action(session, height, width, dirty_only=True)
             continue
 
         if action == "settings":
@@ -2713,14 +2953,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def cmd_repos(args: argparse.Namespace) -> int:
-    repos = find_repos(args.root, args.max_depth, args.include_hidden)
     records = []
-    for path in repos:
+    for path in find_repos(args.root, args.max_depth, args.include_hidden):
         records.append(
             {
                 "name": os.path.basename(path),
                 "path": path,
-                "origin": git.get_origin_url(path),
+                "origin": git.get_origin_url(path) or "-",
             }
         )
     records = _sort_records_by_repo_name(records)
@@ -2817,71 +3056,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    repos = find_repos(args.root, args.max_depth, args.include_hidden)
-    records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos, args.fetch, "status")]
-    include_prs = bool(getattr(args, "with_prs", False))
-    raw_stale_days = getattr(args, "pr_stale_days", None)
-    stale_days = int(30 if raw_stale_days is None else raw_stale_days)
-    provider = ""
-    base_url = ""
-    token = ""
-    configured_host = ""
-    known_github_hosts: Set[str] = {"github.com", "www.github.com", "ssh.github.com"}
-    if include_prs:
-        provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
-        provider = provider.lower()
-        if base_url:
-            try:
-                configured_host = (urllib.parse.urlparse(base_url).hostname or "").lower()
-            except Exception:
-                configured_host = ""
-    pr_cache: Dict[str, List[Dict[str, Any]]] = {}
-    enriched_records: List[Dict[str, str]] = []
-    for record in records:
-        enriched = dict(record)
-        path = str(record.get("path") or "")
-        latest_branch = _detect_latest_branch(path) if path else "-"
-        latest_pr = "-"
-        if include_prs and provider == "github":
-            origin = str(record.get("origin") or "")
-            origin_host, owner, repo_name = _origin_owner_repo(origin)
-            origin_host = (origin_host or "").lower()
-            host_matches = False
-            if configured_host:
-                if origin_host == configured_host:
-                    host_matches = True
-                elif configured_host == "api.github.com" and origin_host in known_github_hosts:
-                    host_matches = True
-            else:
-                if origin_host in known_github_hosts:
-                    host_matches = True
-
-            if host_matches and owner and repo_name:
-                cache_key = f"{owner}/{repo_name}"
-                if cache_key not in pr_cache:
-                    try:
-                        pr_cache[cache_key] = github.fetch_open_pull_requests(
-                            owner=owner,
-                            repo=repo_name,
-                            token=token or None,
-                            stale_days=stale_days,
-                            base_url=base_url or None,
-                        )
-                    except Exception as exc:
-                        print(
-                            f"Warning: failed to fetch pull requests for {cache_key}: {exc}",
-                            file=sys.stderr,
-                        )
-                        pr_cache[cache_key] = []
-                repo_prs = pr_cache.get(cache_key, [])
-                if repo_prs:
-                    latest_pr = str(repo_prs[0].get("number") or "-")
-                    if latest_branch == "-":
-                        latest_branch = str(repo_prs[0].get("head_ref") or "-")
-        enriched["latest_branch"] = latest_branch
-        enriched["latest_pr"] = latest_pr
-        enriched_records.append(enriched)
-    records = enriched_records
+    snapshot_payload, _meta = _build_fleet_snapshot(args, include_remote=False)
+    records = [_snapshot_record_to_status_row(snapshot) for snapshot in snapshot_payload.get("repos", [])]
     records = _sort_records_by_repo_name(records)
     columns = [
         "name",
@@ -2894,6 +3070,71 @@ def cmd_status(args: argparse.Namespace) -> int:
         "latest_pr",
     ]
     print(render_table(records, columns))
+    return 0
+
+
+def cmd_fleet_overview(args: argparse.Namespace) -> int:
+    print("Building fleet overview... please wait.", file=sys.stderr)
+    try:
+        snapshot_payload, meta = _build_fleet_snapshot(args, include_remote=True)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if getattr(args, "output", ""):
+        output_dir = os.path.dirname(args.output)
+        try:
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            with open(args.output, "w", encoding="utf-8") as handle:
+                json.dump(snapshot_payload, handle, indent=2)
+        except OSError as exc:
+            print(f"Failed to write fleet snapshot '{args.output}': {exc}", file=sys.stderr)
+            return 1
+    rows = list(snapshot_payload.get("repos", []))
+    columns = [
+        "repo",
+        "local_exists",
+        "remote_exists",
+        "default_branch",
+        "current_branch",
+        "upstream_branch",
+        "current_vs_upstream",
+        "latest_remote_branch",
+        "tracked_dirty",
+        "open_pr_numbers",
+        "state",
+        "recommended_actions",
+        "path",
+    ]
+    print(render_table(rows, columns))
+    if rows:
+        print(
+            f"\nserver={meta.get('server') or '-'} local={meta.get('local_count', 0)} "
+            f"remote={meta.get('remote_count', 0)} total={len(rows)}"
+        )
+    return 0
+
+
+def cmd_fleet_dirty(args: argparse.Namespace) -> int:
+    try:
+        snapshot_payload, _meta = _build_fleet_snapshot(args, include_remote=False)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    rows: List[Dict[str, Any]] = []
+    for snapshot in snapshot_payload.get("repos", []):
+        if str(snapshot.get("tracked_dirty") or "no") != "yes":
+            continue
+        rows.append(
+            {
+                "repo": str(snapshot.get("repo") or ""),
+                "current_branch": str(snapshot.get("current_branch") or "-"),
+                "dirty_summary": "tracked-changes",
+                "path": str(snapshot.get("path") or ""),
+            }
+        )
+    rows = _sort_records_by_repo_name(rows)
+    print(render_table(rows, ["repo", "current_branch", "dirty_summary", "path"]))
     return 0
 
 
@@ -2958,13 +3199,14 @@ def _remote_repo_keys(repo: Dict[str, Any]) -> Set[str]:
 def _fleet_server_context(args: argparse.Namespace) -> Tuple[str, str, str, str, Optional[Dict[str, str]], Dict[str, Any]]:
     env = github.load_env()
     config = lantern_config.load_config()
-    server = lantern_config.get_server(config, args.server)
+    server_name = str(getattr(args, "server", "") or "")
+    server = lantern_config.get_server(config, server_name)
     provider = (server.get("provider") or "github").lower()
     base_url = str(server.get("base_url") or "")
     env_user_key = f"{provider.upper()}_USER"
     env_token_key = f"{provider.upper()}_TOKEN"
-    user = str(args.user or env.get(env_user_key) or server.get("user") or "")
-    token = str(args.token or env.get(env_token_key) or server.get("token") or "")
+    user = str(getattr(args, "user", "") or env.get(env_user_key) or server.get("user") or "")
+    token = str(getattr(args, "token", "") or env.get(env_token_key) or server.get("token") or "")
     auth = server.get("auth") if isinstance(server.get("auth"), dict) else None
     return provider, base_url, user, token, auth, server
 
@@ -3049,20 +3291,147 @@ def _fleet_missing_local_destination(root: str, repo_name: str) -> str:
     return os.path.join(root, repo_dir)
 
 
-def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
-    local_paths = find_repos(args.root, args.max_depth, args.include_hidden)
-    local_records: List[Dict[str, str]] = []
-    total_local = len(local_paths)
-    for idx, path in enumerate(local_paths, start=1):
-        _progress_line(idx, total_local, f"Scanning {os.path.basename(path)}")
-        record = build_repo_record(path, args.fetch)
-        record = add_divergence_fields(record)
-        record["clean"] = "yes" if git.is_operation_free(path) else "no"
-        local_records.append(record)
-    _progress_done()
+def _host_matches_github_origin(configured_host: str, origin_host: str) -> bool:
+    known_github_hosts: Set[str] = {"github.com", "www.github.com", "ssh.github.com"}
+    configured = (configured_host or "").lower()
+    origin = (origin_host or "").lower()
+    if not origin:
+        return False
+    if configured:
+        if origin == configured:
+            return True
+        if configured == "api.github.com" and origin in known_github_hosts:
+            return True
+        return False
+    return origin in known_github_hosts
 
-    payload = payload if payload is not None else _fleet_load_remote(args)
-    provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
+
+def _default_branch_name(main_ref: str) -> str:
+    value = str(main_ref or "").strip()
+    if not value or value == "-":
+        return "-"
+    if "/" in value:
+        return value.split("/")[-1]
+    return value
+
+
+def _fleet_state_and_action(
+    remote_exists: bool,
+    remote_enabled: bool,
+    up_ahead: Optional[int],
+    up_behind: Optional[int],
+) -> Tuple[str, str]:
+    if not remote_enabled:
+        return "local-only", "-"
+    if not remote_exists:
+        return "local-only", "-"
+    if (up_ahead or 0) > 0 and (up_behind or 0) > 0:
+        return "diverged", "manual"
+    if (up_behind or 0) > 0:
+        return "behind-remote", "pull"
+    if (up_ahead or 0) > 0:
+        return "ahead-remote", "push"
+    return "in-sync", "-"
+
+
+def _recommended_actions_for_snapshot(snapshot: Dict[str, Any]) -> List[str]:
+    actions: List[str] = []
+    local_exists = bool(snapshot.get("local_exists", not bool(snapshot.get("local_missing"))))
+    local_missing = bool(snapshot.get("local_missing"))
+    if local_missing:
+        actions.append("clone")
+    if str(snapshot.get("tracked_dirty") or "no") == "yes":
+        actions.append("review-local")
+    state = str(snapshot.get("state") or "")
+    if state == "behind-remote":
+        actions.append("pull")
+    if state == "ahead-remote":
+        actions.append("push")
+    if state == "diverged" or bool(snapshot.get("remote_missing")):
+        actions.append("manual")
+    latest_remote = str(snapshot.get("latest_remote_branch") or "-")
+    current = str(snapshot.get("current_branch") or "-")
+    if local_exists and not local_missing and latest_remote not in {"", "-"} and current not in {"", "-"} and current != latest_remote:
+        actions.append("checkout-latest")
+    if not actions:
+        actions.append("none")
+    return actions
+
+
+def _snapshot_record_to_plan_row(snapshot: Dict[str, Any]) -> Dict[str, str]:
+    clean_value = "yes"
+    if bool(snapshot.get("local_missing")):
+        clean_value = "-"
+    elif str(snapshot.get("git_operation_in_progress") or "no") == "yes":
+        clean_value = "no"
+    return {
+        "repo": str(snapshot.get("repo") or ""),
+        "state": str(snapshot.get("state") or "-"),
+        "branch": str(snapshot.get("current_branch") or "-"),
+        "up": str(snapshot.get("current_vs_upstream") or "-"),
+        "clean": clean_value,
+        "action": str(snapshot.get("primary_action") or "-"),
+        "latest_branch": str(snapshot.get("latest_remote_branch") or "-"),
+        "prs": str(snapshot.get("open_pr_numbers") or "-"),
+        "path": str(snapshot.get("path") or ""),
+    }
+
+
+def _snapshot_record_to_status_row(snapshot: Dict[str, Any]) -> Dict[str, str]:
+    latest_pr = "-"
+    open_pr_numbers = str(snapshot.get("open_pr_numbers") or "").strip()
+    if open_pr_numbers and open_pr_numbers != "-":
+        latest_pr = open_pr_numbers.split(",", 1)[0].strip() or "-"
+    return {
+        "name": str(snapshot.get("repo") or ""),
+        "path": str(snapshot.get("path") or ""),
+        "branch": str(snapshot.get("current_branch") or "-"),
+        "upstream": str(snapshot.get("upstream_branch") or "-"),
+        "up": str(snapshot.get("current_vs_upstream") or "-"),
+        "main_ref": str(snapshot.get("main_ref") or "-"),
+        "main": str(snapshot.get("current_vs_default") or "-"),
+        "latest_branch": str(snapshot.get("latest_remote_branch") or "-"),
+        "latest_pr": latest_pr,
+        "origin": str(snapshot.get("origin_url") or "-"),
+    }
+
+
+def _load_snapshot_payload(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid snapshot payload: {path}")
+    repos = payload.get("repos")
+    if not isinstance(repos, list):
+        raise ValueError(f"Invalid snapshot payload: {path}")
+    return payload
+
+
+def _build_fleet_snapshot(
+    args: argparse.Namespace,
+    payload: Optional[Dict[str, Any]] = None,
+    include_remote: bool = True,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    local_paths = find_repos(args.root, args.max_depth, args.include_hidden)
+    local_records: List[Dict[str, Any]] = []
+    fetch_requested = bool(getattr(args, "fetch", False))
+    collected_records = _collect_repo_records_with_progress(local_paths, fetch_requested, "snapshot")
+    for record in collected_records:
+        record = add_divergence_fields(dict(record))
+        path = str(record.get("path") or "")
+        worktree_state = git.get_working_tree_state(path)
+        in_progress = not git.is_operation_free(path)
+        record["clean"] = "yes" if not in_progress else "no"
+        record["worktree_state"] = worktree_state
+        record["git_operation_in_progress"] = "yes" if in_progress else "no"
+        local_records.append(record)
+
+    if payload is None:
+        payload = _fleet_load_remote(args) if include_remote else {"repos": []}
+    include_prs = bool(getattr(args, "with_prs", False))
+    provider = base_url = token = ""
+    if include_remote or include_prs:
+        provider, base_url, _user, token, _auth, _server = _fleet_server_context(args)
     remote_repos = payload.get("repos", []) if isinstance(payload.get("repos"), list) else []
     remote_by_key: Dict[str, Dict[str, Any]] = {}
     for repo in remote_repos:
@@ -3073,11 +3442,18 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
 
     local_by_remote_key: Dict[str, Dict[str, str]] = {}
     pr_cache: Dict[str, List[Dict[str, Any]]] = {}
-    include_prs = bool(getattr(args, "with_prs", False))
-    stale_days = int(getattr(args, "pr_stale_days", 30) or 30)
-    plan_rows: List[Dict[str, str]] = []
+    raw_stale_days = getattr(args, "pr_stale_days", 30)
+    stale_days = int(30 if raw_stale_days is None else raw_stale_days)
+    configured_host = ""
+    if base_url:
+        try:
+            configured_host = (urllib.parse.urlparse(base_url).hostname or "").lower()
+        except Exception:
+            configured_host = ""
+
+    snapshot_rows: List[Dict[str, Any]] = []
     for rec in local_records:
-        path = rec.get("path", "")
+        path = str(rec.get("path") or "")
         origin = str(rec.get("origin") or "")
         origin_key = _normalize_repo_url(origin)
         remote_repo = remote_by_key.get(origin_key) if origin_key else None
@@ -3085,26 +3461,12 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
             local_by_remote_key[origin_key] = rec
         up_ahead = _to_int_or_none(rec.get("up_ahead"))
         up_behind = _to_int_or_none(rec.get("up_behind"))
-        state = "local-only"
-        action = "-"
-        if remote_repo:
-            if (up_ahead or 0) > 0 and (up_behind or 0) > 0:
-                state = "diverged"
-                action = "manual"
-            elif (up_behind or 0) > 0:
-                state = "behind-remote"
-                action = "pull"
-            elif (up_ahead or 0) > 0:
-                state = "ahead-remote"
-                action = "push"
-            else:
-                state = "in-sync"
-                action = "-"
+        state, action = _fleet_state_and_action(bool(remote_repo), include_remote, up_ahead, up_behind)
         latest_branch = _detect_latest_branch(path) if path else "-"
         prs = "-"
         if include_prs and provider == "github":
             host, owner, repo_name = _origin_owner_repo(origin)
-            if owner and repo_name:
+            if _host_matches_github_origin(configured_host, host) and owner and repo_name:
                 cache_key = f"{owner}/{repo_name}"
                 if cache_key not in pr_cache:
                     try:
@@ -3116,26 +3478,43 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
                             base_url=base_url or None,
                         )
                     except Exception as exc:
-                        print(f"Warning: failed to fetch PR data for {cache_key}: {exc}", file=sys.stderr)
+                        print(f"Warning: failed to fetch pull requests for {cache_key}: {exc}", file=sys.stderr)
                         pr_cache[cache_key] = []
                 repo_prs = pr_cache.get(cache_key, [])
                 if repo_prs:
                     if latest_branch == "-":
                         latest_branch = str(repo_prs[0].get("head_ref") or "-")
                     prs = ",".join(str(pr.get("number")) for pr in repo_prs[:8] if pr.get("number") is not None) or "-"
-        plan_rows.append(
-            {
-                "repo": rec.get("name", os.path.basename(path)),
-                "state": state,
-                "branch": str(rec.get("branch") or "-"),
-                "up": str(rec.get("up") or "-"),
-                "clean": str(rec.get("clean") or "no"),
-                "action": action,
-                "latest_branch": latest_branch,
-                "prs": prs,
-                "path": path,
-            }
-        )
+        worktree_state = rec.get("worktree_state") if isinstance(rec.get("worktree_state"), dict) else {}
+        tracked_dirty = "yes" if bool(worktree_state.get("has_tracked_changes")) else "no"
+        untracked_only = "yes" if (
+            bool(worktree_state.get("has_untracked")) and not bool(worktree_state.get("has_tracked_changes"))
+        ) else "no"
+        snapshot = {
+            "repo": str(rec.get("name", os.path.basename(path))),
+            "path": path,
+            "origin_url": origin or "-",
+            "local_exists": True,
+            "remote_exists": bool(remote_repo),
+            "remote_missing": bool(include_remote and origin and not remote_repo),
+            "local_missing": False,
+            "default_branch": _default_branch_name(str(rec.get("main_ref") or "-")),
+            "current_branch": str(rec.get("branch") or "-"),
+            "upstream_branch": str(rec.get("upstream") or "-"),
+            "current_vs_upstream": str(rec.get("up") or "-"),
+            "current_vs_default": str(rec.get("main") or "-"),
+            "main_ref": str(rec.get("main_ref") or "-"),
+            "latest_remote_branch": latest_branch,
+            "tracked_dirty": tracked_dirty,
+            "untracked_only": untracked_only,
+            "git_operation_in_progress": str(rec.get("git_operation_in_progress") or "no"),
+            "open_pr_numbers": prs,
+            "state": state,
+            "primary_action": action,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        snapshot["recommended_actions"] = ",".join(_recommended_actions_for_snapshot(snapshot))
+        snapshot_rows.append(snapshot)
 
     for repo in remote_repos:
         if not isinstance(repo, dict):
@@ -3149,27 +3528,118 @@ def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, An
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
         dest = _fleet_missing_local_destination(args.root, name)
-        plan_rows.append(
-            {
-                "repo": name,
-                "state": "missing-local",
-                "branch": "-",
-                "up": "-",
-                "clean": "-",
-                "action": "clone",
-                "latest_branch": _remote_latest_branch_hint(repo),
-                "prs": "-",
-                "path": dest,
-            }
-        )
+        snapshot = {
+            "repo": name,
+            "path": dest,
+            "origin_url": str(repo.get("ssh_url") or repo.get("clone_url") or repo.get("html_url") or "-"),
+            "local_exists": False,
+            "remote_exists": True,
+            "remote_missing": False,
+            "local_missing": True,
+            "default_branch": str(repo.get("default_branch") or "-"),
+            "current_branch": "-",
+            "upstream_branch": "-",
+            "current_vs_upstream": "-",
+            "current_vs_default": "-",
+            "main_ref": "-",
+            "latest_remote_branch": _remote_latest_branch_hint(repo),
+            "tracked_dirty": "no",
+            "untracked_only": "no",
+            "git_operation_in_progress": "no",
+            "open_pr_numbers": "-",
+            "state": "missing-local",
+            "primary_action": "clone",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        snapshot["recommended_actions"] = ",".join(_recommended_actions_for_snapshot(snapshot))
+        snapshot_rows.append(snapshot)
 
-    plan_rows.sort(key=lambda r: (r["repo"].lower(), r["state"]))
-    metadata = {"server": str(payload.get("server") or ""), "remote_count": len(remote_repos), "local_count": len(local_records)}
-    return plan_rows, metadata
+    snapshot_rows.sort(key=lambda r: (str(r.get("repo") or "").lower(), str(r.get("state") or "")))
+    metadata = {
+        "server": str(payload.get("server") or ""),
+        "remote_count": len(remote_repos),
+        "local_count": len(local_records),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return {"root": args.root, "metadata": metadata, "repos": snapshot_rows}, metadata
+
+
+def _fleet_plan_records(args: argparse.Namespace, payload: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+    snapshot_payload, meta = _build_fleet_snapshot(args, payload=payload, include_remote=True)
+    rows = [_snapshot_record_to_plan_row(snapshot) for snapshot in snapshot_payload.get("repos", [])]
+    return rows, meta
 
 
 def _parse_repo_filter(raw: str) -> Set[str]:
     return {item.strip() for item in (raw or "").split(",") if item.strip()}
+
+
+def _normalize_snapshot_repo_path(repo_path: str, snapshot_root: str = "", workspace_root: str = "") -> str:
+    raw_path = str(repo_path or "").strip()
+    if not raw_path:
+        return ""
+    if os.path.isabs(raw_path):
+        return os.path.realpath(raw_path)
+    base_root = str(snapshot_root or "").strip() or str(workspace_root or "").strip()
+    if not base_root:
+        return raw_path
+    return os.path.realpath(os.path.join(base_root, raw_path))
+
+
+def _rows_from_snapshot_payload(snapshot_payload: Dict[str, Any], workspace_root: str = "") -> List[Dict[str, str]]:
+    repos = snapshot_payload.get("repos", [])
+    if not isinstance(repos, list):
+        return []
+    snapshot_root = str(snapshot_payload.get("root") or "").strip() if isinstance(snapshot_payload, dict) else ""
+    rows: List[Dict[str, str]] = []
+    for snapshot in repos:
+        if not isinstance(snapshot, dict):
+            continue
+        row = _snapshot_record_to_plan_row(snapshot)
+        row["path"] = _normalize_snapshot_repo_path(row.get("path") or "", snapshot_root, workspace_root)
+        rows.append(row)
+    return rows
+
+
+def _snapshot_paths_within_root(snapshot_payload: Dict[str, Any], root: str) -> Tuple[bool, List[str], Optional[str]]:
+    root_value = str(root or "").strip()
+    if not root_value:
+        return True, [], None
+    root_real = os.path.realpath(root_value)
+    snapshot_root = str(snapshot_payload.get("root") or "").strip() if isinstance(snapshot_payload, dict) else ""
+    snapshot_root_warning: Optional[str] = None
+    if snapshot_root:
+        try:
+            snapshot_root_real = os.path.realpath(snapshot_root)
+            if snapshot_root_real != root_real:
+                snapshot_root_warning = (
+                    f"Warning: snapshot root '{snapshot_root_real}' does not match --root '{root_real}'."
+                )
+        except Exception:
+            snapshot_root_warning = None
+
+    invalid_paths: List[str] = []
+    repos = snapshot_payload.get("repos", []) if isinstance(snapshot_payload, dict) else []
+    if not isinstance(repos, list):
+        return False, invalid_paths, snapshot_root_warning
+    for snapshot in repos:
+        if not isinstance(snapshot, dict):
+            continue
+        repo_path = str(snapshot.get("path") or "").strip()
+        if not repo_path:
+            continue
+        try:
+            candidate = _normalize_snapshot_repo_path(repo_path, snapshot_root, root_real)
+            if not candidate:
+                invalid_paths.append(repo_path)
+                continue
+            common = os.path.commonpath([root_real, candidate])
+        except Exception:
+            invalid_paths.append(repo_path)
+            continue
+        if common != root_real:
+            invalid_paths.append(repo_path)
+    return len(invalid_paths) == 0, invalid_paths, snapshot_root_warning
 
 
 def cmd_fleet_plan(args: argparse.Namespace) -> int:
@@ -3211,30 +3681,63 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         print("Use only one checkout mode: --checkout-branch, --checkout-pr, or --checkout-latest-branch.", file=sys.stderr)
         return 1
 
-    if not (args.clone_missing or args.pull_behind or args.push_ahead or checkout_branch or pr_number or checkout_latest_branch):
+    clone_missing = bool(getattr(args, "clone_missing", False))
+    pull_behind = bool(getattr(args, "pull_behind", False))
+    push_ahead = bool(getattr(args, "push_ahead", False))
+
+    if not (clone_missing or pull_behind or push_ahead or checkout_branch or pr_number or checkout_latest_branch):
         args.clone_missing = True
         args.pull_behind = True
         args.push_ahead = True
 
     provider = base_url = user = token = ""
+    payload: Dict[str, Any] = {"repos": []}
     try:
-        payload = _fleet_load_remote(args)
         provider, base_url, user, token, _auth, _server = _fleet_server_context(args)
-        rows, _meta = _fleet_plan_records(args, payload=payload)
+        if getattr(args, "snapshot", "") and not getattr(args, "refresh", False):
+            snapshot_payload = _load_snapshot_payload(args.snapshot)
+            snapshot_ok, invalid_snapshot_paths, snapshot_root_warning = _snapshot_paths_within_root(snapshot_payload, args.root)
+            if snapshot_root_warning:
+                print(snapshot_root_warning, file=sys.stderr)
+            if not snapshot_ok:
+                print(
+                    "Refusing to operate on snapshot paths outside the workspace root (--root).\n"
+                    "The following paths are invalid:\n"
+                    + "\n".join(f"  {path}" for path in invalid_snapshot_paths),
+                    file=sys.stderr,
+                )
+                return 1
+            rows = _rows_from_snapshot_payload(snapshot_payload, args.root)
+        else:
+            payload = _fleet_load_remote(args)
+            rows, _meta = _fleet_plan_records(args, payload=payload)
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     clone_sources: Dict[str, str] = {}
-    for remote_repo in payload.get("repos", []):
-        if not isinstance(remote_repo, dict):
-            continue
-        name = str(remote_repo.get("name") or "").strip()
-        if not name:
-            continue
-        src = str(remote_repo.get("ssh_url") or remote_repo.get("clone_url") or "").strip()
-        if src:
-            clone_sources[name] = src
+    if getattr(args, "snapshot", "") and not getattr(args, "refresh", False):
+        for row in rows:
+            name = str(row.get("repo") or "").strip()
+            if name:
+                clone_sources.setdefault(name, "")
+        for snapshot in snapshot_payload.get("repos", []) if isinstance(snapshot_payload.get("repos"), list) else []:
+            if not isinstance(snapshot, dict):
+                continue
+            name = str(snapshot.get("repo") or "").strip()
+            src = str(snapshot.get("origin_url") or "").strip()
+            if name and src and src != "-":
+                clone_sources[name] = src
+    else:
+        for remote_repo in payload.get("repos", []):
+            if not isinstance(remote_repo, dict):
+                continue
+            name = str(remote_repo.get("name") or "").strip()
+            if not name:
+                continue
+            src = str(remote_repo.get("ssh_url") or remote_repo.get("clone_url") or "").strip()
+            if src:
+                clone_sources[name] = src
 
     selected = _parse_repo_filter(args.repos)
     if checkout_latest_branch and not selected:
@@ -3244,6 +3747,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
     if checkout_latest_branch and not selected and not target_rows:
         print("No repositories have actionable latest-branch updates.")
         return 0
+    snapshot_reuse = bool(getattr(args, "snapshot", "") and not getattr(args, "refresh", False))
     results: List[Dict[str, str]] = []
     detailed_results: List[Dict[str, Any]] = []
     total_targets = len(target_rows)
@@ -3436,6 +3940,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                             checkout_action=checkout_action,
                             original_head=original_head,
                             original_branch=original_branch,
+                            fetch_first=not bool(args.fetch) or snapshot_reuse,
                         )
                         statuses.extend(checkout_statuses)
                         action_records.extend(checkout_records)
@@ -3446,6 +3951,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         checkout_action=checkout_action,
                         original_head=original_head,
                         original_branch=original_branch,
+                        fetch_first=not bool(args.fetch) or snapshot_reuse,
                     )
                     statuses.extend(checkout_statuses)
                     action_records.extend(checkout_records)
@@ -3630,7 +4136,8 @@ def cmd_duplicates(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
-    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    snapshot_payload, _meta = _build_fleet_snapshot(args, include_remote=False)
+    snapshot_rows = [row for row in snapshot_payload.get("repos", []) if isinstance(row, dict)]
     actions: List[Tuple[str, List[str]]] = []
     if not (args.fetch or args.pull or args.push):
         args.fetch = True
@@ -3643,16 +4150,17 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
     records = []
     issues: List[Dict[str, str]] = []
-    total_steps = max(1, len(repos) * max(1, len(actions)))
+    total_steps = max(1, len(snapshot_rows) * max(1, len(actions)))
     current_step = 0
-    for path in repos:
-        name = os.path.basename(path)
-        if args.only_clean and not git.is_operation_free(path):
+    for snapshot in snapshot_rows:
+        path = str(snapshot.get("path") or "")
+        name = str(snapshot.get("repo") or os.path.basename(path))
+        if args.only_clean and str(snapshot.get("git_operation_in_progress") or "no") == "yes":
             current_step += max(1, len(actions))
             _progress_line(current_step, total_steps, f"sync: skip in-progress {name}")
             records.append({"name": name, "path": path, "result": "skip:in-progress"})
             continue
-        if args.only_upstream and not git.get_upstream(path):
+        if args.only_upstream and str(snapshot.get("upstream_branch") or "-") in {"", "-"}:
             current_step += max(1, len(actions))
             _progress_line(current_step, total_steps, f"sync: skip no-upstream {name}")
             records.append({"name": name, "path": path, "result": "skip:no-upstream"})
@@ -4682,6 +5190,24 @@ def build_parser() -> argparse.ArgumentParser:
     fleet = sub.add_parser("fleet", help="unified multi-repo management (plan/apply)")
     fleet_sub = fleet.add_subparsers(dest="fleet_command", required=True)
 
+    fleet_overview = fleet_sub.add_parser("overview", help="build the primary fleet dashboard view")
+    fleet_overview.add_argument("--root", default=os.getcwd())
+    fleet_overview.add_argument("--max-depth", type=int, default=6)
+    fleet_overview.add_argument("--include-hidden", action="store_true")
+    fleet_overview.add_argument("--fetch", action="store_true")
+    fleet_overview.add_argument("--server", default="")
+    fleet_overview.add_argument("--input", default="")
+    fleet_overview.add_argument("--user", default="")
+    fleet_overview.add_argument("--token", default="")
+    fleet_overview.add_argument("--include-forks", action="store_true")
+    fleet_overview.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
+    fleet_overview.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
+    fleet_overview.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
+    fleet_overview.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
+    fleet_overview.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
+    fleet_overview.add_argument("--output", default="", help="write the full fleet snapshot to JSON")
+    fleet_overview.set_defaults(func=cmd_fleet_overview)
+
     fleet_plan = fleet_sub.add_parser("plan", help="show local vs remote reconciliation plan")
     fleet_plan.add_argument("--root", default=os.getcwd())
     fleet_plan.add_argument("--max-depth", type=int, default=6)
@@ -4725,8 +5251,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fleet_apply.add_argument("--dry-run", action="store_true")
     fleet_apply.add_argument("--only-clean", action="store_true")
+    fleet_apply.add_argument("--snapshot", default="", help="reuse a previously generated fleet snapshot JSON")
+    fleet_apply.add_argument("--refresh", action="store_true", help="ignore --snapshot and rebuild fleet context before apply")
     fleet_apply.add_argument("--log-json", default="", help="write full fleet apply execution log to JSON")
     fleet_apply.set_defaults(func=cmd_fleet_apply)
+
+    fleet_dirty = fleet_sub.add_parser("dirty", help="list repositories with tracked local changes")
+    fleet_dirty.add_argument("--root", default=os.getcwd())
+    fleet_dirty.add_argument("--max-depth", type=int, default=6)
+    fleet_dirty.add_argument("--include-hidden", action="store_true")
+    fleet_dirty.add_argument("--fetch", action="store_true")
+    fleet_dirty.set_defaults(func=cmd_fleet_dirty)
 
     fleet_logs = fleet_sub.add_parser("logs", help="inspect fleet apply JSON logs")
     fleet_logs.add_argument("--root", default=os.getcwd())
