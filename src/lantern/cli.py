@@ -3574,11 +3574,31 @@ def _parse_repo_filter(raw: str) -> Set[str]:
     return {item.strip() for item in (raw or "").split(",") if item.strip()}
 
 
-def _rows_from_snapshot_payload(snapshot_payload: Dict[str, Any]) -> List[Dict[str, str]]:
+def _normalize_snapshot_repo_path(repo_path: str, snapshot_root: str = "", workspace_root: str = "") -> str:
+    raw_path = str(repo_path or "").strip()
+    if not raw_path:
+        return ""
+    if os.path.isabs(raw_path):
+        return os.path.realpath(raw_path)
+    base_root = str(snapshot_root or "").strip() or str(workspace_root or "").strip()
+    if not base_root:
+        return raw_path
+    return os.path.realpath(os.path.join(base_root, raw_path))
+
+
+def _rows_from_snapshot_payload(snapshot_payload: Dict[str, Any], workspace_root: str = "") -> List[Dict[str, str]]:
     repos = snapshot_payload.get("repos", [])
     if not isinstance(repos, list):
         return []
-    return [_snapshot_record_to_plan_row(snapshot) for snapshot in repos if isinstance(snapshot, dict)]
+    snapshot_root = str(snapshot_payload.get("root") or "").strip() if isinstance(snapshot_payload, dict) else ""
+    rows: List[Dict[str, str]] = []
+    for snapshot in repos:
+        if not isinstance(snapshot, dict):
+            continue
+        row = _snapshot_record_to_plan_row(snapshot)
+        row["path"] = _normalize_snapshot_repo_path(row.get("path") or "", snapshot_root, workspace_root)
+        rows.append(row)
+    return rows
 
 
 def _snapshot_paths_within_root(snapshot_payload: Dict[str, Any], root: str) -> Tuple[bool, List[str], Optional[str]]:
@@ -3609,7 +3629,10 @@ def _snapshot_paths_within_root(snapshot_payload: Dict[str, Any], root: str) -> 
         if not repo_path:
             continue
         try:
-            candidate = os.path.realpath(repo_path if os.path.isabs(repo_path) else os.path.join(root_real, repo_path))
+            candidate = _normalize_snapshot_repo_path(repo_path, snapshot_root, root_real)
+            if not candidate:
+                invalid_paths.append(repo_path)
+                continue
             common = os.path.commonpath([root_real, candidate])
         except Exception:
             invalid_paths.append(repo_path)
@@ -3684,7 +3707,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            rows = _rows_from_snapshot_payload(snapshot_payload)
+            rows = _rows_from_snapshot_payload(snapshot_payload, args.root)
         else:
             payload = _fleet_load_remote(args)
             rows, _meta = _fleet_plan_records(args, payload=payload)
@@ -5238,11 +5261,6 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_dirty.add_argument("--max-depth", type=int, default=6)
     fleet_dirty.add_argument("--include-hidden", action="store_true")
     fleet_dirty.add_argument("--fetch", action="store_true")
-    fleet_dirty.add_argument("--server", default="")
-    fleet_dirty.add_argument("--user", default="")
-    fleet_dirty.add_argument("--token", default="")
-    fleet_dirty.add_argument("--with-prs", action="store_true")
-    fleet_dirty.add_argument("--pr-stale-days", type=int, default=30)
     fleet_dirty.set_defaults(func=cmd_fleet_dirty)
 
     fleet_logs = fleet_sub.add_parser("logs", help="inspect fleet apply JSON logs")

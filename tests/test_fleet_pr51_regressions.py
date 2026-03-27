@@ -130,6 +130,46 @@ def test_snapshot_paths_within_root_rejects_legacy_snapshot_without_root(tmp_pat
     assert warning is None
 
 
+def test_rows_from_snapshot_payload_resolves_relative_paths_against_snapshot_root(tmp_path):
+    snapshot_root = tmp_path / "workspace"
+    repo_path = snapshot_root / "repo-a"
+    rows = cli._rows_from_snapshot_payload(
+        {
+            "root": str(snapshot_root),
+            "repos": [
+                {
+                    "repo": "repo-a",
+                    "path": "repo-a",
+                    "state": "in-sync",
+                    "current_branch": "main",
+                }
+            ],
+        }
+    )
+
+    assert rows[0]["path"] == str(repo_path.resolve())
+
+
+def test_rows_from_snapshot_payload_uses_workspace_root_when_snapshot_root_missing(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    repo_path = workspace_root / "repo-a"
+    rows = cli._rows_from_snapshot_payload(
+        {
+            "repos": [
+                {
+                    "repo": "repo-a",
+                    "path": "repo-a",
+                    "state": "in-sync",
+                    "current_branch": "main",
+                }
+            ],
+        },
+        str(workspace_root),
+    )
+
+    assert rows[0]["path"] == str(repo_path.resolve())
+
+
 def test_cmd_fleet_apply_rejects_snapshot_paths_outside_root(monkeypatch, capsys):
     snapshot_payload = {
         "root": "/tmp/workspace",

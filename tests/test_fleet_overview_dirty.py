@@ -1,5 +1,6 @@
 import argparse
 import json
+import pytest
 
 from lantern import cli
 
@@ -16,8 +17,17 @@ def test_fleet_parser_supports_overview_dirty_and_snapshot_args():
     assert overview_args.func == cli.cmd_fleet_overview
     assert dirty_args.fleet_command == "dirty"
     assert dirty_args.func == cli.cmd_fleet_dirty
+    assert not hasattr(dirty_args, "with_prs")
+    assert not hasattr(dirty_args, "server")
     assert apply_args.snapshot == "snapshot.json"
     assert apply_args.refresh is True
+
+
+def test_fleet_dirty_parser_rejects_remote_pr_flags():
+    parser = cli.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["fleet", "dirty", "--with-prs"])
 
 
 def test_cmd_fleet_dirty_filters_tracked_changes(monkeypatch, capsys):
@@ -45,11 +55,6 @@ def test_cmd_fleet_dirty_filters_tracked_changes(monkeypatch, capsys):
         max_depth=3,
         include_hidden=False,
         fetch=False,
-        server="",
-        user="",
-        token="",
-        with_prs=False,
-        pr_stale_days=30,
     )
 
     rc = cli.cmd_fleet_dirty(args)
