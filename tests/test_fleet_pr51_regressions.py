@@ -109,6 +109,27 @@ def test_snapshot_paths_within_root_rejects_outside_workspace(tmp_path):
     assert warning is None
 
 
+def test_snapshot_paths_within_root_rejects_legacy_snapshot_without_root(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    ok, invalid_paths, warning = cli._snapshot_paths_within_root(
+        {
+            "repos": [
+                {"path": str(root / "repo-a")},
+                {"path": str(outside / "repo-b")},
+            ],
+        },
+        str(root),
+    )
+
+    assert ok is False
+    assert invalid_paths == [str(outside / "repo-b")]
+    assert warning is None
+
+
 def test_cmd_fleet_apply_rejects_snapshot_paths_outside_root(monkeypatch, capsys):
     snapshot_payload = {
         "root": "/tmp/workspace",
@@ -142,6 +163,47 @@ def test_cmd_fleet_apply_rejects_snapshot_paths_outside_root(monkeypatch, capsys
         dry_run=False,
         only_clean=False,
         log_json="",
+        with_prs=False,
+        pr_stale_days=30,
+        snapshot="/tmp/snapshot.json",
+        refresh=False,
+    )
+
+    rc = cli.cmd_fleet_apply(args)
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Refusing to operate on snapshot paths outside the workspace root" in err
+
+
+def test_cmd_fleet_apply_rejects_legacy_snapshot_paths_outside_root(monkeypatch, capsys):
+    snapshot_payload = {
+        "repos": [
+            {"repo": "alpha", "path": "/tmp/outside/alpha", "state": "in-sync", "current_branch": "main"},
+        ],
+    }
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(cli, "_load_snapshot_payload", lambda _path: snapshot_payload)
+
+    args = argparse.Namespace(
+        checkout_branch="",
+        checkout_pr="",
+        checkout_latest_branch=False,
+        checkout_default_branch=False,
+        include_missing=False,
+        clone_missing=False,
+        delete_gone=False,
+        root="/tmp/workspace",
+        server="",
+        provider="github",
+        user="",
+        token="",
+        config=None,
+        json=False,
+        fetch=False,
+        pull=False,
+        push=False,
+        repos="",
         with_prs=False,
         pr_stale_days=30,
         snapshot="/tmp/snapshot.json",

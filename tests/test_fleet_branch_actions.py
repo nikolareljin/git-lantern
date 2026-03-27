@@ -556,12 +556,14 @@ def test_cmd_fleet_apply_reports_no_actionable_latest_branch_updates(monkeypatch
 
 def test_cmd_fleet_apply_snapshot_reuse_skips_remote_reload(monkeypatch, tmp_path, capsys):
     snapshot_path = tmp_path / "fleet-snapshot.json"
+    repo_path = tmp_path / "demo"
     snapshot_path.write_text(
-        """{
+        f"""{{
+  "root": "{tmp_path}",
   "repos": [
-    {
+    {{
       "repo": "demo",
-      "path": "/tmp/demo",
+      "path": "{repo_path}",
       "state": "in-sync",
       "current_branch": "main",
       "current_vs_upstream": "≡",
@@ -570,9 +572,9 @@ def test_cmd_fleet_apply_snapshot_reuse_skips_remote_reload(monkeypatch, tmp_pat
       "open_pr_numbers": "-",
       "origin_url": "git@example.com:demo.git",
       "primary_action": "-"
-    }
+    }}
   ]
-}
+}}
 """,
         encoding="utf-8",
     )
@@ -584,7 +586,7 @@ def test_cmd_fleet_apply_snapshot_reuse_skips_remote_reload(monkeypatch, tmp_pat
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
     monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
 
-    rc = cli.cmd_fleet_apply(_make_apply_args(snapshot=str(snapshot_path)))
+    rc = cli.cmd_fleet_apply(_make_apply_args(snapshot=str(snapshot_path), root=str(tmp_path)))
 
     out = capsys.readouterr().out
     assert rc == 0
@@ -596,6 +598,7 @@ def test_cmd_fleet_apply_snapshot_clone_uses_snapshot_origin(monkeypatch, tmp_pa
     repo_path = tmp_path / "demo"
     snapshot_path.write_text(
         f"""{{
+  "root": "{tmp_path}",
   "repos": [
     {{
       "repo": "demo",
@@ -628,7 +631,9 @@ def test_cmd_fleet_apply_snapshot_clone_uses_snapshot_origin(monkeypatch, tmp_pa
         lambda args, check=False, **kwargs: seen.append(args) or type("Proc", (), {"returncode": 0})(),
     )
 
-    rc = cli.cmd_fleet_apply(_make_apply_args(snapshot=str(snapshot_path), clone_missing=True, dry_run=False))
+    rc = cli.cmd_fleet_apply(
+        _make_apply_args(snapshot=str(snapshot_path), clone_missing=True, dry_run=False, root=str(tmp_path))
+    )
 
     out = capsys.readouterr().out
     assert rc == 0

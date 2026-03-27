@@ -3587,8 +3587,6 @@ def _snapshot_paths_within_root(snapshot_payload: Dict[str, Any], root: str) -> 
         return True, [], None
     root_real = os.path.realpath(root_value)
     snapshot_root = str(snapshot_payload.get("root") or "").strip() if isinstance(snapshot_payload, dict) else ""
-    if not snapshot_root:
-        return True, [], None
     snapshot_root_warning: Optional[str] = None
     if snapshot_root:
         try:
@@ -3660,7 +3658,11 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         print("Use only one checkout mode: --checkout-branch, --checkout-pr, or --checkout-latest-branch.", file=sys.stderr)
         return 1
 
-    if not (args.clone_missing or args.pull_behind or args.push_ahead or checkout_branch or pr_number or checkout_latest_branch):
+    clone_missing = bool(getattr(args, "clone_missing", False))
+    pull_behind = bool(getattr(args, "pull_behind", False))
+    push_ahead = bool(getattr(args, "push_ahead", False))
+
+    if not (clone_missing or pull_behind or push_ahead or checkout_branch or pr_number or checkout_latest_branch):
         args.clone_missing = True
         args.pull_behind = True
         args.push_ahead = True
