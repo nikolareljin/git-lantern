@@ -30,7 +30,6 @@ if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
 fi
 
 "$PYTHON_BIN" - "$VERSION_FILE" "$input" <<'PY'
-import re
 import sys
 
 version_path = sys.argv[1]
@@ -51,7 +50,8 @@ def bump(cur, kind):
 
 new_version = bump(current, value)
 if new_version is None:
-    if not re.match(r"^\d+\.\d+\.\d+$", value):
+    parts = value.split(".")
+    if len(parts) != 3 or any((not part.isdigit()) for part in parts):
         raise SystemExit(f"Invalid version: {value}")
     new_version = value
 

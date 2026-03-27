@@ -1394,12 +1394,16 @@ def _tui_select_server(config: Dict[str, Any], height: int, width: int) -> Optio
     default_server = lantern_config.get_server_name(config, "")
     if not server_records:
         return default_server or ""
-    server_items = [("default", f"Use default ({default_server})")]
+    existing_names = {str(rec.get("name") or "") for rec in server_records}
+    default_tag = "__default__"
+    while default_tag in existing_names:
+        default_tag = f"_{default_tag}_"
+    server_items = [(default_tag, f"Use default ({default_server})")]
     server_items.extend([(rec["name"], rec["provider"]) for rec in server_records])
     server_choice = _dialog_menu("Fleet Server", "Choose server for remote comparison:", server_items, height, width)
     if not server_choice:
         return None
-    return default_server if server_choice == "default" else server_choice
+    return default_server if server_choice == default_tag else server_choice
 
 
 def _tui_load_fleet_snapshot(
@@ -3577,6 +3581,46 @@ def _rows_from_snapshot_payload(snapshot_payload: Dict[str, Any]) -> List[Dict[s
     return [_snapshot_record_to_plan_row(snapshot) for snapshot in repos if isinstance(snapshot, dict)]
 
 
+def _snapshot_paths_within_root(snapshot_payload: Dict[str, Any], root: str) -> Tuple[bool, List[str], Optional[str]]:
+    root_value = str(root or "").strip()
+    if not root_value:
+        return True, [], None
+    root_real = os.path.realpath(root_value)
+    snapshot_root = str(snapshot_payload.get("root") or "").strip() if isinstance(snapshot_payload, dict) else ""
+    if not snapshot_root:
+        return True, [], None
+    snapshot_root_warning: Optional[str] = None
+    if snapshot_root:
+        try:
+            snapshot_root_real = os.path.realpath(snapshot_root)
+            if snapshot_root_real != root_real:
+                snapshot_root_warning = (
+                    f"Warning: snapshot root '{snapshot_root_real}' does not match --root '{root_real}'."
+                )
+        except Exception:
+            snapshot_root_warning = None
+
+    invalid_paths: List[str] = []
+    repos = snapshot_payload.get("repos", []) if isinstance(snapshot_payload, dict) else []
+    if not isinstance(repos, list):
+        return False, invalid_paths, snapshot_root_warning
+    for snapshot in repos:
+        if not isinstance(snapshot, dict):
+            continue
+        repo_path = str(snapshot.get("path") or "").strip()
+        if not repo_path:
+            continue
+        try:
+            candidate = os.path.realpath(repo_path if os.path.isabs(repo_path) else os.path.join(root_real, repo_path))
+            common = os.path.commonpath([root_real, candidate])
+        except Exception:
+            invalid_paths.append(repo_path)
+            continue
+        if common != root_real:
+            invalid_paths.append(repo_path)
+    return len(invalid_paths) == 0, invalid_paths, snapshot_root_warning
+
+
 def cmd_fleet_plan(args: argparse.Namespace) -> int:
     print("Building fleet plan... please wait.", file=sys.stderr)
     try:
@@ -3627,6 +3671,17 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         provider, base_url, user, token, _auth, _server = _fleet_server_context(args)
         if getattr(args, "snapshot", "") and not getattr(args, "refresh", False):
             snapshot_payload = _load_snapshot_payload(args.snapshot)
+            snapshot_ok, invalid_snapshot_paths, snapshot_root_warning = _snapshot_paths_within_root(snapshot_payload, args.root)
+            if snapshot_root_warning:
+                print(snapshot_root_warning, file=sys.stderr)
+            if not snapshot_ok:
+                print(
+                    "Refusing to operate on snapshot paths outside the workspace root (--root).\n"
+                    "The following paths are invalid:\n"
+                    + "\n".join(f"  {path}" for path in invalid_snapshot_paths),
+                    file=sys.stderr,
+                )
+                return 1
             rows = _rows_from_snapshot_payload(snapshot_payload)
         else:
             payload = _fleet_load_remote(args)
@@ -3667,6 +3722,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
     if checkout_latest_branch and not selected and not target_rows:
         print("No repositories have actionable latest-branch updates.")
         return 0
+    snapshot_reuse = bool(getattr(args, "snapshot", "") and not getattr(args, "refresh", False))
     results: List[Dict[str, str]] = []
     detailed_results: List[Dict[str, Any]] = []
     total_targets = len(target_rows)
@@ -3859,7 +3915,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                             checkout_action=checkout_action,
                             original_head=original_head,
                             original_branch=original_branch,
-                            fetch_first=not bool(args.fetch),
+                            fetch_first=not bool(args.fetch) or snapshot_reuse,
                         )
                         statuses.extend(checkout_statuses)
                         action_records.extend(checkout_records)
@@ -3870,7 +3926,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         checkout_action=checkout_action,
                         original_head=original_head,
                         original_branch=original_branch,
-                        fetch_first=not bool(args.fetch),
+                        fetch_first=not bool(args.fetch) or snapshot_reuse,
                     )
                     statuses.extend(checkout_statuses)
                     action_records.extend(checkout_records)
