@@ -46,7 +46,7 @@ Once configured, a typical session looks like:
 3. **Auto list handling**: Lantern auto-uses an existing repo-list JSON, or auto-generates it if missing
 4. **Choose clone directory**: Defaults to your session root
 5. **Select repos**: Use the checklist to pick which repos to clone
-6. **Clone destination**: Repos are cloned into your workspace root using a flat local name derived from the remote identifier, so `my-namespace/my-repo` becomes `my-namespace%2Fmy-repo` instead of a nested directory
+6. **Clone destination**: Repos are cloned into your workspace root using the plain repo name when that path is free, and Lantern falls back to an encoded namespaced path only when needed to avoid a collision
 
 ### TUI Workflow: Interactive Server Setup
 

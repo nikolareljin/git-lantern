@@ -3280,15 +3280,41 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _fleet_missing_local_destination(root: str, repo_name: str) -> str:
+def _fleet_missing_local_destination(
+    root: str,
+    repo_name: str,
+    reserved_paths: Optional[Set[str]] = None,
+) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
     if normalized in {"", "."}:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    repo_dir = urllib.parse.quote(normalized, safe="")
-    if not repo_dir:
+
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    return os.path.join(root, repo_dir)
+
+    basename = parts[-1]
+    encoded = urllib.parse.quote(normalized, safe="")
+    candidates = [basename]
+    if encoded and encoded != basename:
+        candidates.append(encoded)
+
+    reserved = {os.path.realpath(path) for path in (reserved_paths or set()) if path}
+    for repo_dir in candidates:
+        if not repo_dir:
+            continue
+        candidate = os.path.join(root, repo_dir)
+        candidate_real = os.path.realpath(candidate)
+        if candidate_real in reserved:
+            continue
+        if os.path.exists(candidate):
+            continue
+        return candidate
+
+    if not encoded:
+        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
+    return os.path.join(root, encoded)
 
 
 def _host_matches_github_origin(configured_host: str, origin_host: str) -> bool:
@@ -3452,6 +3478,11 @@ def _build_fleet_snapshot(
             configured_host = ""
 
     snapshot_rows: List[Dict[str, Any]] = []
+    reserved_missing_local_paths: Set[str] = {
+        os.path.realpath(str(rec.get("path") or ""))
+        for rec in local_records
+        if str(rec.get("path") or "").strip()
+    }
     for rec in local_records:
         path = str(rec.get("path") or "")
         origin = str(rec.get("origin") or "")
@@ -3527,7 +3558,8 @@ def _build_fleet_snapshot(
             if name:
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
-        dest = _fleet_missing_local_destination(args.root, name)
+        dest = _fleet_missing_local_destination(args.root, name, reserved_missing_local_paths)
+        reserved_missing_local_paths.add(os.path.realpath(dest))
         snapshot = {
             "repo": name,
             "path": dest,
@@ -4595,16 +4627,18 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             print("dialog is required for --tui.", file=sys.stderr)
             return 1
         checklist_items = []
+        reserved_clone_paths: Set[str] = set()
         for repo in repos:
             name = str(repo.get("name") or "").strip()
             if not _is_safe_repo_name(name):
                 if name:
                     print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
                 continue
-            dest = _fleet_missing_local_destination(args.root, name)
+            dest = _fleet_missing_local_destination(args.root, name, reserved_clone_paths)
             status = "on" if os.path.exists(dest) else "off"
             label = "cloned" if status == "on" else "missing"
             checklist_items.extend([name, label, status])
+            reserved_clone_paths.add(os.path.realpath(dest))
         if not checklist_items:
             print("No repositories available to clone.", file=sys.stderr)
             return 1
@@ -4632,6 +4666,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         selected_set = set(selected)
         repos = [repo for repo in repos if repo.get("name") in selected_set]
         repos = _sort_records_by_repo_name(repos)
+    reserved_clone_paths: Set[str] = set()
     for repo in repos:
         name = str(repo.get("name") or "").strip()
         ssh_url = repo.get("ssh_url")
@@ -4641,7 +4676,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             continue
         if not ssh_url:
             continue
-        dest = _fleet_missing_local_destination(args.root, name)
+        dest = _fleet_missing_local_destination(args.root, name, reserved_clone_paths)
         if os.path.exists(dest):
             continue
         parent = os.path.dirname(dest)
@@ -4649,8 +4684,10 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             os.makedirs(parent, exist_ok=True)
         if args.dry_run:
             print(f"[DRY RUN] git clone {ssh_url} {dest}")
+            reserved_clone_paths.add(os.path.realpath(dest))
             continue
         subprocess.run(["git", "clone", ssh_url, dest], check=False)
+        reserved_clone_paths.add(os.path.realpath(dest))
     return 0
 
 

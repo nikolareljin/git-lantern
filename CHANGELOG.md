@@ -6,6 +6,12 @@ All notable changes to git-lantern are documented in this file.
 
 - No unreleased changes yet.
 
+## [0.4.5] - 2026-03-28
+
+### Fixed
+
+- Fixed Fleet and forge clone destination selection so namespaced remotes such as `owner/repo` clone into the plain local repo name when that workspace path is available, while still falling back to an encoded namespaced path when needed to avoid collisions.
+
 ## [0.4.4] - 2026-03-26
 
 ### Added

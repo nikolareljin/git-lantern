@@ -95,7 +95,7 @@ def test_fleet_apply_candidates_for_latest_filters_to_actionable_rows():
 
 
 
-def test_fleet_plan_records_clones_missing_local_repo_into_flat_namespaced_path(monkeypatch, tmp_path):
+def test_fleet_plan_records_clones_missing_local_repo_into_repo_basename_when_available(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
 
@@ -128,21 +128,73 @@ def test_fleet_plan_records_clones_missing_local_repo_into_flat_namespaced_path(
             "action": "clone",
             "latest_branch": "-",
             "prs": "-",
-            "path": str(tmp_path / "my-namespace%2Fmy-repo"),
+            "path": str(tmp_path / "my-repo"),
         }
     ]
 
-def test_fleet_missing_local_destination_preserves_namespace_uniqueness():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/org-a%2Fservice'
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/org-b%2Fservice'
+
+def test_fleet_plan_records_falls_back_to_namespaced_path_when_repo_basename_collides(monkeypatch, tmp_path):
+    repo_path = tmp_path / "my-repo"
+    repo_path.mkdir()
+    monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [str(repo_path)])
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_collect_repo_records_with_progress",
+        lambda *_args, **_kwargs: [
+            {
+                "name": "my-repo",
+                "path": str(repo_path),
+                "origin": "git@example.com:someone-else/my-repo.git",
+                "branch": "main",
+                "upstream": "origin/main",
+                "up": "≡",
+                "main": "≡",
+                "main_ref": "origin/main",
+            }
+        ],
+    )
+    monkeypatch.setattr(cli, "add_divergence_fields", lambda record: record)
+    monkeypatch.setattr(cli.git, "get_working_tree_state", lambda _path: {})
+    monkeypatch.setattr(cli.git, "is_operation_free", lambda _path: True)
+
+    args = argparse.Namespace(
+        root=str(tmp_path),
+        max_depth=1,
+        include_hidden=False,
+        fetch=False,
+        with_prs=False,
+        pr_stale_days=30,
+    )
+    payload = {
+        "repos": [
+            {
+                "name": "my-namespace/my-repo",
+                "ssh_url": "git@example.com:my-namespace/my-repo.git",
+            }
+        ]
+    }
+
+    rows, _meta = cli._fleet_plan_records(args, payload=payload)
+    missing_row = next(row for row in rows if row["repo"] == "my-namespace/my-repo")
+
+    assert missing_row["path"] == str(tmp_path / "my-namespace%2Fmy-repo")
+
+def test_fleet_missing_local_destination_prefers_repo_basename():
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/service'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/service'
 
 
 def test_fleet_missing_local_destination_normalizes_trailing_separators():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org%2Frepo'
-    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org%2Frepo'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/repo'
+    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/repo'
 
-def test_fleet_missing_local_destination_escapes_literal_separator_markers():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo') == '/tmp/root/org%2Frepo'
+def test_fleet_missing_local_destination_falls_back_to_encoded_namespace_on_collision(tmp_path):
+    reserved = {str(tmp_path / 'repo')}
+    assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo', reserved) == str(tmp_path / 'org%2Frepo')
+
+
+def test_fleet_missing_local_destination_keeps_literal_non_namespaced_names():
     assert cli._fleet_missing_local_destination('/tmp/root', 'org__repo') == '/tmp/root/org__repo'
 
 
