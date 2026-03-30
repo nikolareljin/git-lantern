@@ -30,7 +30,4 @@
    # Resolve each thread
    gh api graphql -f query='mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id isResolved } } }' -F threadId=THREAD_ID
    ```
-3. **Re-request Review**: Use comments to trigger automated reviewers (like Copilot).
-   ```bash
-   gh pr comment PR_NUMBER --body "@copilot review"
-   ```
+3. **Re-request Review**: Follow the workspace-level reviewer request policy.
