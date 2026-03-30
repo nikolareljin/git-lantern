@@ -2236,6 +2236,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 apply_cmd = [sys.executable, "-m", "lantern", "fleet", "apply", *common_opts]
                 apply_cmd.append("--fetch")
+                if flat:
+                    apply_cmd.append("--flat")
                 if preset == "fast_pull":
                     apply_cmd.append("--pull-behind")
                 elif preset == "full_reconcile":
@@ -5215,6 +5217,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_overview.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_overview.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_overview.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
+    fleet_overview.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
     fleet_overview.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_overview.add_argument("--output", default="", help="write the full fleet snapshot to JSON")
     fleet_overview.set_defaults(func=cmd_fleet_overview)
@@ -5250,7 +5253,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
     fleet_apply.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_apply.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
-    fleet_apply.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
+    fleet_apply.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
     fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
     fleet_apply.add_argument("--clone-missing", action="store_true")
     fleet_apply.add_argument("--pull-behind", action="store_true")
@@ -5327,6 +5330,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--input", default="data/github.json")
     gh_clone.add_argument("--root", default=os.getcwd())
     gh_clone.add_argument("--dry-run", action="store_true")
+    gh_clone.add_argument("--flat", action="store_true", help="clone missing repos into the root directory (see --root) (no namespace)")
     gh_clone.add_argument("--tui", action="store_true")
     gh_clone.set_defaults(func=cmd_github_clone)
 
@@ -5445,4 +5449,3 @@ def main() -> None:
         raise SystemExit(cmd_tui(args))
 
     raise SystemExit(args.func(args))
-args))
