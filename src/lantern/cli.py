@@ -2363,6 +2363,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 include_forks=session["include_forks"],
                 with_prs=include_prs,
                 pr_stale_days=30,
+                flat=flat,
             )
             try:
                 rows, _meta = _fleet_plan_records(plan_args)
@@ -2500,6 +2501,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 apply_cmd.append("--dry-run")
             if only_clean:
                 apply_cmd.append("--only-clean")
+            if flat:
+                apply_cmd.append("--flat")
 
             confirmed_rows = _fleet_preflight_confirm(
                 title="Fleet Apply Plan",
@@ -5219,7 +5222,6 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_overview.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
     fleet_overview.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_overview.add_argument("--output", default="", help="write the full fleet snapshot to JSON")
-    fleet_overview.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     fleet_overview.set_defaults(func=cmd_fleet_overview)
 
     fleet_plan = fleet_sub.add_parser("plan", help="show local vs remote reconciliation plan")
@@ -5236,7 +5238,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_plan.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_plan.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_plan.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
-    fleet_plan.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
+    fleet_plan.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
     fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_plan.set_defaults(func=cmd_fleet_plan)
 
@@ -5332,7 +5334,6 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--dry-run", action="store_true")
     gh_clone.add_argument("--flat", action="store_true", help="clone missing repos into the root directory (see --root) (no namespace)")
     gh_clone.add_argument("--tui", action="store_true")
-    gh_clone.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     gh_clone.set_defaults(func=cmd_github_clone)
 
     gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")

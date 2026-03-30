@@ -1,5 +1,3 @@
-import argparse
-import pytest
 from lantern import cli
 
 def test_fleet_overview_parser_supports_flat():
