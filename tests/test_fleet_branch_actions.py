@@ -95,7 +95,7 @@ def test_fleet_apply_candidates_for_latest_filters_to_actionable_rows():
 
 
 
-def test_fleet_plan_records_clones_missing_local_repo_into_flat_namespaced_path(monkeypatch, tmp_path):
+def test_fleet_plan_records_clones_missing_local_repo_into_namespaced_subdirectory(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
 

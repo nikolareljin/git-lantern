@@ -6,7 +6,7 @@ All notable changes to git-lantern are documented in this file.
 
 ### Added
 
-- Added `--flat` option to `fleet overview`, `fleet plan`, `fleet apply`, `fleet sync`, and `forge clone` to identify or clone missing repositories directly into the current directory instead of a namespaced subdirectory.
+- Added `--flat` option to `fleet overview`, `fleet plan`, `fleet apply`, and `forge clone` to identify or clone missing repositories directly into the current directory instead of a namespaced subdirectory.
 - Added TUI prompts for "flat" layout in Fleet and Forge Clone operations.
 
 ### Changed

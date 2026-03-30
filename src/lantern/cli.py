@@ -5274,7 +5274,6 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_dirty.add_argument("--max-depth", type=int, default=6)
     fleet_dirty.add_argument("--include-hidden", action="store_true")
     fleet_dirty.add_argument("--fetch", action="store_true")
-    fleet_dirty.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     fleet_dirty.set_defaults(func=cmd_fleet_dirty)
 
     fleet_logs = fleet_sub.add_parser("logs", help="inspect fleet apply JSON logs")
@@ -5446,3 +5445,4 @@ def main() -> None:
         raise SystemExit(cmd_tui(args))
 
     raise SystemExit(args.func(args))
+args))
