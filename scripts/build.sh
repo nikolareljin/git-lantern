@@ -22,5 +22,14 @@ if ! PYTHON_BIN="$(ensure_venv "$PYTHON_BIN" "$VENV_DIR")"; then
   exit 1
 fi
 
+if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
+  echo "pip not found in virtual environment; attempting bootstrap via ensurepip..."
+  if ! "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1; then
+    echo "Failed to bootstrap pip in $VENV_DIR." >&2
+    echo "Install Python venv/ensurepip support and retry (for Debian/Ubuntu: python3-venv)." >&2
+    exit 1
+  fi
+fi
+
 "$PYTHON_BIN" -m pip install -e "$ROOT_DIR"
 echo "Build complete."

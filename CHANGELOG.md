@@ -2,9 +2,16 @@
 
 All notable changes to git-lantern are documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-03-29
 
-- No unreleased changes yet.
+### Added
+
+- Added `--flat` option to `fleet overview`, `fleet plan`, `fleet apply`, `fleet sync`, and `forge clone` to identify or clone missing repositories directly into the current directory instead of a namespaced subdirectory.
+- Added TUI prompts for "flat" layout in Fleet and Forge Clone operations.
+
+### Changed
+
+- Changed default namespaced clone destination to use actual subdirectories (e.g., `namespace/repo`) instead of URL-encoded flat paths (e.g., `namespace%2Frepo`), restoring more intuitive local workspace organization while still preserving namespace uniqueness.
 
 ## [0.4.4] - 2026-03-26
 

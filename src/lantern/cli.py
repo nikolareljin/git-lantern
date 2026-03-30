@@ -2045,6 +2045,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             selected_provider = str(selected_server.get("provider") or "github").lower()
             fetch = _dialog_yesno("Fetch", "Run local git fetch before building fleet plan?")
             include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in plan?")
+            flat = _dialog_yesno("Fleet Layout", "Clone missing repos into current directory (flat, no namespace)?")
             fleet_items: List[Tuple[str, str]] = [
                 ("smart_sync", "Smart Sync (preset multi-repo update)"),
                 ("plan", "Show fleet reconciliation plan"),
@@ -2790,7 +2791,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         continue
                 clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session["root"])
                 if clone_root:
+                    flat = _dialog_yesno("Clone Layout", "Clone missing repos into current directory (flat, no namespace)?")
                     cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
+                    if flat:
+                        cmd_args.append("--flat")
                     _run_lantern_subprocess(cmd_args, height, width, capture=False)
 
             elif forge_action in ("snippets", "snippets_file"):
@@ -3280,12 +3284,15 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _fleet_missing_local_destination(root: str, repo_name: str) -> str:
+def _fleet_missing_local_destination(root: str, repo_name: str, flat: bool = False) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
     if normalized in {"", "."}:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    repo_dir = urllib.parse.quote(normalized, safe="")
+    if flat:
+        repo_dir = os.path.basename(normalized)
+    else:
+        repo_dir = urllib.parse.quote(normalized, safe="/")
     if not repo_dir:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
     return os.path.join(root, repo_dir)
@@ -3527,7 +3534,7 @@ def _build_fleet_snapshot(
             if name:
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
-        dest = _fleet_missing_local_destination(args.root, name)
+        dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
         snapshot = {
             "repo": name,
             "path": dest,
@@ -4601,7 +4608,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
                 if name:
                     print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
                 continue
-            dest = _fleet_missing_local_destination(args.root, name)
+            dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
             status = "on" if os.path.exists(dest) else "off"
             label = "cloned" if status == "on" else "missing"
             checklist_items.extend([name, label, status])
@@ -4641,7 +4648,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             continue
         if not ssh_url:
             continue
-        dest = _fleet_missing_local_destination(args.root, name)
+        dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
         if os.path.exists(dest):
             continue
         parent = os.path.dirname(dest)
@@ -5185,6 +5192,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--only-clean", action="store_true")
     sync.add_argument("--only-upstream", action="store_true")
+    sync.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     sync.set_defaults(func=cmd_sync)
 
     fleet = sub.add_parser("fleet", help="unified multi-repo management (plan/apply)")
@@ -5238,6 +5246,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
     fleet_apply.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_apply.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
+    fleet_apply.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
     fleet_apply.add_argument("--clone-missing", action="store_true")
     fleet_apply.add_argument("--pull-behind", action="store_true")
@@ -5261,6 +5270,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_dirty.add_argument("--max-depth", type=int, default=6)
     fleet_dirty.add_argument("--include-hidden", action="store_true")
     fleet_dirty.add_argument("--fetch", action="store_true")
+    fleet_dirty.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     fleet_dirty.set_defaults(func=cmd_fleet_dirty)
 
     fleet_logs = fleet_sub.add_parser("logs", help="inspect fleet apply JSON logs")
