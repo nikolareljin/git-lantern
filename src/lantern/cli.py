@@ -5197,7 +5197,6 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--only-clean", action="store_true")
     sync.add_argument("--only-upstream", action="store_true")
-    sync.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     sync.set_defaults(func=cmd_sync)
 
     fleet = sub.add_parser("fleet", help="unified multi-repo management (plan/apply)")
@@ -5220,6 +5219,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_overview.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
     fleet_overview.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_overview.add_argument("--output", default="", help="write the full fleet snapshot to JSON")
+    fleet_overview.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     fleet_overview.set_defaults(func=cmd_fleet_overview)
 
     fleet_plan = fleet_sub.add_parser("plan", help="show local vs remote reconciliation plan")
@@ -5332,6 +5332,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--dry-run", action="store_true")
     gh_clone.add_argument("--flat", action="store_true", help="clone missing repos into the root directory (see --root) (no namespace)")
     gh_clone.add_argument("--tui", action="store_true")
+    gh_clone.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     gh_clone.set_defaults(func=cmd_github_clone)
 
     gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")
