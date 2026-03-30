@@ -2102,6 +2102,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     include_forks=session["include_forks"],
                     with_prs=with_prs,
                     pr_stale_days=30,
+                    flat=flat,
                 )
                 try:
                     smart_rows, _smart_meta = _fleet_plan_records(smart_plan_args)
@@ -2319,6 +2320,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     plan_opts.append("--fetch")
                 if include_prs:
                     plan_opts.append("--with-prs")
+                if flat:
+                    plan_opts.append("--flat")
                 _dialog_infobox(
                     "Fleet Plan",
                     "Building fleet plan...\n\nThis may take a while for large workspaces.",
@@ -5230,6 +5233,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_plan.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_plan.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_plan.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
+    fleet_plan.add_argument("--flat", action="store_true", help="identify/clone missing repos into current directory (no namespace)")
     fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_plan.set_defaults(func=cmd_fleet_plan)
 
