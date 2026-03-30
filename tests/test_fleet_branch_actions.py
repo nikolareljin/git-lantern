@@ -144,9 +144,29 @@ def test_fleet_missing_local_destination_flat_layout():
     assert cli._fleet_missing_local_destination('/tmp/root', 'org/sub/repo', flat=True) == '/tmp/root/repo'
 
 
+def test_fleet_missing_local_destination_flat_layout_quotes_special_characters():
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo with space', flat=True) == '/tmp/root/repo%20with%20space'
+
+
 def test_fleet_missing_local_destination_normalizes_trailing_separators():
     assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org/repo'
     assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org/repo'
+
+
+def test_fleet_missing_local_destination_joins_namespaced_segments_individually(monkeypatch):
+    captured = {}
+
+    def fake_join(*parts):
+        captured["parts"] = parts
+        return "::".join(parts)
+
+    monkeypatch.setattr(cli.os.path, "join", fake_join)
+
+    result = cli._fleet_missing_local_destination('/tmp/root', 'org/repo name')
+
+    assert result == '/tmp/root::org::repo%20name'
+    assert captured["parts"] == ('/tmp/root', 'org', 'repo%20name')
+
 
 def test_fleet_missing_local_destination_escapes_safe_characters():
     # Slashes are safe, other special chars might still be quoted

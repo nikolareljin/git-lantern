@@ -2045,7 +2045,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
             selected_provider = str(selected_server.get("provider") or "github").lower()
             fetch = _dialog_yesno("Fetch", "Run local git fetch before building fleet plan?")
             include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in plan?")
-            flat = _dialog_yesno("Fleet Layout", "Clone missing repos into current directory (flat, no namespace)?")
+            flat = _dialog_yesno(
+                "Fleet Layout",
+                f"Clone missing repos into root directory (flat, no namespace)?\nRoot: {session['root']}",
+            )
             fleet_items: List[Tuple[str, str]] = [
                 ("smart_sync", "Smart Sync (preset multi-repo update)"),
                 ("plan", "Show fleet reconciliation plan"),
@@ -2799,7 +2802,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         continue
                 clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session["root"])
                 if clone_root:
-                    flat = _dialog_yesno("Clone Layout", "Clone missing repos into current directory (flat, no namespace)?")
+                    flat = _dialog_yesno(
+                        "Clone Layout",
+                        f"Clone missing repos into selected clone directory:\n{clone_root}\n\nUse flat layout (no namespace)?",
+                    )
                     cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
                     if flat:
                         cmd_args.append("--flat")
@@ -3298,12 +3304,12 @@ def _fleet_missing_local_destination(root: str, repo_name: str, flat: bool = Fal
     if normalized in {"", "."}:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
     if flat:
-        repo_dir = os.path.basename(normalized)
+        repo_dir = urllib.parse.quote(os.path.basename(normalized), safe="")
     else:
         repo_dir = urllib.parse.quote(normalized, safe="/")
     if not repo_dir:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    return os.path.join(root, repo_dir)
+    return os.path.join(root, *repo_dir.split("/"))
 
 
 def _host_matches_github_origin(configured_host: str, origin_host: str) -> bool:
