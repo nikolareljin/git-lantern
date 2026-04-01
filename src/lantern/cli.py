@@ -2043,8 +2043,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     server = server_choice
             selected_server = lantern_config.get_server(config, server)
             selected_provider = str(selected_server.get("provider") or "github").lower()
-            fetch = _dialog_yesno("Fetch", "Run local git fetch before building fleet plan?")
-            include_prs = _dialog_yesno("PR Info", "Include fresh open PR numbers/branches in plan?")
             flat = _dialog_yesno(
                 "Fleet Layout",
                 f"Clone missing repos into root directory (flat, no namespace)?\nRoot: {session['root']}",
