@@ -5223,7 +5223,11 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_overview.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_overview.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_overview.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
-    fleet_overview.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
+    fleet_overview.add_argument(
+        "--flat",
+        action="store_true",
+        help="use a flat destination layout for missing-local repos under the root directory (see --root); when cloning is performed by other commands, repos are placed directly under root with no namespace",
+    )
     fleet_overview.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_overview.add_argument("--output", default="", help="write the full fleet snapshot to JSON")
     fleet_overview.set_defaults(func=cmd_fleet_overview)
@@ -5242,7 +5246,11 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_plan.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_plan.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
     fleet_plan.add_argument("--with-prs", action="store_true", help="include fresh open PR numbers/branches (GitHub)")
-    fleet_plan.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
+    fleet_plan.add_argument(
+        "--flat",
+        action="store_true",
+        help="use a flat layout (no namespace) for missing-local repos under the root directory (see --root); affects paths in the plan and clone destinations used by 'fleet apply'",
+    )
     fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_plan.set_defaults(func=cmd_fleet_plan)
 

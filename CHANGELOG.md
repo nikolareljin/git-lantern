@@ -2,6 +2,8 @@
 
 All notable changes to git-lantern are documented in this file.
 
+## [Unreleased]
+
 ## [0.5.0] - 2026-03-29
 
 ### Added
