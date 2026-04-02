@@ -95,7 +95,7 @@ def test_fleet_apply_candidates_for_latest_filters_to_actionable_rows():
 
 
 
-def test_fleet_plan_records_clones_missing_local_repo_into_flat_namespaced_path(monkeypatch, tmp_path):
+def test_fleet_plan_records_clones_missing_local_repo_into_namespaced_subdirectory(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
 
@@ -128,21 +128,49 @@ def test_fleet_plan_records_clones_missing_local_repo_into_flat_namespaced_path(
             "action": "clone",
             "latest_branch": "-",
             "prs": "-",
-            "path": str(tmp_path / "my-namespace%2Fmy-repo"),
+            "path": str(tmp_path / "my-namespace/my-repo"),
         }
     ]
 
-def test_fleet_missing_local_destination_preserves_namespace_uniqueness():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/org-a%2Fservice'
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/org-b%2Fservice'
+def test_fleet_missing_local_destination_preserves_namespace_as_subdirectories():
+    # Default is namespaced subdirectories (restore behavior requested by user)
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/org-a/service'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/org-b/service'
+
+
+def test_fleet_missing_local_destination_flat_layout():
+    # Flat layout uses only the basename
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service', flat=True) == '/tmp/root/service'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/sub/repo', flat=True) == '/tmp/root/repo'
+
+
+def test_fleet_missing_local_destination_flat_layout_quotes_special_characters():
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo with space', flat=True) == '/tmp/root/repo%20with%20space'
 
 
 def test_fleet_missing_local_destination_normalizes_trailing_separators():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org%2Frepo'
-    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org%2Frepo'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org/repo'
+    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org/repo'
 
-def test_fleet_missing_local_destination_escapes_literal_separator_markers():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo') == '/tmp/root/org%2Frepo'
+
+def test_fleet_missing_local_destination_joins_namespaced_segments_individually(monkeypatch):
+    captured = {}
+
+    def fake_join(*parts):
+        captured["parts"] = parts
+        return "::".join(parts)
+
+    monkeypatch.setattr(cli.os.path, "join", fake_join)
+
+    result = cli._fleet_missing_local_destination('/tmp/root', 'org/repo name')
+
+    assert result == '/tmp/root::org::repo%20name'
+    assert captured["parts"] == ('/tmp/root', 'org', 'repo%20name')
+
+
+def test_fleet_missing_local_destination_escapes_safe_characters():
+    # Slashes are safe, other special chars might still be quoted
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo with space') == '/tmp/root/org/repo%20with%20space'
     assert cli._fleet_missing_local_destination('/tmp/root', 'org__repo') == '/tmp/root/org__repo'
 
 
