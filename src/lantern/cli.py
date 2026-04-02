@@ -3296,18 +3296,47 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _fleet_missing_local_destination(root: str, repo_name: str, flat: bool = False) -> str:
+def _fleet_missing_local_destination(
+    root: str,
+    repo_name: str,
+    reserved_paths: Optional[Set[str]] = None,
+    flat: bool = False,
+) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
     if normalized in {"", "."}:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
     if flat:
         repo_dir = urllib.parse.quote(os.path.basename(normalized), safe="")
-    else:
-        repo_dir = urllib.parse.quote(normalized, safe="/")
-    if not repo_dir:
+        if not repo_dir:
+            raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
+        return os.path.join(root, repo_dir)
+
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    return os.path.join(root, *repo_dir.split("/"))
+
+    basename = urllib.parse.quote(parts[-1], safe="")
+    encoded = urllib.parse.quote(normalized, safe="")
+    candidates = [basename]
+    if encoded and encoded != basename:
+        candidates.append(encoded)
+
+    reserved = {os.path.realpath(path) for path in (reserved_paths or set()) if path}
+    for repo_dir in candidates:
+        if not repo_dir:
+            continue
+        candidate = os.path.join(root, repo_dir)
+        candidate_real = os.path.realpath(candidate)
+        if candidate_real in reserved:
+            continue
+        if os.path.exists(candidate):
+            continue
+        return candidate
+
+    if not encoded:
+        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
+    return os.path.join(root, encoded)
 
 
 def _host_matches_github_origin(configured_host: str, origin_host: str) -> bool:
@@ -3471,6 +3500,11 @@ def _build_fleet_snapshot(
             configured_host = ""
 
     snapshot_rows: List[Dict[str, Any]] = []
+    reserved_destinations: Set[str] = {
+        os.path.realpath(str(rec.get("path") or ""))
+        for rec in local_records
+        if str(rec.get("path") or "").strip()
+    }
     for rec in local_records:
         path = str(rec.get("path") or "")
         origin = str(rec.get("origin") or "")
@@ -3546,7 +3580,13 @@ def _build_fleet_snapshot(
             if name:
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
-        dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
+        dest = _fleet_missing_local_destination(
+            args.root,
+            name,
+            reserved_paths=reserved_destinations,
+            flat=bool(getattr(args, "flat", False)),
+        )
+        reserved_destinations.add(os.path.realpath(dest))
         snapshot = {
             "repo": name,
             "path": dest,
@@ -4609,6 +4649,25 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
     repos = payload.get("repos", [])
     repos = _sort_records_by_repo_name(repos)
     os.makedirs(args.root, exist_ok=True)
+
+    def _planned_destinations(records: List[Dict[str, Any]]) -> Dict[str, str]:
+        planned: Dict[str, str] = {}
+        reserved_paths: Set[str] = set()
+        for repo in records:
+            name = str(repo.get("name") or "").strip()
+            if not _is_safe_repo_name(name):
+                continue
+            dest = _fleet_missing_local_destination(
+                args.root,
+                name,
+                reserved_paths=reserved_paths,
+                flat=bool(getattr(args, "flat", False)),
+            )
+            planned[name] = dest
+            reserved_paths.add(os.path.realpath(dest))
+        return planned
+
+    planned_destinations = _planned_destinations(repos)
     if args.tui:
         if not shutil.which("dialog"):
             print("dialog is required for --tui.", file=sys.stderr)
@@ -4620,7 +4679,9 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
                 if name:
                     print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
                 continue
-            dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
+            dest = planned_destinations.get(name)
+            if not dest:
+                continue
             status = "on" if os.path.exists(dest) else "off"
             label = "cloned" if status == "on" else "missing"
             checklist_items.extend([name, label, status])
@@ -4651,6 +4712,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         selected_set = set(selected)
         repos = [repo for repo in repos if repo.get("name") in selected_set]
         repos = _sort_records_by_repo_name(repos)
+        planned_destinations = _planned_destinations(repos)
     for repo in repos:
         name = str(repo.get("name") or "").strip()
         ssh_url = repo.get("ssh_url")
@@ -4660,7 +4722,9 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             continue
         if not ssh_url:
             continue
-        dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
+        dest = planned_destinations.get(name)
+        if not dest:
+            continue
         if os.path.exists(dest):
             continue
         parent = os.path.dirname(dest)

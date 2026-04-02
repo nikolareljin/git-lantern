@@ -4,6 +4,12 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-04-02
+
+### Fixed
+
+- Fixed fleet planning and forge cloning so the default destination now prefers the repository basename in the workspace root, while still falling back to the encoded namespaced path when another repository already uses that basename.
+
 ## [0.5.0] - 2026-03-29
 
 ### Added

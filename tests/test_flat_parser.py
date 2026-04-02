@@ -91,3 +91,40 @@ def test_cmd_github_clone_dry_run_uses_flat_destination(tmp_path, capsys):
     assert rc == 0
     assert f"{tmp_path / 'workspace' / 'my-repo'}" in out
     assert "my-namespace/my-repo" not in out.split("git clone ", 1)[1].rsplit(" ", 1)[-1]
+
+
+def test_cmd_github_clone_dry_run_falls_back_to_encoded_destination_on_basename_collision(tmp_path, capsys):
+    input_path = tmp_path / "repos.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    },
+                    {
+                        "name": "beta/shared-repo",
+                        "ssh_url": "git@example.com:beta/shared-repo.git",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(tmp_path / "workspace"),
+        tui=False,
+        flat=False,
+        dry_run=True,
+    )
+
+    rc = cli.cmd_github_clone(args)
+
+    out_lines = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert any(str(tmp_path / "workspace" / "shared-repo") in line for line in out_lines)
+    assert any(str(tmp_path / "workspace" / "beta%2Fshared-repo") in line for line in out_lines)
