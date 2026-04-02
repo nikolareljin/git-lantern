@@ -3307,18 +3307,13 @@ def _fleet_missing_local_destination(
     normalized = normalized.replace("\\", "/")
     if normalized in {"", "."}:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    if flat:
-        repo_dir = urllib.parse.quote(os.path.basename(normalized), safe="")
-        if not repo_dir:
-            raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-        return os.path.join(root, repo_dir)
 
     parts = [part for part in normalized.split("/") if part]
     if not parts:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
 
     basename = urllib.parse.quote(parts[-1], safe="")
-    encoded = urllib.parse.quote(normalized, safe="")
+    encoded = "" if flat else urllib.parse.quote(normalized, safe="")
     candidates = [basename]
     if encoded and encoded != basename:
         candidates.append(encoded)
