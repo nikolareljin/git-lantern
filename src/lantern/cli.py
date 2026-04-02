@@ -3301,6 +3301,7 @@ def _fleet_missing_local_destination(
     repo_name: str,
     reserved_paths: Optional[Set[str]] = None,
     flat: bool = False,
+    prefer_existing_basename: bool = False,
 ) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
@@ -3323,6 +3324,15 @@ def _fleet_missing_local_destination(
         candidates.append(encoded)
 
     reserved = {os.path.realpath(path) for path in (reserved_paths or set()) if path}
+    basename_candidate = os.path.join(root, basename)
+    basename_candidate_real = os.path.realpath(basename_candidate)
+    if (
+        prefer_existing_basename
+        and basename_candidate_real not in reserved
+        and os.path.exists(basename_candidate)
+    ):
+        return basename_candidate
+
     for repo_dir in candidates:
         if not repo_dir:
             continue
@@ -3334,9 +3344,15 @@ def _fleet_missing_local_destination(
             continue
         return candidate
 
-    if not encoded:
-        raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    return os.path.join(root, encoded)
+    suffix = 2
+    while suffix <= 1000:
+        repo_dir = f"{basename}-{suffix}"
+        candidate = os.path.join(root, repo_dir)
+        candidate_real = os.path.realpath(candidate)
+        if candidate_real not in reserved and not os.path.exists(candidate):
+            return candidate
+        suffix += 1
+    raise RuntimeError(f"Unable to find collision-free local destination for repository {repo_name!r}")
 
 
 def _host_matches_github_origin(configured_host: str, origin_host: str) -> bool:
@@ -4662,6 +4678,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
                 name,
                 reserved_paths=reserved_paths,
                 flat=bool(getattr(args, "flat", False)),
+                prefer_existing_basename=True,
             )
             planned[name] = dest
             reserved_paths.add(os.path.realpath(dest))

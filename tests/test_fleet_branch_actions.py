@@ -205,6 +205,13 @@ def test_fleet_missing_local_destination_falls_back_to_encoded_namespace_on_coll
     assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo', reserved) == str(tmp_path / 'org%2Frepo')
 
 
+def test_fleet_missing_local_destination_uses_suffix_when_primary_candidates_are_unavailable(tmp_path):
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "org%2Frepo").mkdir()
+
+    assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo') == str(tmp_path / 'repo-2')
+
+
 def test_fleet_missing_local_destination_escapes_safe_characters():
     assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo with space') == '/tmp/root/repo%20with%20space'
     assert cli._fleet_missing_local_destination('/tmp/root', 'org__repo') == '/tmp/root/org__repo'

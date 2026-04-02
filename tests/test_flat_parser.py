@@ -128,3 +128,37 @@ def test_cmd_github_clone_dry_run_falls_back_to_encoded_destination_on_basename_
     assert rc == 0
     assert any(str(tmp_path / "workspace" / "shared-repo") in line for line in out_lines)
     assert any(str(tmp_path / "workspace" / "beta%2Fshared-repo") in line for line in out_lines)
+
+
+def test_cmd_github_clone_dry_run_skips_repo_when_basename_destination_already_exists(tmp_path, capsys):
+    input_path = tmp_path / "repos.json"
+    workspace = tmp_path / "workspace"
+    (workspace / "shared-repo").mkdir(parents=True)
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(workspace),
+        tui=False,
+        flat=False,
+        dry_run=True,
+    )
+
+    rc = cli.cmd_github_clone(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == ""
