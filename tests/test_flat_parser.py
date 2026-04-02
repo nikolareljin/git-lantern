@@ -1,6 +1,8 @@
-from lantern import cli
 import argparse
 import json
+
+from lantern import cli
+
 
 def test_fleet_overview_parser_supports_flat():
     parser = cli.build_parser()
@@ -8,17 +10,20 @@ def test_fleet_overview_parser_supports_flat():
     assert args.fleet_command == "overview"
     assert args.flat is True
 
+
 def test_fleet_plan_parser_supports_flat():
     parser = cli.build_parser()
     args = parser.parse_args(["fleet", "plan", "--flat"])
     assert args.fleet_command == "plan"
     assert args.flat is True
 
+
 def test_fleet_apply_parser_supports_flat():
     parser = cli.build_parser()
     args = parser.parse_args(["fleet", "apply", "--flat"])
     assert args.fleet_command == "apply"
     assert args.flat is True
+
 
 def test_forge_clone_parser_supports_flat():
     parser = cli.build_parser()
