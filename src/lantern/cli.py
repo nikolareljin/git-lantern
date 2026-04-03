@@ -3580,9 +3580,12 @@ def _build_fleet_snapshot(
         snapshot["recommended_actions"] = ",".join(_recommended_actions_for_snapshot(snapshot))
         snapshot_rows.append(snapshot)
 
-    for repo in remote_repos:
-        if not isinstance(repo, dict):
-            continue
+    sorted_remote_repos = sorted(
+        (repo for repo in remote_repos if isinstance(repo, dict)),
+        key=lambda repo: str(repo.get("name") or "").lower(),
+    )
+
+    for repo in sorted_remote_repos:
         keys = _remote_repo_keys(repo)
         if not keys or any(k in local_by_remote_key for k in keys):
             continue

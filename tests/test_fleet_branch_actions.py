@@ -180,6 +180,38 @@ def test_fleet_plan_records_falls_back_to_namespaced_path_when_repo_basename_col
     assert missing_row["path"] == str(tmp_path / "my-namespace%2Fmy-repo")
 
 
+def test_fleet_plan_records_assigns_missing_local_destinations_deterministically(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+
+    args = argparse.Namespace(
+        root=str(tmp_path),
+        max_depth=1,
+        include_hidden=False,
+        fetch=False,
+        with_prs=False,
+        pr_stale_days=30,
+    )
+    payload = {
+        "repos": [
+            {
+                "name": "beta/shared-repo",
+                "ssh_url": "git@example.com:beta/shared-repo.git",
+            },
+            {
+                "name": "alpha/shared-repo",
+                "ssh_url": "git@example.com:alpha/shared-repo.git",
+            },
+        ]
+    }
+
+    rows, _meta = cli._fleet_plan_records(args, payload=payload)
+
+    path_by_repo = {row["repo"]: row["path"] for row in rows}
+    assert path_by_repo["alpha/shared-repo"] == str(tmp_path / "shared-repo")
+    assert path_by_repo["beta/shared-repo"] == str(tmp_path / "beta%2Fshared-repo")
+
+
 def test_fleet_missing_local_destination_prefers_repo_basename():
     assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/service'
     assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/service'
