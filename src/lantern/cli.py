@@ -3296,18 +3296,58 @@ def _fleet_load_remote(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _fleet_missing_local_destination(root: str, repo_name: str, flat: bool = False) -> str:
+def _fleet_missing_local_destination(
+    root: str,
+    repo_name: str,
+    reserved_paths: Optional[Set[str]] = None,
+    flat: bool = False,
+    prefer_existing_basename: bool = False,
+) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
     if normalized in {"", "."}:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    if flat:
-        repo_dir = urllib.parse.quote(os.path.basename(normalized), safe="")
-    else:
-        repo_dir = urllib.parse.quote(normalized, safe="/")
-    if not repo_dir:
+
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
-    return os.path.join(root, *repo_dir.split("/"))
+
+    basename = urllib.parse.quote(parts[-1], safe="")
+    encoded = "" if flat else urllib.parse.quote(normalized, safe="")
+    candidates = [basename]
+    if encoded and encoded != basename:
+        candidates.append(encoded)
+
+    reserved = {os.path.realpath(path) for path in (reserved_paths or set()) if path}
+    basename_candidate = os.path.join(root, basename)
+    basename_candidate_real = os.path.realpath(basename_candidate)
+    if (
+        prefer_existing_basename
+        and basename_candidate_real not in reserved
+        and os.path.exists(basename_candidate)
+    ):
+        return basename_candidate
+
+    for repo_dir in candidates:
+        if not repo_dir:
+            continue
+        candidate = os.path.join(root, repo_dir)
+        candidate_real = os.path.realpath(candidate)
+        if candidate_real in reserved:
+            continue
+        if os.path.exists(candidate):
+            continue
+        return candidate
+
+    suffix = 2
+    while suffix <= 1000:
+        repo_dir = f"{basename}-{suffix}"
+        candidate = os.path.join(root, repo_dir)
+        candidate_real = os.path.realpath(candidate)
+        if candidate_real not in reserved and not os.path.exists(candidate):
+            return candidate
+        suffix += 1
+    raise RuntimeError(f"Unable to find collision-free local destination for repository {repo_name!r}")
 
 
 def _host_matches_github_origin(configured_host: str, origin_host: str) -> bool:
@@ -3471,6 +3511,11 @@ def _build_fleet_snapshot(
             configured_host = ""
 
     snapshot_rows: List[Dict[str, Any]] = []
+    reserved_destinations: Set[str] = {
+        os.path.realpath(str(rec.get("path") or ""))
+        for rec in local_records
+        if str(rec.get("path") or "").strip()
+    }
     for rec in local_records:
         path = str(rec.get("path") or "")
         origin = str(rec.get("origin") or "")
@@ -3535,9 +3580,12 @@ def _build_fleet_snapshot(
         snapshot["recommended_actions"] = ",".join(_recommended_actions_for_snapshot(snapshot))
         snapshot_rows.append(snapshot)
 
-    for repo in remote_repos:
-        if not isinstance(repo, dict):
-            continue
+    sorted_remote_repos = sorted(
+        (repo for repo in remote_repos if isinstance(repo, dict)),
+        key=lambda repo: str(repo.get("name") or "").lower(),
+    )
+
+    for repo in sorted_remote_repos:
         keys = _remote_repo_keys(repo)
         if not keys or any(k in local_by_remote_key for k in keys):
             continue
@@ -3546,7 +3594,13 @@ def _build_fleet_snapshot(
             if name:
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
             continue
-        dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
+        dest = _fleet_missing_local_destination(
+            args.root,
+            name,
+            reserved_paths=reserved_destinations,
+            flat=bool(getattr(args, "flat", False)),
+        )
+        reserved_destinations.add(os.path.realpath(dest))
         snapshot = {
             "repo": name,
             "path": dest,
@@ -4609,6 +4663,53 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
     repos = payload.get("repos", [])
     repos = _sort_records_by_repo_name(repos)
     os.makedirs(args.root, exist_ok=True)
+
+    def _planned_destinations(records: List[Dict[str, Any]]) -> Dict[str, str]:
+        planned: Dict[str, str] = {}
+        reserved_paths: Set[str] = set()
+        for repo in records:
+            name = str(repo.get("name") or "").strip()
+            if not _is_safe_repo_name(name):
+                continue
+            normalized_name = os.path.normpath(name.replace("\\", "/"))
+            remote_keys = _remote_repo_keys(repo)
+            basename = urllib.parse.quote(os.path.basename(normalized_name), safe="")
+            basename_path = os.path.join(args.root, basename)
+            prefer_existing_basename = False
+            dest: Optional[str] = None
+            if basename and os.path.exists(basename_path) and git.is_git_repo(basename_path):
+                existing_origin = _normalize_repo_url(str(git.get_origin_url(basename_path) or ""))
+                if existing_origin and existing_origin in remote_keys:
+                    prefer_existing_basename = True
+            if not bool(getattr(args, "flat", False)):
+                encoded = urllib.parse.quote(normalized_name, safe="")
+                encoded_path = os.path.join(args.root, encoded)
+                if (
+                    encoded
+                    and encoded != basename
+                    and os.path.exists(encoded_path)
+                    and git.is_git_repo(encoded_path)
+                ):
+                    existing_origin = _normalize_repo_url(str(git.get_origin_url(encoded_path) or ""))
+                    if (
+                        existing_origin
+                        and existing_origin in remote_keys
+                        and os.path.realpath(encoded_path) not in reserved_paths
+                    ):
+                        dest = encoded_path
+            if dest is None:
+                dest = _fleet_missing_local_destination(
+                    args.root,
+                    name,
+                    reserved_paths=reserved_paths,
+                    flat=bool(getattr(args, "flat", False)),
+                    prefer_existing_basename=prefer_existing_basename,
+                )
+            planned[name] = dest
+            reserved_paths.add(os.path.realpath(dest))
+        return planned
+
+    planned_destinations = _planned_destinations(repos)
     if args.tui:
         if not shutil.which("dialog"):
             print("dialog is required for --tui.", file=sys.stderr)
@@ -4620,7 +4721,9 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
                 if name:
                     print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
                 continue
-            dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
+            dest = planned_destinations.get(name)
+            if not dest:
+                continue
             status = "on" if os.path.exists(dest) else "off"
             label = "cloned" if status == "on" else "missing"
             checklist_items.extend([name, label, status])
@@ -4651,6 +4754,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         selected_set = set(selected)
         repos = [repo for repo in repos if repo.get("name") in selected_set]
         repos = _sort_records_by_repo_name(repos)
+        planned_destinations = _planned_destinations(repos)
     for repo in repos:
         name = str(repo.get("name") or "").strip()
         ssh_url = repo.get("ssh_url")
@@ -4660,7 +4764,9 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             continue
         if not ssh_url:
             continue
-        dest = _fleet_missing_local_destination(args.root, name, flat=bool(getattr(args, "flat", False)))
+        dest = planned_destinations.get(name)
+        if not dest:
+            continue
         if os.path.exists(dest):
             continue
         parent = os.path.dirname(dest)
