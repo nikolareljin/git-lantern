@@ -272,3 +272,54 @@ def test_cmd_github_clone_dry_run_falls_back_when_existing_basename_is_different
     out = capsys.readouterr().out
     assert rc == 0
     assert str(workspace / "alpha%2Fshared-repo") in out
+
+
+def test_cmd_github_clone_dry_run_skips_repo_when_encoded_destination_already_exists(tmp_path, capsys, monkeypatch):
+    input_path = tmp_path / "repos.json"
+    workspace = tmp_path / "workspace"
+    (workspace / "shared-repo").mkdir(parents=True)
+    (workspace / "alpha%2Fshared-repo").mkdir(parents=True)
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(workspace),
+        tui=False,
+        flat=False,
+        dry_run=True,
+    )
+
+    def fake_is_git_repo(path):
+        return path in {
+            str(workspace / "shared-repo"),
+            str(workspace / "alpha%2Fshared-repo"),
+        }
+
+    def fake_get_origin_url(path):
+        if path == str(workspace / "shared-repo"):
+            return "git@example.com:other/shared-repo.git"
+        if path == str(workspace / "alpha%2Fshared-repo"):
+            return "git@example.com:alpha/shared-repo.git"
+        return ""
+
+    monkeypatch.setattr(cli.git, "is_git_repo", fake_is_git_repo)
+    monkeypatch.setattr(cli.git, "get_origin_url", fake_get_origin_url)
+
+    rc = cli.cmd_github_clone(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == ""

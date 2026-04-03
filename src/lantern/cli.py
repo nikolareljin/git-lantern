@@ -4672,20 +4672,39 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             if not _is_safe_repo_name(name):
                 continue
             prefer_existing_basename = False
+            dest: Optional[str] = None
             if not bool(getattr(args, "flat", False)):
-                basename = urllib.parse.quote(os.path.basename(os.path.normpath(name.replace("\\", "/"))), safe="")
+                normalized_name = os.path.normpath(name.replace("\\", "/"))
+                remote_keys = _remote_repo_keys(repo)
+                basename = urllib.parse.quote(os.path.basename(normalized_name), safe="")
                 basename_path = os.path.join(args.root, basename)
                 if basename and os.path.exists(basename_path) and git.is_git_repo(basename_path):
                     existing_origin = _normalize_repo_url(str(git.get_origin_url(basename_path) or ""))
-                    if existing_origin and existing_origin in _remote_repo_keys(repo):
+                    if existing_origin and existing_origin in remote_keys:
                         prefer_existing_basename = True
-            dest = _fleet_missing_local_destination(
-                args.root,
-                name,
-                reserved_paths=reserved_paths,
-                flat=bool(getattr(args, "flat", False)),
-                prefer_existing_basename=prefer_existing_basename,
-            )
+                encoded = urllib.parse.quote(normalized_name, safe="")
+                encoded_path = os.path.join(args.root, encoded)
+                if (
+                    encoded
+                    and encoded != basename
+                    and os.path.exists(encoded_path)
+                    and git.is_git_repo(encoded_path)
+                ):
+                    existing_origin = _normalize_repo_url(str(git.get_origin_url(encoded_path) or ""))
+                    if (
+                        existing_origin
+                        and existing_origin in remote_keys
+                        and os.path.realpath(encoded_path) not in reserved_paths
+                    ):
+                        dest = encoded_path
+            if dest is None:
+                dest = _fleet_missing_local_destination(
+                    args.root,
+                    name,
+                    reserved_paths=reserved_paths,
+                    flat=bool(getattr(args, "flat", False)),
+                    prefer_existing_basename=prefer_existing_basename,
+                )
             planned[name] = dest
             reserved_paths.add(os.path.realpath(dest))
         return planned
