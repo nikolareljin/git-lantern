@@ -164,6 +164,43 @@ def test_cmd_github_clone_dry_run_uses_suffix_for_flat_destination_collision(tmp
     assert any(str(tmp_path / "workspace" / "shared-repo-2") in line for line in out_lines)
 
 
+def test_cmd_github_clone_dry_run_skips_repo_when_flat_destination_already_exists(tmp_path, capsys, monkeypatch):
+    input_path = tmp_path / "repos.json"
+    workspace = tmp_path / "workspace"
+    (workspace / "shared-repo").mkdir(parents=True)
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(workspace),
+        tui=False,
+        flat=True,
+        dry_run=True,
+    )
+
+    monkeypatch.setattr(cli.git, "is_git_repo", lambda path: path == str(workspace / "shared-repo"))
+    monkeypatch.setattr(cli.git, "get_origin_url", lambda path: "git@example.com:alpha/shared-repo.git")
+
+    rc = cli.cmd_github_clone(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == ""
+
+
 def test_cmd_github_clone_dry_run_falls_back_to_encoded_destination_on_basename_collision(tmp_path, capsys):
     input_path = tmp_path / "repos.json"
     input_path.write_text(
