@@ -742,3 +742,66 @@ def test_cmd_fleet_apply_snapshot_clone_uses_snapshot_origin(monkeypatch, tmp_pa
     assert rc == 0
     assert seen == [["git", "clone", "git@example.com:demo.git", str(repo_path)]]
     assert "clone:ok" in out
+
+
+def test_cmd_fleet_apply_uses_explicit_origin_pull_when_no_upstream(monkeypatch, tmp_path, capsys):
+    repo_path = tmp_path / "demo"
+    repo_path.mkdir()
+    seen_cmds = []
+
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [
+                {
+                    "repo": "demo",
+                    "state": "behind-remote",
+                    "path": str(repo_path),
+                    "clean": "yes",
+                    "branch": "main",
+                    "latest_branch": "main",
+                    "action": "pull",
+                }
+            ],
+            {},
+        ),
+    )
+    monkeypatch.setattr(cli.git, "get_upstream", lambda _path: None)
+
+    def fake_run(args, check=False, **kwargs):
+        seen_cmds.append(list(args))
+        return type("Proc", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    rc = cli.cmd_fleet_apply(_make_apply_args(pull_behind=True, dry_run=False))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "pull:ok" in out
+    assert ["git", "-C", str(repo_path), "pull", "--ff-only", "origin", "main"] in seen_cmds
+
+
+def test_custom_select_candidates_exclude_push_only_repos():
+    rows = [
+        {"repo": "alpha", "state": "behind-remote", "branch": "main", "latest_branch": "main", "action": "pull"},
+        {"repo": "beta", "state": "ahead-remote", "branch": "main", "latest_branch": "main", "action": "push"},
+        {"repo": "gamma", "state": "in-sync", "branch": "main", "latest_branch": "feature/x", "action": "-"},
+        {"repo": "delta", "state": "in-sync", "branch": "main", "latest_branch": "main", "action": "-"},
+    ]
+
+    candidates = [
+        r for r in rows
+        if str(r.get("action") or "") in {"clone", "pull"}
+        or cli._fleet_latest_branch_is_actionable(r)
+    ]
+
+    repos = {r["repo"] for r in candidates}
+    assert "alpha" in repos    # pull action — pre-checked
+    assert "beta" not in repos  # push action — excluded, preset won't push
+    assert "gamma" in repos    # latest branch differs — pre-checked
+    assert "delta" not in repos  # in-sync, latest matches current

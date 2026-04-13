@@ -2124,10 +2124,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
                     selectable_rows = list(smart_rows)
                 elif preset == "custom_select":
-                    # All repos are selectable; default-check those with pending actions.
+                    # All repos are selectable; default-check those with actions this
+                    # preset will actually perform (pull/clone and latest-branch checkout).
+                    # Push is excluded because include_push defaults to False here.
                     candidates = [
                         r for r in smart_rows
-                        if str(r.get("action") or "") in {"clone", "pull", "push"}
+                        if str(r.get("action") or "") in {"clone", "pull"}
                         or _fleet_latest_branch_is_actionable(r)
                     ]
                     selectable_rows = list(smart_rows)
@@ -3911,7 +3913,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     # git pull succeeds for repos detected via the origin/<branch>
                     # fallback in repo_status().
                     branch_name = str(row.get("branch") or "").strip()
-                    if branch_name and branch_name != "-":
+                    if branch_name and branch_name not in {"-", "detached", "HEAD"}:
                         pull_cmd = ["git", "-C", path, "pull", "--ff-only", "origin", branch_name]
                 proc = subprocess.run(
                     pull_cmd,

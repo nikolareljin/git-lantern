@@ -30,7 +30,9 @@ def fetch(repo_path: str) -> None:
 
 def get_branch(repo_path: str) -> str:
     branch = run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
-    return branch or "detached"
+    if not branch or branch == "HEAD":
+        return "detached"
+    return branch
 
 
 def get_upstream(repo_path: str) -> Optional[str]:

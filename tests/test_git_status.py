@@ -1,5 +1,7 @@
 import subprocess
 
+import pytest
+
 from lantern import git
 
 
@@ -97,3 +99,60 @@ def test_get_working_tree_state_treats_git_failures_as_unsafe(monkeypatch):
         "allows_checkout_latest": None,
         "error": "git status failed; fatal; exit=128",
     }
+
+
+def test_get_branch_maps_literal_head_to_detached(monkeypatch):
+    monkeypatch.setattr(
+        git,
+        "run_git",
+        lambda _path, args: "HEAD" if args == ["rev-parse", "--abbrev-ref", "HEAD"] else "",
+    )
+    assert git.get_branch("/fake/repo") == "detached"
+
+
+def test_repo_status_infers_upstream_from_origin_branch_when_no_tracking_branch(monkeypatch):
+    def fake_run_git(_path, args):
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return "main"
+        if args[:3] == ["rev-parse", "--abbrev-ref", "--symbolic-full-name"]:
+            return ""  # no @{u}
+        if args[:2] == ["rev-parse", "--verify"] and args[2] == "origin/main":
+            return "deadbeef"
+        if args[:3] == ["rev-list", "--left-right", "--count"]:
+            return "0 3"
+        if args == ["remote"]:
+            return "origin"
+        if args[:2] == ["symbolic-ref", "-q"]:
+            return "origin/main"
+        return ""
+
+    monkeypatch.setattr(git, "run_git", fake_run_git)
+    status = git.repo_status("/fake/repo")
+
+    assert status["upstream"] is None
+    assert status["upstream_ahead"] == "0"
+    assert status["upstream_behind"] == "3"
+
+
+def test_repo_status_skips_origin_inference_for_detached_head(monkeypatch):
+    tried = []
+
+    def fake_run_git(_path, args):
+        tried.append(list(args))
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return "HEAD"  # detached — get_branch() maps this to "detached"
+        if args[:3] == ["rev-parse", "--abbrev-ref", "--symbolic-full-name"]:
+            return ""
+        if args == ["remote"]:
+            return ""
+        return ""
+
+    monkeypatch.setattr(git, "run_git", fake_run_git)
+    status = git.repo_status("/fake/repo")
+
+    assert all(args[:2] != ["rev-parse", "--verify"] for args in tried), (
+        "Should not attempt origin/<branch> inference for detached HEAD"
+    )
+    assert status["upstream"] is None
+    assert status["upstream_ahead"] is None
+    assert status["upstream_behind"] is None
