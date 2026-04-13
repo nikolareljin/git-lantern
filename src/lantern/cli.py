@@ -3905,8 +3905,16 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append("pull:dry-run")
                 action_records.append({"action": "pull", "status": "dry-run"})
             else:
+                pull_cmd = ["git", "-C", path, "pull", "--ff-only"]
+                if not git.get_upstream(path):
+                    # No tracking branch — supply remote and branch explicitly so
+                    # git pull succeeds for repos detected via the origin/<branch>
+                    # fallback in repo_status().
+                    branch_name = str(row.get("branch") or "").strip()
+                    if branch_name and branch_name != "-":
+                        pull_cmd = ["git", "-C", path, "pull", "--ff-only", "origin", branch_name]
                 proc = subprocess.run(
-                    ["git", "-C", path, "pull", "--ff-only"],
+                    pull_cmd,
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
