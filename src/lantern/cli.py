@@ -2074,6 +2074,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     ("branch_rollout", "Latest Branch Rollout (checkout/update latest detected branch)"),
                     ("pr_rollout", "PR Rollout (checkout PR branch)"),
                     ("full_reconcile", "Full Reconcile (clone/pull/push)"),
+                    ("custom_select", "Custom Select (pick any repos to pull/checkout)"),
                 ]
                 preset = _dialog_menu("Smart Sync", "Choose a preset:", preset_items, height, width)
                 if not preset:
@@ -2122,6 +2123,14 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 elif preset == "branch_rollout":
                     candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
                     selectable_rows = list(smart_rows)
+                elif preset == "custom_select":
+                    # All repos are selectable; default-check those with pending actions.
+                    candidates = [
+                        r for r in smart_rows
+                        if str(r.get("action") or "") in {"clone", "pull", "push"}
+                        or _fleet_latest_branch_is_actionable(r)
+                    ]
+                    selectable_rows = list(smart_rows)
                 else:
                     candidates = list(smart_rows)
                     selectable_rows = list(candidates)
@@ -2135,16 +2144,20 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 include_push = False
                 preview_checkout_branch = ""
                 preview_checkout_pr = ""
-                preview_checkout_latest_branch = preset == "branch_rollout"
+                preview_checkout_latest_branch = preset in {"branch_rollout", "custom_select"}
 
-                scope_items: List[Tuple[str, str]] = [
-                    ("all", "All actionable repositories"),
-                    ("clean", "Only repos without in-progress Git operations"),
-                    ("select", "Pick repositories"),
-                ]
-                scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
-                if not scope:
-                    continue
+                if preset == "custom_select":
+                    # Skip the scope menu and go straight to the per-repo checklist.
+                    scope = "select"
+                else:
+                    scope_items: List[Tuple[str, str]] = [
+                        ("all", "All actionable repositories"),
+                        ("clean", "Only repos without in-progress Git operations"),
+                        ("select", "Pick repositories"),
+                    ]
+                    scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
+                    if not scope:
+                        continue
 
                 selected_rows = list(candidates)
                 if scope == "clean":
@@ -2193,7 +2206,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 checkout_branch = ""
                 checkout_pr = ""
                 checkout_latest_branch = False
-                if preset == "branch_rollout":
+                if preset in {"branch_rollout", "custom_select"}:
                     checkout_latest_branch = True
                 elif preset == "pr_rollout":
                     pr_numbers: List[str] = []

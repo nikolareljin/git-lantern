@@ -190,6 +190,14 @@ def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
         ahead, behind = count_ahead_behind(repo_path, "HEAD", upstream)
         upstream_ahead = str(ahead)
         upstream_behind = str(behind)
+    elif branch and branch != "detached":
+        # No tracking branch — fall back to origin/<branch> if it exists so
+        # repos without @{u} still show as behind-remote after a fetch.
+        candidate = f"origin/{branch}"
+        if run_git(repo_path, ["rev-parse", "--verify", candidate]):
+            ahead, behind = count_ahead_behind(repo_path, "HEAD", candidate)
+            upstream_ahead = str(ahead)
+            upstream_behind = str(behind)
 
     default_refs = get_default_branch_refs(repo_path)
     main_ref = get_default_branch_ref(repo_path)

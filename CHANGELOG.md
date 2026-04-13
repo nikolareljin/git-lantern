@@ -4,6 +4,22 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-13
+
+### Fixed
+
+- Fixed fleet sync detection for repositories without a configured upstream tracking branch.
+  After a fetch, git-lantern now compares HEAD to `origin/<current-branch>` as an inferred
+  upstream when `@{u}` is absent, so these repos correctly appear as "behind-remote" in
+  `full_reconcile` and `fast_pull` instead of being silently classified as "in-sync".
+
+### Added
+
+- Added "Custom Select" smart sync preset that shows all repositories regardless of detected
+  state and opens a checklist so any combination can be picked for pull or latest-branch
+  checkout. Repos with pending actions are pre-checked; all others are visible and selectable.
+  This provides direct control when automatic state classification is not sufficient.
+
 ## [0.5.1] - 2026-04-02
 
 ### Fixed
