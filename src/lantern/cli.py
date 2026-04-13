@@ -3913,27 +3913,37 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     # git pull succeeds for repos detected via the origin/<branch>
                     # fallback in repo_status().
                     branch_name = str(row.get("branch") or "").strip()
-                    if branch_name and branch_name not in {"-", "detached", "HEAD"}:
-                        pull_cmd = ["git", "-C", path, "pull", "--ff-only", "origin", branch_name]
-                proc = subprocess.run(
-                    pull_cmd,
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                )
-                ok = proc.returncode == 0
-                statuses.append(f"pull:{'ok' if ok else 'fail'}")
-                action_records.append({"action": "pull", "status": "ok" if ok else "fail"})
-                if not ok:
-                    rollback = _attempt_repo_rollback(path, original_head, original_branch)
-                    action_records.append(
-                        {
-                            "action": "rollback",
-                            "status": rollback.get("restored", "no"),
-                            "detail": rollback.get("steps", "none"),
-                        }
+                    if (
+                        branch_name
+                        and branch_name not in {"-", "detached", "HEAD"}
+                        and _is_valid_git_branch_name(branch_name)
+                    ):
+                        pull_cmd = ["git", "-C", path, "pull", "--ff-only", "--", "origin", branch_name]
+                    else:
+                        pull_cmd = []
+                if not pull_cmd:
+                    statuses.append("pull:skip-invalid-branch")
+                    action_records.append({"action": "pull", "status": "skip-invalid-branch"})
+                else:
+                    proc = subprocess.run(
+                        pull_cmd,
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
                     )
+                    ok = proc.returncode == 0
+                    statuses.append(f"pull:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "pull", "status": "ok" if ok else "fail"})
+                    if not ok:
+                        rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                        action_records.append(
+                            {
+                                "action": "rollback",
+                                "status": rollback.get("restored", "no"),
+                                "detail": rollback.get("steps", "none"),
+                            }
+                        )
         elif state == "ahead-remote" and args.push_ahead:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append("push:skip-dirty")

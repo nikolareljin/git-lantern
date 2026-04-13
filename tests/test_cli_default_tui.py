@@ -150,6 +150,75 @@ def test_cmd_tui_fleet_does_not_prompt_for_fetch_or_pr_info_before_operation(mon
     assert yesno_titles == ["Fleet Layout"]
 
 
+def test_cmd_tui_custom_select_skips_scope_and_shows_full_checklist(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    scan_path = workspace / "repos.json"
+    scan_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_init", lambda: (20, 84))
+    monkeypatch.setattr(
+        cli.lantern_config,
+        "load_config",
+        lambda: {
+            "workspace_root": str(workspace),
+            "scan_json_path": str(scan_path),
+        },
+    )
+    monkeypatch.setattr(cli.lantern_config, "list_servers", lambda _config: [])
+    monkeypatch.setattr(cli.lantern_config, "get_server", lambda _config, _server: {"provider": "github"})
+    monkeypatch.setattr(cli.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args: (
+            [
+                {"repo": "alpha", "state": "behind-remote", "branch": "main", "latest_branch": "main", "action": "pull", "clean": "yes"},
+                {"repo": "beta", "state": "ahead-remote", "branch": "main", "latest_branch": "main", "action": "push", "clean": "yes"},
+                {"repo": "gamma", "state": "in-sync", "branch": "main", "latest_branch": "feature/x", "action": "-", "clean": "yes"},
+                {"repo": "delta", "state": "in-sync", "branch": "main", "latest_branch": "main", "action": "-", "clean": "yes"},
+            ],
+            {},
+        ),
+    )
+    monkeypatch.setattr(cli, "_dialog_infobox", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "_dialog_msgbox", lambda *_args, **_kwargs: None)
+
+    menu_titles = []
+    menu_choices = {
+        "Git Lantern": iter(["fleet", "exit"]),
+        "Fleet": iter(["smart_sync"]),
+        "Smart Sync": iter(["custom_select"]),
+    }
+
+    def fake_menu(title, *_args, **_kwargs):
+        menu_titles.append(title)
+        assert title != "Scope"
+        return next(menu_choices[title])
+
+    checklist_calls = []
+
+    def fake_checklist(_title, _text, items, *_args, **_kwargs):
+        checklist_calls.append(items)
+        return []
+
+    monkeypatch.setattr(cli, "_dialog_menu", fake_menu)
+    monkeypatch.setattr(cli, "_dialog_checklist", fake_checklist)
+    monkeypatch.setattr(cli, "_dialog_yesno", lambda *_args, **_kwargs: False)
+
+    rc = cli.cmd_tui(SimpleNamespace(tui_root=""))
+
+    assert rc == 0
+    assert "Scope" not in menu_titles
+    assert len(checklist_calls) == 1
+    assert [item[0] for item in checklist_calls[0]] == ["1", "2", "3", "4"]
+    assert [item[2] for item in checklist_calls[0]] == [True, False, True, False]
+    assert [item[1].split(" [", 1)[0] for item in checklist_calls[0]] == ["alpha", "beta", "gamma", "delta"]
+    assert "pull" in checklist_calls[0][0][1]
+    assert "feature/x" in checklist_calls[0][2][1]
+
+
 def test_run_lantern_subprocess_shows_output_when_not_capturing(monkeypatch):
     captured = {}
 
