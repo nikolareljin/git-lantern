@@ -188,6 +188,7 @@ def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
     upstream = get_upstream(repo_path)
     upstream_ahead = None
     upstream_behind = None
+    upstream_inferred = False
     if upstream:
         ahead, behind = count_ahead_behind(repo_path, "HEAD", upstream)
         upstream_ahead = str(ahead)
@@ -200,6 +201,7 @@ def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
             ahead, behind = count_ahead_behind(repo_path, "HEAD", candidate)
             upstream_ahead = str(ahead)
             upstream_behind = str(behind)
+            upstream_inferred = True
 
     default_refs = get_default_branch_refs(repo_path)
     main_ref = get_default_branch_ref(repo_path)
@@ -213,6 +215,7 @@ def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
     return {
         "branch": branch,
         "upstream": upstream,
+        "upstream_inferred": upstream_inferred,
         "upstream_ahead": upstream_ahead,
         "upstream_behind": upstream_behind,
         "main_ref": main_ref,

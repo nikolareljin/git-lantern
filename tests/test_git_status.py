@@ -128,6 +128,7 @@ def test_repo_status_infers_upstream_from_origin_branch_when_no_tracking_branch(
     status = git.repo_status("/fake/repo")
 
     assert status["upstream"] is None
+    assert status["upstream_inferred"] is True
     assert status["upstream_ahead"] == "0"
     assert status["upstream_behind"] == "3"
 
@@ -152,5 +153,6 @@ def test_repo_status_skips_origin_inference_for_detached_head(monkeypatch):
         "Should not attempt origin/<branch> inference for detached HEAD"
     )
     assert status["upstream"] is None
+    assert status["upstream_inferred"] is False
     assert status["upstream_ahead"] is None
     assert status["upstream_behind"] is None

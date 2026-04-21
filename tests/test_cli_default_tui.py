@@ -213,7 +213,7 @@ def test_cmd_tui_custom_select_skips_scope_and_shows_full_checklist(monkeypatch,
     assert "Scope" not in menu_titles
     assert len(checklist_calls) == 1
     assert [item[0] for item in checklist_calls[0]] == ["1", "2", "3", "4"]
-    assert [item[2] for item in checklist_calls[0]] == [True, False, True, False]
+    assert [item[2] for item in checklist_calls[0]] == [True, True, True, False]
     assert [item[1].split(" [", 1)[0] for item in checklist_calls[0]] == ["alpha", "beta", "gamma", "delta"]
     assert "pull" in checklist_calls[0][0][1]
     assert "feature/x" in checklist_calls[0][2][1]

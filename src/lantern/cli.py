@@ -2124,12 +2124,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
                     selectable_rows = list(smart_rows)
                 elif preset == "custom_select":
-                    # All repos are selectable; default-check those with actions this
-                    # preset will actually perform (pull/clone and latest-branch checkout).
-                    # Push is excluded because include_push defaults to False here.
+                    # All repos are selectable; default-check those with a pending
+                    # pull/clone/push or an actionable latest branch.
                     candidates = [
                         r for r in smart_rows
-                        if str(r.get("action") or "") in {"clone", "pull"}
+                        if str(r.get("action") or "") in {"clone", "pull", "push"}
                         or _fleet_latest_branch_is_actionable(r)
                     ]
                     selectable_rows = list(smart_rows)
@@ -2235,7 +2234,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
                     only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
 
-                if preset == "full_reconcile":
+                if preset in {"full_reconcile", "custom_select"}:
                     push_choice = _dialog_menu(
                         "Push Mode",
                         "Should ahead repositories be pushed to remote?",
@@ -2256,12 +2255,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     apply_cmd.append("--flat")
                 if preset == "fast_pull":
                     apply_cmd.append("--pull-behind")
-                elif preset == "full_reconcile":
+                else:
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                     if include_push:
                         apply_cmd.append("--push-ahead")
-                else:
-                    apply_cmd.extend(["--clone-missing", "--pull-behind"])
                 if checkout_branch:
                     apply_cmd.extend(["--checkout-branch", checkout_branch])
                 if checkout_pr:
