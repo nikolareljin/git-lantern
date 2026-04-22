@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple, TypedDict
 
 
 class RepoStatus(TypedDict):
-    branch: str
+    branch: Optional[str]
     upstream: Optional[str]
     upstream_inferred: bool
     upstream_ahead: Optional[str]
@@ -40,10 +40,10 @@ def fetch(repo_path: str) -> None:
     )
 
 
-def get_branch(repo_path: str) -> str:
+def get_branch(repo_path: str) -> Optional[str]:
     branch = run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
     if not branch or branch == "HEAD":
-        return "detached"
+        return None
     return branch
 
 
@@ -205,7 +205,7 @@ def repo_status(repo_path: str) -> RepoStatus:
         ahead, behind = count_ahead_behind(repo_path, "HEAD", upstream)
         upstream_ahead = str(ahead)
         upstream_behind = str(behind)
-    elif branch and branch != "detached":
+    elif branch:
         # No tracking branch — fall back to origin/<branch> if it exists so
         # repos without @{u} still show as behind-remote after a fetch.
         candidate = f"origin/{branch}"

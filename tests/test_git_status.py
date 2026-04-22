@@ -99,13 +99,13 @@ def test_get_working_tree_state_treats_git_failures_as_unsafe(monkeypatch):
     }
 
 
-def test_get_branch_maps_literal_head_to_detached(monkeypatch):
+def test_get_branch_maps_literal_head_to_none(monkeypatch):
     monkeypatch.setattr(
         git,
         "run_git",
         lambda _path, args: "HEAD" if args == ["rev-parse", "--abbrev-ref", "HEAD"] else "",
     )
-    assert git.get_branch("/fake/repo") == "detached"
+    assert git.get_branch("/fake/repo") is None
 
 
 def test_repo_status_infers_upstream_from_origin_branch_when_no_tracking_branch(monkeypatch):
@@ -139,7 +139,7 @@ def test_repo_status_skips_origin_inference_for_detached_head(monkeypatch):
     def fake_run_git(_path, args):
         tried.append(list(args))
         if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
-            return "HEAD"  # detached — get_branch() maps this to "detached"
+            return "HEAD"  # detached — get_branch() maps this to None
         if args[:3] == ["rev-parse", "--abbrev-ref", "--symbolic-full-name"]:
             return ""
         if args == ["remote"]:
@@ -152,6 +152,7 @@ def test_repo_status_skips_origin_inference_for_detached_head(monkeypatch):
     assert all(args[:2] != ["rev-parse", "--verify"] for args in tried), (
         "Should not attempt origin/<branch> inference for detached HEAD"
     )
+    assert status["branch"] is None
     assert status["upstream"] is None
     assert status["upstream_inferred"] is False
     assert status["upstream_ahead"] is None
