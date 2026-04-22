@@ -2149,6 +2149,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 if preset == "custom_select":
                     # Skip the scope menu and go straight to the per-repo checklist.
+                    # The checklist flow must distinguish cancel from confirming an
+                    # empty selection so the existing "No repositories selected"
+                    # feedback can still be shown.
                     scope = "select"
                 else:
                     scope_items: List[Tuple[str, str]] = [
