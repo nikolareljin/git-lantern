@@ -2074,7 +2074,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     ("branch_rollout", "Latest Branch Rollout (checkout/update latest detected branch)"),
                     ("pr_rollout", "PR Rollout (checkout PR branch)"),
                     ("full_reconcile", "Full Reconcile (clone/pull/push)"),
-                    ("custom_select", "Custom Select (pick any repos to pull/checkout)"),
+                    ("custom_select", "Custom Select (pick repos/actions: clone/pull/push/checkout-latest)"),
                 ]
                 preset = _dialog_menu("Smart Sync", "Choose a preset:", preset_items, height, width)
                 if not preset:
@@ -3957,7 +3957,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         and branch_name not in {"-", "detached", "HEAD"}
                         and _is_valid_git_branch_name(branch_name)
                     ):
-                        push_cmd = ["git", "-C", path, "push", "origin", branch_name]
+                        push_cmd = ["git", "-C", path, "push", "--", "origin", branch_name]
                     else:
                         push_cmd = []
                 if not push_cmd:

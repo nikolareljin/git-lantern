@@ -869,7 +869,7 @@ def test_cmd_fleet_apply_uses_explicit_origin_push_when_no_upstream(monkeypatch,
     out = capsys.readouterr().out
     assert rc == 0
     assert "push:ok" in out
-    assert ["git", "-C", str(repo_path), "push", "origin", "main"] in seen_cmds
+    assert ["git", "-C", str(repo_path), "push", "--", "origin", "main"] in seen_cmds
 
 
 def test_cmd_fleet_apply_skips_explicit_origin_push_when_branch_name_invalid(monkeypatch, tmp_path, capsys):
