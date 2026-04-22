@@ -2074,6 +2074,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     ("branch_rollout", "Latest Branch Rollout (checkout/update latest detected branch)"),
                     ("pr_rollout", "PR Rollout (checkout PR branch)"),
                     ("full_reconcile", "Full Reconcile (clone/pull/push)"),
+                    ("custom_select", "Custom Select (pick repos/actions: clone/pull/push/checkout-latest)"),
                 ]
                 preset = _dialog_menu("Smart Sync", "Choose a preset:", preset_items, height, width)
                 if not preset:
@@ -2122,6 +2123,15 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 elif preset == "branch_rollout":
                     candidates = [r for r in smart_rows if _fleet_latest_branch_is_actionable(r)]
                     selectable_rows = list(smart_rows)
+                elif preset == "custom_select":
+                    # All repos are selectable; default-check those with a pending
+                    # pull/clone/push or an actionable latest branch.
+                    candidates = [
+                        r for r in smart_rows
+                        if str(r.get("action") or "") in {"clone", "pull", "push"}
+                        or _fleet_latest_branch_is_actionable(r)
+                    ]
+                    selectable_rows = list(smart_rows)
                 else:
                     candidates = list(smart_rows)
                     selectable_rows = list(candidates)
@@ -2135,16 +2145,23 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 include_push = False
                 preview_checkout_branch = ""
                 preview_checkout_pr = ""
-                preview_checkout_latest_branch = preset == "branch_rollout"
+                preview_checkout_latest_branch = preset in {"branch_rollout", "custom_select"}
 
-                scope_items: List[Tuple[str, str]] = [
-                    ("all", "All actionable repositories"),
-                    ("clean", "Only repos without in-progress Git operations"),
-                    ("select", "Pick repositories"),
-                ]
-                scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
-                if not scope:
-                    continue
+                if preset == "custom_select":
+                    # Skip the scope menu and go straight to the per-repo checklist.
+                    # The checklist flow must distinguish cancel from confirming an
+                    # empty selection so the existing "No repositories selected"
+                    # feedback can still be shown.
+                    scope = "select"
+                else:
+                    scope_items: List[Tuple[str, str]] = [
+                        ("all", "All actionable repositories"),
+                        ("clean", "Only repos without in-progress Git operations"),
+                        ("select", "Pick repositories"),
+                    ]
+                    scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
+                    if not scope:
+                        continue
 
                 selected_rows = list(candidates)
                 if scope == "clean":
@@ -2193,7 +2210,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 checkout_branch = ""
                 checkout_pr = ""
                 checkout_latest_branch = False
-                if preset == "branch_rollout":
+                if preset in {"branch_rollout", "custom_select"}:
                     checkout_latest_branch = True
                 elif preset == "pr_rollout":
                     pr_numbers: List[str] = []
@@ -2220,7 +2237,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
                     only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
 
-                if preset == "full_reconcile":
+                if preset in {"full_reconcile", "custom_select"}:
                     push_choice = _dialog_menu(
                         "Push Mode",
                         "Should ahead repositories be pushed to remote?",
@@ -2241,12 +2258,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     apply_cmd.append("--flat")
                 if preset == "fast_pull":
                     apply_cmd.append("--pull-behind")
-                elif preset == "full_reconcile":
+                else:
                     apply_cmd.extend(["--clone-missing", "--pull-behind"])
                     if include_push:
                         apply_cmd.append("--push-ahead")
-                else:
-                    apply_cmd.extend(["--clone-missing", "--pull-behind"])
                 if checkout_branch:
                     apply_cmd.extend(["--checkout-branch", checkout_branch])
                 if checkout_pr:
@@ -3892,25 +3907,43 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append("pull:dry-run")
                 action_records.append({"action": "pull", "status": "dry-run"})
             else:
-                proc = subprocess.run(
-                    ["git", "-C", path, "pull", "--ff-only"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                )
-                ok = proc.returncode == 0
-                statuses.append(f"pull:{'ok' if ok else 'fail'}")
-                action_records.append({"action": "pull", "status": "ok" if ok else "fail"})
-                if not ok:
-                    rollback = _attempt_repo_rollback(path, original_head, original_branch)
-                    action_records.append(
-                        {
-                            "action": "rollback",
-                            "status": rollback.get("restored", "no"),
-                            "detail": rollback.get("steps", "none"),
-                        }
+                pull_cmd = ["git", "-C", path, "pull", "--ff-only"]
+                if not git.get_upstream(path):
+                    # No tracking branch — supply remote and branch explicitly so
+                    # git pull succeeds for repos detected via the origin/<branch>
+                    # fallback in repo_status().
+                    branch_name = str(row.get("branch") or "").strip()
+                    if (
+                        branch_name
+                        and branch_name not in {"-", "detached", "HEAD"}
+                        and _is_valid_git_branch_name(branch_name)
+                    ):
+                        pull_cmd = ["git", "-C", path, "pull", "--ff-only", "--", "origin", branch_name]
+                    else:
+                        pull_cmd = []
+                if not pull_cmd:
+                    statuses.append("pull:skip-invalid-branch")
+                    action_records.append({"action": "pull", "status": "skip-invalid-branch"})
+                else:
+                    proc = subprocess.run(
+                        pull_cmd,
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
                     )
+                    ok = proc.returncode == 0
+                    statuses.append(f"pull:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "pull", "status": "ok" if ok else "fail"})
+                    if not ok:
+                        rollback = _attempt_repo_rollback(path, original_head, original_branch)
+                        action_records.append(
+                            {
+                                "action": "rollback",
+                                "status": rollback.get("restored", "no"),
+                                "detail": rollback.get("steps", "none"),
+                            }
+                        )
         elif state == "ahead-remote" and args.push_ahead:
             if args.only_clean and row.get("clean") != "yes":
                 statuses.append("push:skip-dirty")
@@ -3919,16 +3952,31 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append("push:dry-run")
                 action_records.append({"action": "push", "status": "dry-run"})
             else:
-                proc = subprocess.run(
-                    ["git", "-C", path, "push"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                )
-                ok = proc.returncode == 0
-                statuses.append(f"push:{'ok' if ok else 'fail'}")
-                action_records.append({"action": "push", "status": "ok" if ok else "fail"})
+                push_cmd = ["git", "-C", path, "push"]
+                if not git.get_upstream(path):
+                    branch_name = str(row.get("branch") or "").strip()
+                    if (
+                        branch_name
+                        and branch_name not in {"-", "detached", "HEAD"}
+                        and _is_valid_git_branch_name(branch_name)
+                    ):
+                        push_cmd = ["git", "-C", path, "push", "--", "origin", branch_name]
+                    else:
+                        push_cmd = []
+                if not push_cmd:
+                    statuses.append("push:skip-invalid-branch")
+                    action_records.append({"action": "push", "status": "skip-invalid-branch"})
+                else:
+                    proc = subprocess.run(
+                        push_cmd,
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
+                    )
+                    ok = proc.returncode == 0
+                    statuses.append(f"push:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "push", "status": "ok" if ok else "fail"})
 
         effective_branch = checkout_branch
         if pr_number:

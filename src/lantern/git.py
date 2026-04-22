@@ -1,6 +1,18 @@
 import os
 import subprocess
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, TypedDict
+
+
+class RepoStatus(TypedDict):
+    branch: Optional[str]
+    upstream: Optional[str]
+    upstream_inferred: bool
+    upstream_ahead: Optional[str]
+    upstream_behind: Optional[str]
+    main_ref: Optional[str]
+    main_ahead: Optional[str]
+    main_behind: Optional[str]
+    default_refs: Optional[str]
 
 
 def run_git(repo_path: str, args: list) -> str:
@@ -28,9 +40,11 @@ def fetch(repo_path: str) -> None:
     )
 
 
-def get_branch(repo_path: str) -> str:
+def get_branch(repo_path: str) -> Optional[str]:
     branch = run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
-    return branch or "detached"
+    if not branch or branch == "HEAD":
+        return None
+    return branch
 
 
 def get_upstream(repo_path: str) -> Optional[str]:
@@ -181,15 +195,25 @@ def get_default_branch_refs(repo_path: str) -> Dict[str, str]:
     return refs
 
 
-def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
+def repo_status(repo_path: str) -> RepoStatus:
     branch = get_branch(repo_path)
     upstream = get_upstream(repo_path)
     upstream_ahead = None
     upstream_behind = None
+    upstream_inferred = False
     if upstream:
         ahead, behind = count_ahead_behind(repo_path, "HEAD", upstream)
         upstream_ahead = str(ahead)
         upstream_behind = str(behind)
+    elif branch:
+        # No tracking branch — fall back to origin/<branch> if it exists so
+        # repos without @{u} still show as behind-remote after a fetch.
+        candidate = f"origin/{branch}"
+        if run_git(repo_path, ["rev-parse", "--verify", candidate]):
+            ahead, behind = count_ahead_behind(repo_path, "HEAD", candidate)
+            upstream_ahead = str(ahead)
+            upstream_behind = str(behind)
+            upstream_inferred = True
 
     default_refs = get_default_branch_refs(repo_path)
     main_ref = get_default_branch_ref(repo_path)
@@ -203,6 +227,7 @@ def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
     return {
         "branch": branch,
         "upstream": upstream,
+        "upstream_inferred": upstream_inferred,
         "upstream_ahead": upstream_ahead,
         "upstream_behind": upstream_behind,
         "main_ref": main_ref,
