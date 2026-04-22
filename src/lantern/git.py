@@ -1,6 +1,18 @@
 import os
 import subprocess
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, TypedDict
+
+
+class RepoStatus(TypedDict):
+    branch: str
+    upstream: Optional[str]
+    upstream_inferred: bool
+    upstream_ahead: Optional[str]
+    upstream_behind: Optional[str]
+    main_ref: Optional[str]
+    main_ahead: Optional[str]
+    main_behind: Optional[str]
+    default_refs: Optional[str]
 
 
 def run_git(repo_path: str, args: list) -> str:
@@ -183,7 +195,7 @@ def get_default_branch_refs(repo_path: str) -> Dict[str, str]:
     return refs
 
 
-def repo_status(repo_path: str) -> Dict[str, Optional[str]]:
+def repo_status(repo_path: str) -> RepoStatus:
     branch = get_branch(repo_path)
     upstream = get_upstream(repo_path)
     upstream_ahead = None
