@@ -828,3 +828,89 @@ def test_cmd_fleet_apply_skips_explicit_origin_pull_when_branch_name_invalid(mon
     assert "pull:skip-invalid-branch" in out
     assert ["git", "-C", str(repo_path), "pull", "--ff-only"] not in seen_cmds
     assert ["git", "-C", str(repo_path), "pull", "--ff-only", "--", "origin", "--upload-pack=sh"] not in seen_cmds
+
+
+def test_cmd_fleet_apply_uses_explicit_origin_push_when_no_upstream(monkeypatch, tmp_path, capsys):
+    repo_path = tmp_path / "demo"
+    repo_path.mkdir()
+    seen_cmds = []
+
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [
+                {
+                    "repo": "demo",
+                    "state": "ahead-remote",
+                    "path": str(repo_path),
+                    "clean": "yes",
+                    "branch": "main",
+                    "latest_branch": "main",
+                    "action": "push",
+                }
+            ],
+            {},
+        ),
+    )
+    monkeypatch.setattr(cli.git, "get_upstream", lambda _path: None)
+
+    def fake_run(args, check=False, **kwargs):
+        seen_cmds.append(list(args))
+        return type("Proc", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    rc = cli.cmd_fleet_apply(_make_apply_args(push_ahead=True, dry_run=False))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "push:ok" in out
+    assert ["git", "-C", str(repo_path), "push", "origin", "main"] in seen_cmds
+
+
+def test_cmd_fleet_apply_skips_explicit_origin_push_when_branch_name_invalid(monkeypatch, tmp_path, capsys):
+    repo_path = tmp_path / "demo"
+    repo_path.mkdir()
+    seen_cmds = []
+
+    monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
+    monkeypatch.setattr(cli, "_fleet_load_remote", lambda _args: {"repos": []})
+    monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
+    monkeypatch.setattr(
+        cli,
+        "_fleet_plan_records",
+        lambda _args, payload=None: (
+            [
+                {
+                    "repo": "demo",
+                    "state": "ahead-remote",
+                    "path": str(repo_path),
+                    "clean": "yes",
+                    "branch": "--force",
+                    "latest_branch": "main",
+                    "action": "push",
+                }
+            ],
+            {},
+        ),
+    )
+    monkeypatch.setattr(cli.git, "get_upstream", lambda _path: None)
+    monkeypatch.setattr(cli, "_is_valid_git_branch_name", lambda _branch: False)
+
+    def fake_run(args, check=False, **kwargs):
+        seen_cmds.append(list(args))
+        return type("Proc", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    rc = cli.cmd_fleet_apply(_make_apply_args(push_ahead=True, dry_run=False))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "push:skip-invalid-branch" in out
+    assert ["git", "-C", str(repo_path), "push"] not in seen_cmds
+    assert ["git", "-C", str(repo_path), "push", "origin", "--force"] not in seen_cmds

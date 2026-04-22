@@ -3949,16 +3949,31 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 statuses.append("push:dry-run")
                 action_records.append({"action": "push", "status": "dry-run"})
             else:
-                proc = subprocess.run(
-                    ["git", "-C", path, "push"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                )
-                ok = proc.returncode == 0
-                statuses.append(f"push:{'ok' if ok else 'fail'}")
-                action_records.append({"action": "push", "status": "ok" if ok else "fail"})
+                push_cmd = ["git", "-C", path, "push"]
+                if not git.get_upstream(path):
+                    branch_name = str(row.get("branch") or "").strip()
+                    if (
+                        branch_name
+                        and branch_name not in {"-", "detached", "HEAD"}
+                        and _is_valid_git_branch_name(branch_name)
+                    ):
+                        push_cmd = ["git", "-C", path, "push", "origin", branch_name]
+                    else:
+                        push_cmd = []
+                if not push_cmd:
+                    statuses.append("push:skip-invalid-branch")
+                    action_records.append({"action": "push", "status": "skip-invalid-branch"})
+                else:
+                    proc = subprocess.run(
+                        push_cmd,
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
+                    )
+                    ok = proc.returncode == 0
+                    statuses.append(f"push:{'ok' if ok else 'fail'}")
+                    action_records.append({"action": "push", "status": "ok" if ok else "fail"})
 
         effective_branch = checkout_branch
         if pr_number:
