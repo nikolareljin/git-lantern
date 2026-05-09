@@ -134,6 +134,51 @@ def test_fetch_pr_unresolved_thread_count_counts_unresolved():
     assert count == 2
 
 
+def test_fetch_pr_unresolved_thread_count_paginates_review_threads():
+    first_page = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [
+                            {"isResolved": True},
+                            {"isResolved": False},
+                        ],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "cursor-1"},
+                    }
+                }
+            }
+        }
+    }
+    second_page = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [
+                            {"isResolved": False},
+                            {"isResolved": False},
+                        ],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            }
+        }
+    }
+    first_proc = MagicMock(returncode=0, stdout=json.dumps(first_page))
+    second_proc = MagicMock(returncode=0, stdout=json.dumps(second_page))
+
+    with patch("shutil.which", return_value="/usr/bin/gh"), patch(
+        "subprocess.run", side_effect=[first_proc, second_proc]
+    ) as run_mock:
+        count = pr_sweep.fetch_pr_unresolved_thread_count("owner", "repo", 42)
+
+    assert count == 3
+    assert run_mock.call_count == 2
+    assert "-F" in run_mock.call_args_list[1].args[0]
+    assert "cursor=cursor-1" in run_mock.call_args_list[1].args[0]
+
+
 def test_fetch_pr_unresolved_thread_count_returns_minus_one_when_gh_missing():
     with patch("shutil.which", return_value=None):
         count = pr_sweep.fetch_pr_unresolved_thread_count("owner", "repo", 1)
@@ -208,6 +253,26 @@ def test_discover_eligible_prs_excludes_archived(monkeypatch):
     )
 
     assert all(j["repo"] == "user/live" for j in jobs)
+
+
+def test_discover_eligible_prs_preserves_archived_flag_in_rest_fallback(monkeypatch):
+    api_repos = [
+        {"name": "user/live", "fork": False, "archived": False},
+        {"name": "user/old", "fork": False, "archived": True},
+    ]
+    monkeypatch.setattr(pr_sweep, "list_owner_repos", lambda owner: None)
+    monkeypatch.setattr("lantern.forge.fetch_repos", lambda *args, **kwargs: api_repos)
+    monkeypatch.setattr(pr_sweep, "fetch_pr_unresolved_thread_count", lambda *_: 1)
+    monkeypatch.setattr(
+        "lantern.github.fetch_open_pull_requests",
+        lambda owner, repo, token, **kw: [_make_pr(1)],
+    )
+
+    jobs, _ = pr_sweep.discover_eligible_prs(
+        owner="user", token=None, forge_url="", skip_forks=True, skip_frozen=False
+    )
+
+    assert [j["repo"] for j in jobs] == ["user/live"]
 
 
 def test_discover_eligible_prs_excludes_frozen(monkeypatch):
@@ -310,3 +375,20 @@ def test_discover_eligible_prs_skips_prs_with_zero_unresolved(monkeypatch):
     )
 
     assert jobs == []
+
+
+def test_discover_eligible_prs_skips_prs_with_unknown_unresolved_count(monkeypatch):
+    repos = [{"full_name": "user/repo", "fork": False, "archived": False}]
+    monkeypatch.setattr(pr_sweep, "list_owner_repos", lambda owner: repos)
+    monkeypatch.setattr(pr_sweep, "fetch_pr_unresolved_thread_count", lambda *_: -1)
+    monkeypatch.setattr(
+        "lantern.github.fetch_open_pull_requests",
+        lambda owner, repo, token, **kw: [_make_pr(1)],
+    )
+
+    jobs, warnings = pr_sweep.discover_eligible_prs(
+        owner="user", token=None, forge_url="", skip_forks=True, skip_frozen=False
+    )
+
+    assert jobs == []
+    assert any("could not be determined" in warning for warning in warnings)

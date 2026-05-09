@@ -4688,7 +4688,7 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
         owner = _pr_sweep.gh_authenticated_user() or ""
         if not owner:
             print(
-                "Error: --owner is required (could not detect from 'gh auth status').",
+                "Error: --owner is required (could not detect from 'gh api user --jq .login').",
                 file=sys.stderr,
             )
             return 1
@@ -4702,14 +4702,18 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
         [r.strip() for r in repos_raw.split(",") if r.strip()] if repos_raw else None
     )
 
-    forge_url = (getattr(args, "forge_url", "") or os.environ.get("FORGE_MIND_URL", "")).strip()
+    forge_url = (
+        getattr(args, "forge_url", "")
+        or os.environ.get("FORGE_MIND_URL", "")
+        or "http://localhost:8000"
+    ).strip()
 
     jobs, warnings = _pr_sweep.discover_eligible_prs(
         owner=owner,
         token=token,
         forge_url=forge_url,
         skip_forks=not getattr(args, "include_forks", False),
-        skip_frozen=getattr(args, "skip_frozen", True) and bool(forge_url),
+        skip_frozen=getattr(args, "skip_frozen", True),
         repos_filter=repos_filter,
     )
 
@@ -5592,7 +5596,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr_sweep_parser.add_argument(
         "--owner",
         default="",
-        help="GitHub username to scan (default: authenticated user via 'gh auth status')",
+        help="GitHub username to scan (default: authenticated user via 'gh api user --jq .login')",
     )
     pr_sweep_parser.add_argument("--server", default="", help="configured server name")
     pr_sweep_parser.add_argument("--token", default="", help="GitHub personal access token")
@@ -5603,15 +5607,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pr_sweep_parser.add_argument(
         "--skip-frozen",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="exclude repos that forge-mind marks as frozen/archived (default: true)",
-    )
-    pr_sweep_parser.add_argument(
-        "--no-skip-frozen",
-        dest="skip_frozen",
-        action="store_false",
-        help="disable forge-mind frozen filter",
     )
     pr_sweep_parser.add_argument(
         "--forge-url",

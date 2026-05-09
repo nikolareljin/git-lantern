@@ -11,8 +11,9 @@ All notable changes to git-lantern are documented in this file.
 - Added `lantern pr sweep` command for automated discovery of open pull requests with
   unresolved review threads across a personal GitHub namespace. The command:
   - Filters out forked and archived repositories automatically.
-  - Queries a local forge-mind instance (`$FORGE_MIND_URL` or `--forge-url`) to exclude
-    frozen/archived projects; falls back gracefully with a warning when unreachable.
+  - Queries a local forge-mind instance (`--forge-url`, `$FORGE_MIND_URL`, or
+    `http://localhost:8000`) to exclude frozen/archived projects; falls back gracefully
+    with a warning when unreachable.
   - Accepts `--repos` to restrict the sweep to specific repositories.
   - Prompts for PR selection (dialog TUI or stdin fallback) when a repository has more
     than one eligible PR.

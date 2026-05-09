@@ -82,37 +82,57 @@ def fetch_pr_unresolved_thread_count(owner: str, repo: str, pr_number: int) -> i
         return -1
 
     query = (
-        "query($owner:String!,$repo:String!,$pr:Int!){"
+        "query($owner:String!,$repo:String!,$pr:Int!,$cursor:String){"
         "repository(owner:$owner,name:$repo){"
         "pullRequest(number:$pr){"
-        "reviewThreads(first:100){nodes{isResolved}}}}}"
+        "reviewThreads(first:100,after:$cursor){"
+        "nodes{isResolved} pageInfo{hasNextPage endCursor}}}}}"
     )
+    unresolved = 0
+    cursor: Optional[str] = None
     try:
-        proc = subprocess.run(
-            [
+        while True:
+            cmd = [
                 gh, "api", "graphql",
                 "-f", f"query={query}",
                 "-F", f"owner={owner}",
                 "-F", f"repo={repo}",
                 "-F", f"pr={pr_number}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-        if proc.returncode != 0:
-            return -1
-        data = json.loads(proc.stdout or "{}")
+            ]
+            if cursor:
+                cmd.extend(["-F", f"cursor={cursor}"])
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if proc.returncode != 0:
+                return -1
+            data = json.loads(proc.stdout or "{}")
+
+            review_threads = (
+                (((data.get("data") or {}).get("repository") or {}).get("pullRequest") or {})
+                .get("reviewThreads")
+            )
+            if not isinstance(review_threads, dict):
+                return -1
+            nodes = review_threads.get("nodes", [])
+            if not isinstance(nodes, list):
+                return -1
+            unresolved += sum(
+                1 for t in nodes if isinstance(t, dict) and not t.get("isResolved")
+            )
+
+            page_info = review_threads.get("pageInfo") or {}
+            if not isinstance(page_info, dict) or not page_info.get("hasNextPage"):
+                return unresolved
+            cursor = str(page_info.get("endCursor") or "")
+            if not cursor:
+                return -1
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
         return -1
-
-    nodes = (
-        (((data.get("data") or {}).get("repository") or {}).get("pullRequest") or {})
-        .get("reviewThreads", {})
-        .get("nodes", [])
-    )
-    return sum(1 for t in nodes if isinstance(t, dict) and not t.get("isResolved"))
 
 
 def discover_eligible_prs(
@@ -160,7 +180,11 @@ def discover_eligible_prs(
         except ValueError as exc:
             return [], [f"Failed to list repos for '{owner}': {exc}"]
         raw_repos = [
-            {"full_name": r.get("name", ""), "fork": False, "archived": False}
+            {
+                "full_name": r.get("name", ""),
+                "fork": bool(r.get("fork")),
+                "archived": bool(r.get("archived")),
+            }
             for r in api_repos
         ]
 
@@ -202,8 +226,13 @@ def discover_eligible_prs(
             if pr_number is None:
                 continue
             unresolved = fetch_pr_unresolved_thread_count(repo_owner, repo_name, pr_number)
-            # Include when count is unknown (-1) or positive; skip confirmed-zero.
-            if unresolved != 0:
+            if unresolved < 0:
+                warnings.append(
+                    f"Warning: skipped {full_name}#{pr_number}; unresolved review "
+                    "thread count could not be determined."
+                )
+                continue
+            if unresolved > 0:
                 jobs.append(
                     {
                         "repo": full_name,
