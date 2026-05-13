@@ -9,8 +9,9 @@ from typing import Set
 def fetch_frozen_repos(forge_url: str, timeout: int = 10) -> Set[str]:
     """Return the set of frozen repo full_names from forge-mind's fleet status endpoint.
 
-    Raises network or parse exceptions when the endpoint cannot be queried. Callers
-    are responsible for catching those failures and deciding whether to continue.
+    Raises ``urllib.error.URLError``, ``TimeoutError``, ``json.JSONDecodeError``, or
+    ``OSError`` when the endpoint cannot be queried or the response is malformed.
+    Callers are responsible for catching those failures and deciding whether to continue.
     """
     url = f"{forge_url.rstrip('/')}/api/v1/fleet/status"
     req = urllib.request.Request(url)

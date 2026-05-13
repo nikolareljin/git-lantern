@@ -4696,6 +4696,7 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
     cfg = lantern_config.load_config()
     server = lantern_config.get_server(cfg, getattr(args, "server", ""))
     token = (getattr(args, "token", "") or server.get("token") or "").strip() or None
+    base_url = str(server.get("base_url") or "")
 
     repos_raw = getattr(args, "repos", "") or ""
     repos_filter: Optional[List[str]] = (
@@ -4715,6 +4716,7 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
         skip_forks=not getattr(args, "include_forks", False),
         skip_frozen=getattr(args, "skip_frozen", True),
         repos_filter=repos_filter,
+        base_url=base_url,
     )
 
     for warning in warnings:
@@ -5607,9 +5609,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pr_sweep_parser.add_argument(
         "--skip-frozen",
-        action=argparse.BooleanOptionalAction,
+        dest="skip_frozen",
+        action="store_true",
         default=True,
         help="exclude repos that forge-mind marks as frozen/archived (default: true)",
+    )
+    pr_sweep_parser.add_argument(
+        "--no-skip-frozen",
+        dest="skip_frozen",
+        action="store_false",
+        help="include repos that forge-mind marks as frozen/archived",
     )
     pr_sweep_parser.add_argument(
         "--forge-url",

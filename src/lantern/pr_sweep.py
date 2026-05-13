@@ -142,6 +142,7 @@ def discover_eligible_prs(
     skip_forks: bool,
     skip_frozen: bool,
     repos_filter: Optional[List[str]] = None,
+    base_url: str = "",
 ) -> Tuple[List[Dict], List[str]]:
     """Discover open PRs with unresolved review threads across *owner*'s repos.
 
@@ -152,6 +153,7 @@ def discover_eligible_prs(
         skip_forks:   Exclude forked repositories.
         skip_frozen:  Exclude repos that forge-mind considers frozen/archived.
         repos_filter: If given, restrict scan to these ``owner/repo`` full names.
+        base_url:     GitHub API base URL (empty string means ``https://api.github.com``).
 
     Returns:
         A ``(jobs, warnings)`` tuple where *jobs* is a list of dicts::
@@ -174,7 +176,7 @@ def discover_eligible_prs(
                 owner,
                 token,
                 not skip_forks,
-                "",
+                base_url,
                 include_user=True,
             )
         except ValueError as exc:
@@ -220,7 +222,9 @@ def discover_eligible_prs(
             continue
         repo_owner, repo_name = parts
 
-        open_prs = github.fetch_open_pull_requests(repo_owner, repo_name, token)
+        open_prs = github.fetch_open_pull_requests(
+            repo_owner, repo_name, token, stale_days=36500, base_url=base_url or None
+        )
         for pr in open_prs:
             pr_number = pr.get("number")
             if pr_number is None:
