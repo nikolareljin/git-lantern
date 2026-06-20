@@ -265,3 +265,11 @@ See `docs/commands.md` for the full command reference and `docs/use-cases.md` fo
 
 - `--fetch` will run `git fetch --prune` on each repo to refresh remote refs.
 - Ahead/behind and main-branch distance use local remote-tracking refs.
+
+---
+
+## Clone traffic
+
+![Clone traffic](https://raw.githubusercontent.com/nikolareljin/stats/main/charts/git-lantern.svg)
+
+_Updated daily. Total and unique cloners over the last 14 days._
