@@ -41,6 +41,7 @@ Commands (jump to detailed guides):
 - `lantern forge clone` -> `docs/use-cases.md#clone-missing-repos-to-a-workspace`
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`
 - `lantern forge snippets ...` -> `docs/use-cases.md#list-snippets-githubgitlabbitbucket`
+- `lantern pr sweep` -> `docs/commands.md#lantern-pr-sweep` (find open PRs with unresolved review threads)
 - `lantern config export/import/path` -> `docs/use-cases.md#server-config-github-gitlab-bitbucket`
 - `lantern config setup` - Interactive server configuration (TUI)
 - `lantern tui` - Interactive TUI mode (explicit subcommand)
@@ -70,6 +71,8 @@ lantern forge list --server github.com --output data/github.json
 lantern forge list --server github.com --org my-org --org platform --with-user --output data/github-orgs.json
 lantern forge clone --server github.com --input data/github.json --root ~/workspace
 lantern forge gists list --server github.com --output data/gists.json
+lantern pr sweep --dry-run
+lantern pr sweep nikolareljin/git-lantern --json
 ```
 
 Selection tips:

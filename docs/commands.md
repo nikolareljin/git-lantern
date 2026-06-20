@@ -625,3 +625,60 @@ lantern forge gists update GIST_ID --delete old.txt --force
 lantern forge gists create --file ./notes.txt --description "Notes" --public
 lantern forge gists create --file ./notes.txt --description "Notes" --private
 ```
+
+## Pull request commands (`lantern pr ...`)
+
+### `lantern pr sweep`
+
+**Purpose**: discover open pull requests that still have unresolved review threads
+across your personal GitHub namespace, so you can decide which ones to fix next.
+
+**Synopsis**:
+```
+lantern pr sweep [OPTIONS] [REPO...]
+```
+
+**What it does**:
+- Lists every repo owned by `--owner` (default: the authenticated GitHub user from
+  `gh api user --jq .login`).
+- Filters out forks and archived repos automatically.
+- Optionally queries a forge-mind instance to skip frozen/archived projects.
+- For each remaining repo, finds open PRs and counts unresolved review threads via
+  the GitHub GraphQL API; only PRs with at least one unresolved thread are listed.
+- Discovery and listing only — it does **not** dispatch fixes itself. Use the output
+  to drive a per-PR fix workflow (e.g. `implement_pr.txt`).
+- GitHub servers only; selecting a non-GitHub provider fails fast.
+
+**Requirements**:
+- GitHub CLI (`gh`) authenticated, or a token via `--token`/`GITHUB_TOKEN`.
+
+**Options**:
+- `--owner <user>`: GitHub username to scan (default: authenticated user).
+- `--server <name>`: configured server name (must be a GitHub provider).
+- `--token <token>`: GitHub personal access token (overrides config/`gh`).
+- `--include-forks`: include forked repositories (default: exclude forks).
+- `--skip-frozen` / `--no-skip-frozen`: toggle the forge-mind frozen filter
+  (default: enabled).
+- `--forge-url <url>`: forge-mind base URL (default: `$FORGE_MIND_URL` or
+  `http://localhost:8000`).
+- `--dry-run`: print the eligible PR table and exit (no selection prompt).
+- `--json`: emit selected jobs as JSON for machine consumption.
+- `REPO...`: optional positional `owner/repo` names to restrict the sweep.
+
+**Examples**:
+```bash
+# Preview every eligible PR for the authenticated user
+lantern pr sweep --dry-run
+
+# Scan a specific account
+lantern pr sweep --owner nikolareljin --dry-run
+
+# Restrict the sweep to specific repos
+lantern pr sweep nikolareljin/git-lantern nikolareljin/ci-helpers --dry-run
+
+# Skip the forge-mind frozen filter
+lantern pr sweep --no-skip-frozen --dry-run
+
+# Machine-readable output for a downstream fix workflow
+lantern pr sweep --json
+```
