@@ -108,6 +108,8 @@ def fetch_repos(
                 "html_url": repo.get("html_url"),
                 "owner": owner_login,
                 "org": org_label,
+                "fork": bool(repo.get("fork")),
+                "archived": bool(repo.get("archived")),
             }
         )
 

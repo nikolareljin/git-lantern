@@ -4678,6 +4678,149 @@ def cmd_todo_issues(args: argparse.Namespace) -> int:
         os.chdir(original_cwd)
 
 
+def cmd_pr_sweep(args: argparse.Namespace) -> int:
+    """Discover open PRs with unresolved review threads across personal repos."""
+    from . import pr_sweep as _pr_sweep
+    from collections import defaultdict
+
+    owner = args.owner.strip()
+    if not owner:
+        owner = _pr_sweep.gh_authenticated_user() or ""
+        if not owner:
+            print(
+                "Error: --owner is required (could not detect from 'gh api user --jq .login').",
+                file=sys.stderr,
+            )
+            return 1
+
+    cfg = lantern_config.load_config()
+    server = lantern_config.get_server(cfg, getattr(args, "server", ""))
+    provider = (server.get("provider") or "github").strip().lower()
+    if provider != "github":
+        print(
+            f"Error: 'pr sweep' supports GitHub only; server "
+            f"'{server.get('name', '')}' uses provider '{provider}'.",
+            file=sys.stderr,
+        )
+        return 1
+    token = (getattr(args, "token", "") or server.get("token") or "").strip() or None
+    base_url = str(server.get("base_url") or "")
+
+    repos_list = getattr(args, "repos", None) or []
+    repos_filter: Optional[List[str]] = (
+        [r.strip() for r in repos_list if r.strip()] or None
+    )
+
+    forge_url = (
+        getattr(args, "forge_url", "")
+        or os.environ.get("FORGE_MIND_URL", "")
+        or "http://localhost:8000"
+    ).strip()
+
+    jobs, warnings = _pr_sweep.discover_eligible_prs(
+        owner=owner,
+        token=token,
+        forge_url=forge_url,
+        skip_forks=not getattr(args, "include_forks", False),
+        skip_frozen=getattr(args, "skip_frozen", True),
+        repos_filter=repos_filter,
+        base_url=base_url,
+    )
+
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+
+    if not jobs:
+        print("No eligible PRs found with unresolved review threads.")
+        return 0
+
+    if getattr(args, "dry_run", False):
+        print(f"[DRY-RUN] {len(jobs)} eligible PR(s) with unresolved review threads:\n")
+        rows = [
+            {
+                "repo": j["repo"],
+                "pr": f"#{j['pr']}",
+                "threads": str(j["unresolved_threads"]) if j["unresolved_threads"] >= 0 else "?",
+                "title": j["title"][:55],
+                "url": j["url"],
+            }
+            for j in jobs
+        ]
+        print(render_table(rows, ["repo", "pr", "threads", "title", "url"]))
+        return 0
+
+    # Group by repo for interactive selection when >1 PR exists per repo.
+    by_repo: Dict[str, List[Dict]] = defaultdict(list)
+    for job in jobs:
+        by_repo[job["repo"]].append(job)
+
+    selected: List[Dict] = []
+    for repo, repo_jobs in by_repo.items():
+        if len(repo_jobs) == 1:
+            selected.extend(repo_jobs)
+        elif _dialog_available():
+            items = [
+                (str(j["pr"]), f"PR #{j['pr']}: {j['title'][:50]}", True)
+                for j in repo_jobs
+            ]
+            chosen = _dialog_checklist(
+                f"PR Sweep — {repo}",
+                f"Select PRs to fix in {repo}:",
+                items,
+            )
+            selected.extend(j for j in repo_jobs if str(j["pr"]) in chosen)
+        else:
+            print(f"\nRepository: {repo}")
+            for idx, j in enumerate(repo_jobs, start=1):
+                threads_label = (
+                    f"{j['unresolved_threads']} thread(s)"
+                    if j["unresolved_threads"] >= 0
+                    else "unknown threads"
+                )
+                print(f"  [{idx}] PR #{j['pr']}: {j['title']} ({threads_label})")
+            try:
+                line = input("Select by number (comma-separated, or Enter for all): ").strip()
+            except EOFError:
+                line = ""
+            if not line or line.lower() == "all":
+                selected.extend(repo_jobs)
+            else:
+                chosen_indices = {
+                    int(x.strip()) for x in line.split(",") if x.strip().isdigit()
+                }
+                selected.extend(j for i, j in enumerate(repo_jobs, start=1) if i in chosen_indices)
+
+    if not selected:
+        print("No PRs selected.")
+        return 0
+
+    if getattr(args, "json_output", False):
+        print(json.dumps(selected, indent=2))
+        return 0
+
+    print(f"\n{len(selected)} PR(s) selected for review sweep:\n")
+    rows = [
+        {
+            "repo": j["repo"],
+            "pr": f"#{j['pr']}",
+            "threads": str(j["unresolved_threads"]) if j["unresolved_threads"] >= 0 else "?",
+            "title": j["title"][:55],
+            "url": j["url"],
+        }
+        for j in selected
+    ]
+    print(render_table(rows, ["repo", "pr", "threads", "title", "url"]))
+
+    print(
+        "\nThis command lists eligible PRs only; it does not dispatch fixes itself.\n"
+        "To act on them, run a fix workflow (e.g. implement_pr.txt) per PR below:"
+    )
+    for j in selected:
+        print(f"  {j['repo']}  PR #{j['pr']}  {j['url']}")
+
+    return 0
+
+
 def cmd_github_clone(args: argparse.Namespace) -> int:
     with open(args.input, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -5455,6 +5598,62 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_logs.add_argument("--show-results", action="store_true", help="include per-repo result table in fallback output")
     fleet_logs.add_argument("--no-pretty", action="store_true", help="disable jq pretty JSON output and use tabular summary output")
     fleet_logs.set_defaults(func=cmd_fleet_logs)
+
+    pr = sub.add_parser("pr", help="pull request utilities")
+    pr_sub = pr.add_subparsers(dest="pr_command", required=True)
+
+    pr_sweep_parser = pr_sub.add_parser(
+        "sweep",
+        help="discover open PRs with unresolved review threads across personal repos",
+    )
+    pr_sweep_parser.add_argument(
+        "--owner",
+        default="",
+        help="GitHub username to scan (default: authenticated user via 'gh api user --jq .login')",
+    )
+    pr_sweep_parser.add_argument("--server", default="", help="configured server name")
+    pr_sweep_parser.add_argument("--token", default="", help="GitHub personal access token")
+    pr_sweep_parser.add_argument(
+        "--include-forks",
+        action="store_true",
+        help="include forked repositories (default: exclude forks)",
+    )
+    pr_sweep_parser.add_argument(
+        "--skip-frozen",
+        dest="skip_frozen",
+        action="store_true",
+        default=True,
+        help="exclude repos that forge-mind marks as frozen/archived (default: true)",
+    )
+    pr_sweep_parser.add_argument(
+        "--no-skip-frozen",
+        dest="skip_frozen",
+        action="store_false",
+        help="include repos that forge-mind marks as frozen/archived",
+    )
+    pr_sweep_parser.add_argument(
+        "--forge-url",
+        default="",
+        help="forge-mind base URL (default: $FORGE_MIND_URL or http://localhost:8000)",
+    )
+    pr_sweep_parser.add_argument(
+        "repos",
+        nargs="*",
+        metavar="REPO",
+        help="optional owner/repo names to restrict the sweep to (e.g. user/proj-a user/proj-b)",
+    )
+    pr_sweep_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list eligible PRs without interactive selection or dispatch output",
+    )
+    pr_sweep_parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="output selected jobs as JSON",
+    )
+    pr_sweep_parser.set_defaults(func=cmd_pr_sweep)
 
     report = sub.add_parser("report", help="export scan results")
     report.add_argument("--input", default="data/repos.json")
