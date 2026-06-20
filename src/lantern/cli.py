@@ -4695,6 +4695,14 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
 
     cfg = lantern_config.load_config()
     server = lantern_config.get_server(cfg, getattr(args, "server", ""))
+    provider = (server.get("provider") or "github").strip().lower()
+    if provider != "github":
+        print(
+            f"Error: 'pr sweep' supports GitHub only; server "
+            f"'{server.get('name', '')}' uses provider '{provider}'.",
+            file=sys.stderr,
+        )
+        return 1
     token = (getattr(args, "token", "") or server.get("token") or "").strip() or None
     base_url = str(server.get("base_url") or "")
 
@@ -4803,7 +4811,10 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
     ]
     print(render_table(rows, ["repo", "pr", "threads", "title", "url"]))
 
-    print("\nDispatch each PR fix as a subagent running implement_pr.txt:")
+    print(
+        "\nThis command lists eligible PRs only; it does not dispatch fixes itself.\n"
+        "To act on them, run a fix workflow (e.g. implement_pr.txt) per PR below:"
+    )
     for j in selected:
         print(f"  {j['repo']}  PR #{j['pr']}  {j['url']}")
 

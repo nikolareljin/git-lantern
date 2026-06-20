@@ -123,7 +123,7 @@ def fetch_pr_unresolved_thread_count(owner: str, repo: str, pr_number: int) -> i
             if not isinstance(nodes, list):
                 return -1
             unresolved += sum(
-                1 for t in nodes if isinstance(t, dict) and not t.get("isResolved")
+                1 for t in nodes if isinstance(t, dict) and t.get("isResolved") is False
             )
 
             page_info = review_threads.get("pageInfo") or {}

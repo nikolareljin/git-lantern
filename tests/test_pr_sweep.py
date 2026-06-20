@@ -392,3 +392,111 @@ def test_discover_eligible_prs_skips_prs_with_unknown_unresolved_count(monkeypat
 
     assert jobs == []
     assert any("could not be determined" in warning for warning in warnings)
+
+
+# ---------------------------------------------------------------------------
+# cmd_pr_sweep end-to-end tests (parser + command handler)
+# ---------------------------------------------------------------------------
+
+
+from lantern import cli  # noqa: E402
+
+
+def _sweep_args(**overrides):
+    parser = cli.build_parser()
+    argv = ["pr", "sweep", "--owner", "user"]
+    argv += overrides.pop("argv_extra", [])
+    args = parser.parse_args(argv)
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+def _patch_github_server(monkeypatch):
+    monkeypatch.setattr(cli.lantern_config, "load_config", lambda: {})
+    monkeypatch.setattr(
+        cli.lantern_config,
+        "get_server",
+        lambda cfg, name="": {"name": "github.com", "provider": "github", "token": ""},
+    )
+
+
+def test_pr_sweep_parser_repos_positional():
+    parser = cli.build_parser()
+    args = parser.parse_args(["pr", "sweep", "user/a", "user/b", "--dry-run"])
+    assert args.repos == ["user/a", "user/b"]
+    assert args.dry_run is True
+    assert args.func == cli.cmd_pr_sweep
+
+
+def test_cmd_pr_sweep_dry_run_lists_jobs(monkeypatch, capsys):
+    _patch_github_server(monkeypatch)
+    monkeypatch.setattr(
+        cli, "render_table", lambda rows, cols: "\n".join(r["repo"] for r in rows)
+    )
+    monkeypatch.setattr(
+        "lantern.pr_sweep.discover_eligible_prs",
+        lambda **kw: (
+            [{"repo": "user/a", "pr": 7, "title": "Fix", "url": "u", "unresolved_threads": 2}],
+            [],
+        ),
+    )
+
+    args = _sweep_args(argv_extra=["--dry-run"])
+    rc = cli.cmd_pr_sweep(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "DRY-RUN" in out
+    assert "user/a" in out
+
+
+def test_cmd_pr_sweep_json_output(monkeypatch, capsys):
+    _patch_github_server(monkeypatch)
+    job = {"repo": "user/a", "pr": 7, "title": "Fix", "url": "u", "unresolved_threads": 2}
+    monkeypatch.setattr(
+        "lantern.pr_sweep.discover_eligible_prs", lambda **kw: ([job], [])
+    )
+
+    args = _sweep_args(argv_extra=["--json"])
+    rc = cli.cmd_pr_sweep(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(out) == [job]
+
+
+def test_cmd_pr_sweep_no_jobs(monkeypatch, capsys):
+    _patch_github_server(monkeypatch)
+    monkeypatch.setattr(
+        "lantern.pr_sweep.discover_eligible_prs", lambda **kw: ([], [])
+    )
+
+    rc = cli.cmd_pr_sweep(_sweep_args())
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No eligible PRs" in out
+
+
+def test_cmd_pr_sweep_rejects_non_github_provider(monkeypatch, capsys):
+    monkeypatch.setattr(cli.lantern_config, "load_config", lambda: {})
+    monkeypatch.setattr(
+        cli.lantern_config,
+        "get_server",
+        lambda cfg, name="": {"name": "gitlab.com", "provider": "gitlab", "token": ""},
+    )
+    called = {"discover": False}
+
+    def _fail(**kw):
+        called["discover"] = True
+        return ([], [])
+
+    monkeypatch.setattr("lantern.pr_sweep.discover_eligible_prs", _fail)
+
+    rc = cli.cmd_pr_sweep(_sweep_args())
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "GitHub only" in err
+    assert called["discover"] is False
