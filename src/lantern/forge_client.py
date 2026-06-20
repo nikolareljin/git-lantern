@@ -1,7 +1,6 @@
 """Minimal HTTP client for the forge-mind portfolio API."""
 
 import json
-import urllib.error
 import urllib.request
 from typing import Set
 
@@ -15,11 +14,8 @@ def fetch_frozen_repos(forge_url: str, timeout: int = 10) -> Set[str]:
     """
     url = f"{forge_url.rstrip('/')}/api/v1/fleet/status"
     req = urllib.request.Request(url)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        raise
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
 
     frozen: Set[str] = set()
     if isinstance(data, list):

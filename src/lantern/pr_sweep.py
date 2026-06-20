@@ -7,6 +7,7 @@ applying filters for forks, archived repos, and forge-mind frozen projects.
 import json
 import shutil
 import subprocess
+import urllib.error
 from typing import Dict, List, Optional, Set, Tuple
 
 from . import github
@@ -206,7 +207,7 @@ def discover_eligible_prs(
     if skip_frozen and forge_url:
         try:
             frozen = _forge_client.fetch_frozen_repos(forge_url)
-        except Exception:
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
             warnings.append(
                 f"Warning: could not reach forge-mind at {forge_url!r}; skipping frozen filter."
             )

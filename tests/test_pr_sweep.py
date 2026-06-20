@@ -39,7 +39,7 @@ def test_fetch_frozen_repos_raises_on_network_error():
     import urllib.error
 
     with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
-        with pytest.raises(Exception):
+        with pytest.raises(urllib.error.URLError):
             forge_client.fetch_frozen_repos("http://localhost:8000")
 
 

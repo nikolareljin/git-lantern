@@ -14,7 +14,8 @@ All notable changes to git-lantern are documented in this file.
   - Queries a local forge-mind instance (`--forge-url`, `$FORGE_MIND_URL`, or
     `http://localhost:8000`) to exclude frozen/archived projects; falls back gracefully
     with a warning when unreachable.
-  - Accepts `--repos` to restrict the sweep to specific repositories.
+  - Accepts optional positional `REPO...` arguments to restrict the sweep to specific
+    repositories (`lantern pr sweep [OPTIONS] [REPO...]`).
   - Prompts for PR selection (dialog TUI or stdin fallback) when a repository has more
     than one eligible PR.
   - Supports `--dry-run` for a non-interactive preview and `--json` for machine-readable

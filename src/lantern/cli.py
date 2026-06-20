@@ -4698,9 +4698,9 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
     token = (getattr(args, "token", "") or server.get("token") or "").strip() or None
     base_url = str(server.get("base_url") or "")
 
-    repos_raw = getattr(args, "repos", "") or ""
+    repos_list = getattr(args, "repos", None) or []
     repos_filter: Optional[List[str]] = (
-        [r.strip() for r in repos_raw.split(",") if r.strip()] if repos_raw else None
+        [r.strip() for r in repos_list if r.strip()] or None
     )
 
     forge_url = (
@@ -5626,9 +5626,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="forge-mind base URL (default: $FORGE_MIND_URL or http://localhost:8000)",
     )
     pr_sweep_parser.add_argument(
-        "--repos",
-        default="",
-        help="comma-separated owner/repo names to restrict the sweep to",
+        "repos",
+        nargs="*",
+        metavar="REPO",
+        help="optional owner/repo names to restrict the sweep to (e.g. user/proj-a user/proj-b)",
     )
     pr_sweep_parser.add_argument(
         "--dry-run",
