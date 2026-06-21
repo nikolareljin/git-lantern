@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Version tag to release (e.g. 0.8.0). Leave blank to use the ref."
-        required: false
-        default: ""
+        description: "Version tag to release (e.g. 0.8.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,7 +15,8 @@ jobs:
   github-release:
     # Create the GitHub Release for the tag, using CHANGELOG notes when present
     # and falling back to GitHub auto-generated notes otherwise. Dispatched by
-    # auto-tag.yml after a release/x.y.z -> main merge, or runnable manually.
+    # auto-tag.yml after a release/x.y.z -> main merge (which always supplies
+    # release_tag), or runnable manually with an explicit tag.
     uses: nikolareljin/ci-helpers/.github/workflows/create-github-release.yml@production
     with:
-      release_tag: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
+      release_tag: ${{ inputs.release_tag }}

@@ -4,8 +4,7 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-06-20
-
+## 2026-06-20 — v0.8.0
 ### Changed
 
 - Release automation now reuses the shared `ci-helpers` workflows instead of
@@ -21,13 +20,15 @@ All notable changes to git-lantern are documented in this file.
 - Removed the previously non-functional, placeholder-configured package build
   jobs (Homebrew/deb/rpm/PPA) from `release.yml`; native package generation is
   tracked separately.
+- Aligned CHANGELOG version headers to the `YYYY-MM-DD — vX.Y.Z` format that
+  `ci-helpers/create-github-release.yml` parses, so the curated notes appear in
+  each GitHub Release instead of falling back to auto-generated notes.
 
 ### Added
 
 - Bumped the `scripts/script-helpers` submodule to the latest `production`.
 
-## [0.7.0] - 2026-05-03
-
+## 2026-05-03 — v0.7.0
 ### Added
 
 - Added `lantern pr sweep` command for automated discovery of open pull requests with
@@ -48,8 +49,7 @@ All notable changes to git-lantern are documented in this file.
   - Added `src/lantern/pr_sweep.py` (discovery logic) and `src/lantern/forge_client.py`
     (forge-mind HTTP client).
 
-## [0.6.0] - 2026-04-13
-
+## 2026-04-13 — v0.6.0
 ### Fixed
 
 - Fixed fleet sync detection for repositories without a configured upstream tracking branch.
@@ -64,14 +64,12 @@ All notable changes to git-lantern are documented in this file.
   checkout. Repos with pending actions are pre-checked; all others are visible and selectable.
   This provides direct control when automatic state classification is not sufficient.
 
-## [0.5.1] - 2026-04-02
-
+## 2026-04-02 — v0.5.1
 ### Fixed
 
 - Fixed fleet planning and forge cloning so the default destination now prefers the repository basename in the workspace root, while still falling back to the encoded namespaced path when another repository already uses that basename.
 
-## [0.5.0] - 2026-03-29
-
+## 2026-03-29 — v0.5.0
 ### Added
 
 - Added `--flat` option to `fleet overview`, `fleet plan`, `fleet apply`, and `forge clone` to identify or clone missing repositories directly into the root directory (see `--root`) instead of a namespaced subdirectory.
@@ -81,8 +79,7 @@ All notable changes to git-lantern are documented in this file.
 
 - Changed default namespaced clone destination to use actual subdirectories (e.g., `namespace/repo`) instead of URL-encoded flat paths (e.g., `namespace%2Frepo`), restoring more intuitive local workspace organization while still preserving namespace uniqueness.
 
-## [0.4.4] - 2026-03-26
-
+## 2026-03-26 — v0.4.4
 ### Added
 
 - Added `lantern fleet overview` as the primary fleet dashboard snapshot command, with optional JSON export for later reuse.
@@ -100,29 +97,25 @@ All notable changes to git-lantern are documented in this file.
 - Fixed latest-branch apply paths to avoid an extra fetch when the caller already refreshed refs.
 - Fixed dashboard recommended actions so clean repositories are no longer incorrectly flagged for `review-local`.
 
-## [0.4.3] - 2026-03-24
-
+## 2026-03-24 — v0.4.3
 ### Fixed
 
 - Fixed fleet sync and forge clone destination resolution so namespaced remote identifiers such as `my-namespace/my-repo` clone into a flat, unique workspace path like `my-namespace%2Fmy-repo` instead of creating nested namespace directories or colliding with similarly named repos from other namespaces.
 - Fixed Smart Sync and Fleet Sync TUI progress dialogs to suppress subprocess output while the modal is visible, preventing clone and checkout text from leaking underneath the active dialog.
 
-## [0.4.2] - 2026-03-24
-
+## 2026-03-24 — v0.4.2
 ### Fixed
 
 - Fixed latest-branch detection so the symbolic `origin/HEAD` ref is ignored during fleet refresh planning instead of being misread as a real branch named `origin`.
 - Corrected `fleet apply --checkout-latest-branch` and related status/plan flows to target the real most-recent branch candidate, preventing false `checkout-latest:origin:skip-no-remote` rollouts.
 
-## [0.4.1] - 2026-03-23
-
+## 2026-03-23 — v0.4.1
 ### Fixed
 
 - Fixed `auto-tag` so merges of `release/x.y.z` branches to `main` can still derive the release version even when GitHub does not associate the merge commit with the PR immediately; the workflow now falls back to parsing the merge commit message before tagging.
 - Corrected the missing `0.4.0` tag by tagging the merged `release/0.4.0` commit on `main` and keeping future patch/minor releases on the repaired auto-tag path.
 
-## [0.4.0] - 2026-03-22
-
+## 2026-03-22 — v0.4.0
 ### Added
 
 - Added selective latest-branch fleet refresh planning so Lantern can focus branch refreshes on repos where the detected latest branch is actually actionable.
@@ -132,8 +125,7 @@ All notable changes to git-lantern are documented in this file.
 - Changed `fleet apply --checkout-latest-branch` and the TUI latest-branch rollout flows to show current-to-latest branch transitions, allow explicit repo selection, and preserve untracked-only worktrees while still blocking tracked uncommitted changes.
 - Changed latest-branch auto-scope so missing-local repos are only included when cloning is enabled, and TUI latest-refresh checklists now start from the full repo set with actionable repos preselected.
 
-## [0.3.3] - 2026-03-20
-
+## 2026-03-20 — v0.3.3
 ### Changed
 
 - Changed `lantern todo issues --todo-file ...` duplicate detection to match existing issues by normalized title plus body fingerprint across all issue states, so re-importing `TODO.txt` will not recreate already closed issues.
@@ -143,8 +135,7 @@ All notable changes to git-lantern are documented in this file.
 
 - Added an `About` entry to the interactive TUI with GitHub and LinkedIn profile links.
 
-## [0.3.0] - 2026-03-02
-
+## 2026-03-02 — v0.3.0
 ### Added
 
 - Added `lantern todo issues` command to create GitHub issues from `TODO.txt` with duplicate checks by title/body.
@@ -160,8 +151,7 @@ All notable changes to git-lantern are documented in this file.
 - Changed `fleet plan` output to always include a `latest_branch` column; `prs` is still shown only with `--with-prs`.
 - Changed `lantern` default invocation behavior to launch TUI when no subcommand is provided (same as `lantern tui`).
 
-## [0.2.0] - 2026-02-28
-
+## 2026-02-28 — v0.2.0
 ### Highlights
 
 - Added GitHub organization-aware repository listing:
