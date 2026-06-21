@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Version tag to release (e.g. 0.8.0)"
+        description: "Semver version to release, no leading 'v' (e.g. 0.8.0 or 0.8.0-rc1)"
         required: true
         type: string
 

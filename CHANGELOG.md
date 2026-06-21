@@ -23,9 +23,6 @@ All notable changes to git-lantern are documented in this file.
 - Aligned CHANGELOG version headers to the `YYYY-MM-DD — vX.Y.Z` format that
   `ci-helpers/create-github-release.yml` parses, so the curated notes appear in
   each GitHub Release instead of falling back to auto-generated notes.
-
-### Added
-
 - Bumped the `scripts/script-helpers` submodule to the latest `production`.
 
 ## 2026-05-03 — v0.7.0
