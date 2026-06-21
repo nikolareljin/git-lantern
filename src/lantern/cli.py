@@ -843,8 +843,9 @@ def _run_lantern_subprocess(
     result = subprocess.run(cmd_args, **kwargs)
     if result.returncode != 0 and capture:
         stderr = (result.stderr or "").strip()
-        if stderr:
-            _dialog_msgbox("Error", f"Command failed:\n{stderr}", height, width)
+        stdout = (result.stdout or "").strip()
+        detail = stderr or stdout or f"Command exited with status {result.returncode}."
+        _dialog_msgbox("Error", f"Command failed:\n{detail}", height, width)
     return result
 
 
@@ -2770,8 +2771,17 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     if result.returncode == 0:
                         if forge_action == "list_file":
                             _dialog_msgbox("List", f"Repository list saved to:\n{output}")
-                        elif result.stdout:
+                        elif result.stdout and result.stdout.strip():
                             _dialog_textbox_from_text(f"Repositories on {server}", result.stdout, height, width)
+                        else:
+                            _dialog_msgbox(
+                                "Repositories",
+                                f"No repositories returned for {server}.\n\n"
+                                "If this is unexpected, verify the server token/scope, "
+                                "or toggle 'Forks' in Session settings.",
+                                height,
+                                width,
+                            )
 
             elif forge_action == "clone":
                 input_file = _resolve_existing_repo_list_file(session["root"])
@@ -2843,8 +2853,15 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     if result.returncode == 0:
                         if forge_action == "snippets_file":
                             _dialog_msgbox("Snippets", f"Snippet list saved to:\n{output}")
-                        elif result.stdout:
+                        elif result.stdout and result.stdout.strip():
                             _dialog_textbox_from_text(f"Gists/Snippets on {server}", result.stdout, height, width)
+                        else:
+                            _dialog_msgbox(
+                                "Gists/Snippets",
+                                f"No gists/snippets returned for {server}.",
+                                height,
+                                width,
+                            )
 
             elif forge_action == "snippet_dl":
                 config = lantern_config.load_config()
