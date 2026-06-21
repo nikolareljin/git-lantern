@@ -4,6 +4,28 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-20
+
+### Changed
+
+- Release automation now reuses the shared `ci-helpers` workflows instead of
+  repo-local scripts:
+  - `auto-tag.yml` calls `ci-helpers/auto-tag-release.yml`, which detects a
+    `release/x.y.z` -> `main` merge, creates and pushes the version tag, then
+    dispatches `release.yml` (via `workflow_dispatch`, which bypasses the
+    GitHub restriction where `GITHUB_TOKEN`-pushed tags do not fire tag-push
+    workflows).
+  - `release.yml` calls `ci-helpers/create-github-release.yml`, which generates
+    the GitHub Release for the tag using CHANGELOG notes when available and
+    GitHub auto-generated notes otherwise.
+- Removed the previously non-functional, placeholder-configured package build
+  jobs (Homebrew/deb/rpm/PPA) from `release.yml`; native package generation is
+  tracked separately.
+
+### Added
+
+- Bumped the `scripts/script-helpers` submodule to the latest `production`.
+
 ## [0.7.0] - 2026-05-03
 
 ### Added
