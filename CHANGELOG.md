@@ -4,6 +4,19 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## 2026-06-21 — v0.8.1
+### Fixed
+
+- TUI forge operations no longer dead-end silently to the main menu:
+  - `forge` > "List remote repositories (display)" now shows a "No
+    repositories returned" message when the listing succeeds but is empty,
+    instead of returning to the main menu with no feedback.
+  - `forge` > "List gists/snippets (display)" shows an equivalent
+    "No gists/snippets returned" message for empty results.
+  - Failed subprocess commands are now always surfaced in an Error dialog,
+    including when the command writes nothing to stderr (the exit status is
+    reported instead of failing silently).
+
 ## 2026-06-20 — v0.8.0
 ### Changed
 
