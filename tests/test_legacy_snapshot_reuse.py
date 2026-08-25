@@ -55,7 +55,7 @@ def test_cmd_sync_uses_snapshot_state_for_skip_checks(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "alpha:skip:in-progress" in out
-    assert "beta:skip:no-upstream" in out
+    assert "beta:skip:dirty" in out
 
 
 def test_build_fleet_snapshot_defaults_missing_fetch_and_skips_server_context_for_local_only(monkeypatch):

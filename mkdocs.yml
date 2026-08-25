@@ -1,0 +1,22 @@
+site_name: Git Lantern
+site_description: Local and forge repository visibility toolkit.
+site_url: https://nikolareljin.github.io/git-lantern/
+repo_url: https://github.com/nikolareljin/git-lantern
+repo_name: nikolareljin/git-lantern
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Use cases: use-cases.md
+  - Command reference: commands.md
+
+plugins:
+  - search
