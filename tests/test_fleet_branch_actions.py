@@ -125,6 +125,8 @@ def test_fleet_plan_records_prefers_missing_local_repo_basename(monkeypatch, tmp
             "branch": "-",
             "up": "-",
             "clean": "-",
+            "tracked_dirty": "no",
+            "git_operation_in_progress": "no",
             "action": "clone",
             "latest_branch": "-",
             "prs": "-",

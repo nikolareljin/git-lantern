@@ -3469,6 +3469,8 @@ def _snapshot_record_to_plan_row(snapshot: Dict[str, Any]) -> Dict[str, str]:
         "branch": str(snapshot.get("current_branch") or "-"),
         "up": str(snapshot.get("current_vs_upstream") or "-"),
         "clean": clean_value,
+        "tracked_dirty": str(snapshot.get("tracked_dirty") or "no"),
+        "git_operation_in_progress": str(snapshot.get("git_operation_in_progress") or "no"),
         "action": str(snapshot.get("primary_action") or "-"),
         "latest_branch": str(snapshot.get("latest_remote_branch") or "-"),
         "prs": str(snapshot.get("open_pr_numbers") or "-"),
