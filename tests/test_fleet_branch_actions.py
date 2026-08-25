@@ -259,6 +259,14 @@ def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):
     assert "Use only one checkout mode" in err
 
 
+def test_fleet_missing_local_destination_falls_back_when_namespace_parent_is_a_file(tmp_path):
+    (tmp_path / "org").write_text("reserved", encoding="utf-8")
+
+    destination = cli._fleet_missing_local_destination(str(tmp_path), "org/repo")
+
+    assert destination == str(tmp_path / "org%2Frepo")
+
+
 def test_fleet_missing_local_destination_rejects_unsafe_repo_names():
     for repo_name in ("../repo", "/repo", "org/../repo"):
         try:

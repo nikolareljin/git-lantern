@@ -360,3 +360,19 @@ def test_cmd_github_clone_dry_run_skips_repo_when_namespaced_destination_already
     out = capsys.readouterr().out
     assert rc == 0
     assert out == ""
+
+def test_cmd_github_clone_dry_run_normalizes_windows_namespace_separators(tmp_path, capsys, monkeypatch):
+    input_path = tmp_path / "repos.json"
+    input_path.write_text(
+        json.dumps({"repos": [{"name": "org/repo", "ssh_url": "git@example.com:org/repo.git"}]}),
+        encoding="utf-8",
+    )
+    original_normpath = cli.os.path.normpath
+    monkeypatch.setattr(cli.os.path, "normpath", lambda value: original_normpath(value).replace("/", "\\"))
+
+    rc = cli.cmd_github_clone(
+        argparse.Namespace(input=str(input_path), server="", root=str(tmp_path / "workspace"), tui=False, flat=False, dry_run=True)
+    )
+
+    assert rc == 0
+    assert str(tmp_path / "workspace" / "org" / "repo") in capsys.readouterr().out

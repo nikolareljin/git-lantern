@@ -3355,8 +3355,18 @@ def _fleet_missing_local_destination(
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
 
     basename = urllib.parse.quote(parts[-1], safe="")
-    namespaced = os.path.join(*(urllib.parse.quote(part, safe="") for part in parts))
-    candidates = [basename] if flat else [namespaced]
+    namespaced_parts = [urllib.parse.quote(part, safe="") for part in parts]
+    namespaced = os.path.join(*namespaced_parts)
+    encoded = urllib.parse.quote(normalized, safe="")
+    namespace_parent = root
+    namespace_parent_blocked = False
+    for part in namespaced_parts[:-1]:
+        namespace_parent = os.path.join(namespace_parent, part)
+        if os.path.exists(namespace_parent) and not os.path.isdir(namespace_parent):
+            namespace_parent_blocked = True
+            break
+    candidates = [basename] if flat else [encoded if namespace_parent_blocked else namespaced]
+    suffix_base = basename if flat else (encoded if namespace_parent_blocked else namespaced)
 
     reserved = {os.path.realpath(path) for path in (reserved_paths or set()) if path}
 
@@ -3373,7 +3383,7 @@ def _fleet_missing_local_destination(
 
     suffix = 2
     while suffix <= 1000:
-        repo_dir = f"{basename if flat else namespaced}-{suffix}"
+        repo_dir = f"{suffix_base}-{suffix}"
         candidate = os.path.join(root, repo_dir)
         candidate_real = os.path.realpath(candidate)
         if candidate_real not in reserved and not os.path.exists(candidate):
@@ -4890,6 +4900,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             if not _is_safe_repo_name(name):
                 continue
             normalized_name = os.path.normpath(name.replace("\\", "/"))
+            normalized_name = normalized_name.replace("\\", "/")
             parts = [part for part in normalized_name.split("/") if part]
             flat_layout = bool(getattr(args, "flat", False))
             destination_name = (
