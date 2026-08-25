@@ -2241,7 +2241,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         continue
 
                 dry_run = False
-                only_clean = False
+                only_clean = scope == "clean"
                 if _dialog_yesno("Advanced", "Adjust advanced options (dry-run / only-clean)?", height, width):
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
                     only_clean = _dialog_yesno("Only Clean", "Skip repos with tracked changes or in-progress Git operations?")
