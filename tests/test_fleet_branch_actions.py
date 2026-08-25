@@ -254,8 +254,19 @@ def test_cmd_fleet_apply_rejects_multiple_checkout_modes(capsys):
     args = _make_apply_args(checkout_branch="main", checkout_latest_branch=True)
     rc = cli.cmd_fleet_apply(args)
     err = capsys.readouterr().err
+
     assert rc == 1
     assert "Use only one checkout mode" in err
+
+
+def test_fleet_missing_local_destination_rejects_unsafe_repo_names():
+    for repo_name in ("../repo", "/repo", "org/../repo"):
+        try:
+            cli._fleet_missing_local_destination("/tmp/root", repo_name)
+        except ValueError as exc:
+            assert "Unsafe repository name" in str(exc)
+        else:
+            raise AssertionError(f"Expected unsafe name to be rejected: {repo_name}")
 
 
 def test_cmd_fleet_apply_uses_latest_branch_hint_in_dry_run(monkeypatch, capsys):

@@ -3342,6 +3342,9 @@ def _fleet_missing_local_destination(
     reserved_paths: Optional[Set[str]] = None,
     flat: bool = False,
 ) -> str:
+    if not _is_safe_repo_name(repo_name):
+        raise ValueError(f"Unsafe repository name: {repo_name!r}")
+
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
     if normalized in {"", "."}:
