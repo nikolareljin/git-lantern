@@ -4,6 +4,8 @@
 
 Local and GitHub repository visibility toolkit. The CLI is `lantern`.
 
+Full documentation is published at [nikolareljin.github.io/git-lantern](https://nikolareljin.github.io/git-lantern/).
+
 ## Quick start
 
 ```bash
