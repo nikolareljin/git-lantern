@@ -569,6 +569,15 @@ def _resolve_selected_records(records: List[Dict[str, str]], repos_csv: str) -> 
     return selected, None
 
 
+def _is_only_clean_eligible(record: Dict[str, Any]) -> bool:
+    """Return whether a record is safe for a mutating --only-clean action."""
+    return (
+        str(record.get("clean") or "yes") == "yes"
+        and str(record.get("tracked_dirty") or "no") != "yes"
+        and str(record.get("git_operation_in_progress") or "no") != "yes"
+    )
+
+
 def _apply_bulk_action(
     records: List[Dict[str, str]],
     action: str,
@@ -580,11 +589,10 @@ def _apply_bulk_action(
         name = str(rec.get("name") or "")
         path = str(rec.get("path") or "")
         upstream = str(rec.get("upstream") or "")
-        clean = str(rec.get("clean") or "no")
         result = "skip"
         detail = ""
 
-        if only_clean and clean != "yes":
+        if only_clean and not _is_only_clean_eligible(rec):
             results.append({"repo": name, "action": action, "result": "skip-dirty", "path": path})
             continue
 
@@ -2157,7 +2165,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 else:
                     scope_items: List[Tuple[str, str]] = [
                         ("all", "All actionable repositories"),
-                        ("clean", "Only repos without in-progress Git operations"),
+                        ("clean", "Only repos without tracked changes or in-progress Git operations"),
                         ("select", "Pick repositories"),
                     ]
                     scope = _dialog_menu("Scope", "Choose repository scope:", scope_items, height, width)
@@ -2166,7 +2174,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 selected_rows = list(candidates)
                 if scope == "clean":
-                    selected_rows = [r for r in selected_rows if str(r.get("clean") or "") in {"yes", "-"}]
+                    selected_rows = [r for r in selected_rows if _is_only_clean_eligible(r)]
                 elif scope == "select":
                     checklist_items: List[Tuple[str, str, bool]] = []
                     idx_to_row: Dict[str, Dict[str, str]] = {}
@@ -2236,7 +2244,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 only_clean = False
                 if _dialog_yesno("Advanced", "Adjust advanced options (dry-run / only-clean)?", height, width):
                     dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
-                    only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
+                    only_clean = _dialog_yesno("Only Clean", "Skip repos with tracked changes or in-progress Git operations?")
 
                 if preset in {"full_reconcile", "custom_select"}:
                     push_choice = _dialog_menu(
@@ -2487,7 +2495,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 checkout_latest_branch = True
 
             dry_run = _dialog_yesno("Dry Run", "Perform a dry run (no changes)?")
-            only_clean = _dialog_yesno("Only Clean", "Skip repos with in-progress Git operations?")
+            only_clean = _dialog_yesno("Only Clean", "Skip repos with tracked changes or in-progress Git operations?")
             push_choice = _dialog_menu(
                 "Push Mode",
                 "Should ahead repositories be pushed to remote?",
@@ -3917,7 +3925,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                             }
                         )
         elif state == "behind-remote" and args.pull_behind:
-            if args.only_clean and row.get("clean") != "yes":
+            if args.only_clean and not _is_only_clean_eligible(row):
                 statuses.append("pull:skip-dirty")
                 action_records.append({"action": "pull", "status": "skip-dirty"})
             elif args.dry_run:
@@ -3962,7 +3970,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                             }
                         )
         elif state == "ahead-remote" and args.push_ahead:
-            if args.only_clean and row.get("clean") != "yes":
+            if args.only_clean and not _is_only_clean_eligible(row):
                 statuses.append("push:skip-dirty")
                 action_records.append({"action": "push", "status": "skip-dirty"})
             elif args.dry_run:
@@ -4036,7 +4044,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 action_records.append({"action": checkout_action, "status": "invalid-branch"})
                 effective_branch = ""
         if effective_branch:
-            if args.only_clean and row.get("clean") == "no":
+            if args.only_clean and not _is_only_clean_eligible(row):
                 statuses.append(f"{checkout_action}:{effective_branch}:skip-dirty")
                 action_records.append({"action": checkout_action, "status": "skip-dirty", "branch": effective_branch})
             elif not clone_ok and not args.dry_run:
@@ -4297,6 +4305,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
             current_step += max(1, len(actions))
             _progress_line(current_step, total_steps, f"sync: skip in-progress {name}")
             records.append({"name": name, "path": path, "result": "skip:in-progress"})
+            continue
+        if args.only_clean and not _is_only_clean_eligible(snapshot):
+            current_step += max(1, len(actions))
+            _progress_line(current_step, total_steps, f"sync: skip dirty {name}")
+            records.append({"name": name, "path": path, "result": "skip:dirty"})
             continue
         if args.only_upstream and str(snapshot.get("upstream_branch") or "-") in {"", "-"}:
             current_step += max(1, len(actions))

@@ -7,6 +7,8 @@ Git Lantern is a Python command-line tool for scanning a workspace, seeing which
 ## Start here
 
 ```bash
+git clone https://github.com/nikolareljin/git-lantern.git
+cd git-lantern
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
