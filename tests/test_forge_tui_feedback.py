@@ -126,3 +126,16 @@ def test_forge_snippets_empty_result_shows_no_snippets_message(monkeypatch, tmp_
         title == "Gists/Snippets" and "No gists/snippets returned" in text
         for title, text in calls
     ), calls
+
+
+def test_dialog_yesno_defaults_to_yes(monkeypatch):
+    commands = []
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command) or SimpleNamespace(returncode=0),
+    )
+
+    assert cli._dialog_yesno("Clone Layout", "Use namespace directories?") is True
+    assert "--yesno" in commands[0]
+    assert "--defaultno" not in commands[0]

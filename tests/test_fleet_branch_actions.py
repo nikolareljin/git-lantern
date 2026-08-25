@@ -95,7 +95,7 @@ def test_fleet_apply_candidates_for_latest_filters_to_actionable_rows():
 
 
 
-def test_fleet_plan_records_prefers_missing_local_repo_basename(monkeypatch, tmp_path):
+def test_fleet_plan_records_uses_namespaced_destination_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
 
@@ -128,11 +128,11 @@ def test_fleet_plan_records_prefers_missing_local_repo_basename(monkeypatch, tmp
             "action": "clone",
             "latest_branch": "-",
             "prs": "-",
-            "path": str(tmp_path / "my-repo"),
+            "path": str(tmp_path / "my-namespace" / "my-repo"),
         }
     ]
 
-def test_fleet_plan_records_falls_back_to_namespaced_path_when_repo_basename_collides(monkeypatch, tmp_path):
+def test_fleet_plan_records_uses_namespaced_path_when_repo_basename_exists(monkeypatch, tmp_path):
     repo_path = tmp_path / "my-repo"
     repo_path.mkdir()
     monkeypatch.setattr(cli, "find_repos", lambda *_args, **_kwargs: [str(repo_path)])
@@ -177,7 +177,7 @@ def test_fleet_plan_records_falls_back_to_namespaced_path_when_repo_basename_col
     rows, _meta = cli._fleet_plan_records(args, payload=payload)
     missing_row = next(row for row in rows if row["repo"] == "my-namespace/my-repo")
 
-    assert missing_row["path"] == str(tmp_path / "my-namespace%2Fmy-repo")
+    assert missing_row["path"] == str(tmp_path / "my-namespace" / "my-repo")
 
 
 def test_fleet_plan_records_assigns_missing_local_destinations_deterministically(monkeypatch, tmp_path):
@@ -208,13 +208,13 @@ def test_fleet_plan_records_assigns_missing_local_destinations_deterministically
     rows, _meta = cli._fleet_plan_records(args, payload=payload)
 
     path_by_repo = {row["repo"]: row["path"] for row in rows}
-    assert path_by_repo["alpha/shared-repo"] == str(tmp_path / "shared-repo")
-    assert path_by_repo["beta/shared-repo"] == str(tmp_path / "beta%2Fshared-repo")
+    assert path_by_repo["alpha/shared-repo"] == str(tmp_path / "alpha" / "shared-repo")
+    assert path_by_repo["beta/shared-repo"] == str(tmp_path / "beta" / "shared-repo")
 
 
-def test_fleet_missing_local_destination_prefers_repo_basename():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/service'
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/service'
+def test_fleet_missing_local_destination_uses_namespace_by_default():
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-a/service') == '/tmp/root/org-a/service'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org-b/service') == '/tmp/root/org-b/service'
 
 
 def test_fleet_missing_local_destination_flat_layout():
@@ -228,24 +228,23 @@ def test_fleet_missing_local_destination_flat_layout_quotes_special_characters()
 
 
 def test_fleet_missing_local_destination_normalizes_trailing_separators():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/repo'
-    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/repo'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo/') == '/tmp/root/org/repo'
+    assert cli._fleet_missing_local_destination('/tmp/root', r'org\repo') == '/tmp/root/org/repo'
 
 
-def test_fleet_missing_local_destination_falls_back_to_encoded_namespace_on_collision(tmp_path):
+def test_fleet_missing_local_destination_ignores_flat_collision_by_default(tmp_path):
     reserved = {str(tmp_path / 'repo')}
-    assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo', reserved) == str(tmp_path / 'org%2Frepo')
+    assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo', reserved) == str(tmp_path / 'org' / 'repo')
 
 
 def test_fleet_missing_local_destination_uses_suffix_when_primary_candidates_are_unavailable(tmp_path):
-    (tmp_path / "repo").mkdir()
-    (tmp_path / "org%2Frepo").mkdir()
+    (tmp_path / "org" / "repo").mkdir(parents=True)
 
-    assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo') == str(tmp_path / 'repo-2')
+    assert cli._fleet_missing_local_destination(str(tmp_path), 'org/repo') == str(tmp_path / 'org' / 'repo-2')
 
 
 def test_fleet_missing_local_destination_escapes_safe_characters():
-    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo with space') == '/tmp/root/repo%20with%20space'
+    assert cli._fleet_missing_local_destination('/tmp/root', 'org/repo with space') == '/tmp/root/org/repo%20with%20space'
     assert cli._fleet_missing_local_destination('/tmp/root', 'org__repo') == '/tmp/root/org__repo'
 
 

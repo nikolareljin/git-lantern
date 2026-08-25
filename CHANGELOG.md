@@ -4,6 +4,13 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## 2026-08-25 — v0.8.2
+### Fixed
+
+- Restored namespaced clone destinations by default for Forge Clone and Fleet operations. Repositories such as `namespace/repo` now clone to `namespace/repo` beneath the selected root; `--flat` explicitly selects a root-level destination.
+- Updated TUI clone-layout prompts to default to using namespace directories.
+
+
 ## 2026-06-21 — v0.8.1
 ### Fixed
 

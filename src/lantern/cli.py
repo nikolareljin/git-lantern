@@ -2044,9 +2044,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     server = server_choice
             selected_server = lantern_config.get_server(config, server)
             selected_provider = str(selected_server.get("provider") or "github").lower()
-            flat = _dialog_yesno(
+            use_namespace = _dialog_yesno(
                 "Fleet Layout",
-                f"Clone missing repos into root directory (flat, no namespace)?\nRoot: {session['root']}",
+                f"Clone missing repos using namespace directories?\nRoot: {session['root']}",
             )
             fleet_items: List[Tuple[str, str]] = [
                 ("smart_sync", "Smart Sync (preset multi-repo update)"),
@@ -2105,7 +2105,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     include_forks=session["include_forks"],
                     with_prs=with_prs,
                     pr_stale_days=30,
-                    flat=flat,
+                    flat=not use_namespace,
                 )
                 try:
                     smart_rows, _smart_meta = _fleet_plan_records(smart_plan_args)
@@ -2255,7 +2255,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
                 apply_cmd = [sys.executable, "-m", "lantern", "fleet", "apply", *common_opts]
                 apply_cmd.append("--fetch")
-                if flat:
+                if not use_namespace:
                     apply_cmd.append("--flat")
                 if preset == "fast_pull":
                     apply_cmd.append("--pull-behind")
@@ -2339,7 +2339,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     plan_opts.append("--fetch")
                 if include_prs:
                     plan_opts.append("--with-prs")
-                if flat:
+                if not use_namespace:
                     plan_opts.append("--flat")
                 _dialog_infobox(
                     "Fleet Plan",
@@ -2380,7 +2380,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 include_forks=session["include_forks"],
                 with_prs=include_prs,
                 pr_stale_days=30,
-                flat=flat,
+                flat=not use_namespace,
             )
             try:
                 rows, _meta = _fleet_plan_records(plan_args)
@@ -2518,7 +2518,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 apply_cmd.append("--dry-run")
             if only_clean:
                 apply_cmd.append("--only-clean")
-            if flat:
+            if not use_namespace:
                 apply_cmd.append("--flat")
 
             confirmed_rows = _fleet_preflight_confirm(
@@ -2825,12 +2825,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
                         continue
                 clone_root = _dialog_inputbox("Clone Directory", "Enter directory to clone into:", session["root"])
                 if clone_root:
-                    flat = _dialog_yesno(
+                    use_namespace = _dialog_yesno(
                         "Clone Layout",
-                        f"Clone missing repos into selected clone directory:\n{clone_root}\n\nUse flat layout (no namespace)?",
+                        f"Clone missing repos into selected clone directory:\n{clone_root}\n\nUse namespace directories?",
                     )
                     cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
-                    if flat:
+                    if not use_namespace:
                         cmd_args.append("--flat")
                     _run_lantern_subprocess(cmd_args, height, width, capture=False)
 
@@ -3333,7 +3333,6 @@ def _fleet_missing_local_destination(
     repo_name: str,
     reserved_paths: Optional[Set[str]] = None,
     flat: bool = False,
-    prefer_existing_basename: bool = False,
 ) -> str:
     normalized = os.path.normpath(repo_name.strip().replace("\\", "/"))
     normalized = normalized.replace("\\", "/")
@@ -3345,20 +3344,10 @@ def _fleet_missing_local_destination(
         raise ValueError(f"Invalid repository name with empty basename: {repo_name!r}")
 
     basename = urllib.parse.quote(parts[-1], safe="")
-    encoded = "" if flat else urllib.parse.quote(normalized, safe="")
-    candidates = [basename]
-    if encoded and encoded != basename:
-        candidates.append(encoded)
+    namespaced = os.path.join(*(urllib.parse.quote(part, safe="") for part in parts))
+    candidates = [basename] if flat else [namespaced]
 
     reserved = {os.path.realpath(path) for path in (reserved_paths or set()) if path}
-    basename_candidate = os.path.join(root, basename)
-    basename_candidate_real = os.path.realpath(basename_candidate)
-    if (
-        prefer_existing_basename
-        and basename_candidate_real not in reserved
-        and os.path.exists(basename_candidate)
-    ):
-        return basename_candidate
 
     for repo_dir in candidates:
         if not repo_dir:
@@ -3373,7 +3362,7 @@ def _fleet_missing_local_destination(
 
     suffix = 2
     while suffix <= 1000:
-        repo_dir = f"{basename}-{suffix}"
+        repo_dir = f"{basename if flat else namespaced}-{suffix}"
         candidate = os.path.join(root, repo_dir)
         candidate_real = os.path.realpath(candidate)
         if candidate_real not in reserved and not os.path.exists(candidate):
@@ -4880,38 +4869,28 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             if not _is_safe_repo_name(name):
                 continue
             normalized_name = os.path.normpath(name.replace("\\", "/"))
+            parts = [part for part in normalized_name.split("/") if part]
+            flat_layout = bool(getattr(args, "flat", False))
+            destination_name = (
+                urllib.parse.quote(parts[-1], safe="")
+                if flat_layout
+                else os.path.join(*(urllib.parse.quote(part, safe="") for part in parts))
+            )
+            existing_destination = os.path.join(args.root, destination_name)
             remote_keys = _remote_repo_keys(repo)
-            basename = urllib.parse.quote(os.path.basename(normalized_name), safe="")
-            basename_path = os.path.join(args.root, basename)
-            prefer_existing_basename = False
-            dest: Optional[str] = None
-            if basename and os.path.exists(basename_path) and git.is_git_repo(basename_path):
-                existing_origin = _normalize_repo_url(str(git.get_origin_url(basename_path) or ""))
-                if existing_origin and existing_origin in remote_keys:
-                    prefer_existing_basename = True
-            if not bool(getattr(args, "flat", False)):
-                encoded = urllib.parse.quote(normalized_name, safe="")
-                encoded_path = os.path.join(args.root, encoded)
-                if (
-                    encoded
-                    and encoded != basename
-                    and os.path.exists(encoded_path)
-                    and git.is_git_repo(encoded_path)
-                ):
-                    existing_origin = _normalize_repo_url(str(git.get_origin_url(encoded_path) or ""))
-                    if (
-                        existing_origin
-                        and existing_origin in remote_keys
-                        and os.path.realpath(encoded_path) not in reserved_paths
-                    ):
-                        dest = encoded_path
-            if dest is None:
+            if (
+                os.path.realpath(existing_destination) not in reserved_paths
+                and os.path.exists(existing_destination)
+                and git.is_git_repo(existing_destination)
+                and _normalize_repo_url(str(git.get_origin_url(existing_destination) or "")) in remote_keys
+            ):
+                dest = existing_destination
+            else:
                 dest = _fleet_missing_local_destination(
                     args.root,
                     name,
                     reserved_paths=reserved_paths,
-                    flat=bool(getattr(args, "flat", False)),
-                    prefer_existing_basename=prefer_existing_basename,
+                    flat=flat_layout,
                 )
             planned[name] = dest
             reserved_paths.add(os.path.realpath(dest))
@@ -5540,7 +5519,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_overview.add_argument(
         "--flat",
         action="store_true",
-        help="use a flat destination layout for missing-local repos under the root directory (see --root); when cloning is performed by other commands, repos are placed directly under root with no namespace",
+        help="use a flat destination layout for missing-local repos directly under the root directory instead of the default namespace directories (see --root)",
     )
     fleet_overview.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_overview.add_argument("--output", default="", help="write the full fleet snapshot to JSON")
@@ -5563,7 +5542,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_plan.add_argument(
         "--flat",
         action="store_true",
-        help="use a flat layout (no namespace) for missing-local repos under the root directory (see --root); affects paths in the plan and clone destinations used by 'fleet apply'",
+        help="use a flat layout (no namespace) directly under the root directory instead of the default namespace directories (see --root); affects paths in the plan and clone destinations used by 'fleet apply'",
     )
     fleet_plan.add_argument("--pr-stale-days", type=int, default=30, help="exclude PRs older than this number of days")
     fleet_plan.set_defaults(func=cmd_fleet_plan)
@@ -5581,7 +5560,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--org", dest="orgs", action="append", default=[], help="organization to include (repeatable)")
     fleet_apply.add_argument("--all-orgs", action="store_true", help="include all organizations configured on the server")
     fleet_apply.add_argument("--with-user", action="store_true", help="include personal repos alongside selected organizations")
-    fleet_apply.add_argument("--flat", action="store_true", help="identify/clone missing repos into the root directory (see --root) (no namespace)")
+    fleet_apply.add_argument("--flat", action="store_true", help="identify/clone missing repos directly under the root directory instead of the default namespace directories (see --root)")
     fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
     fleet_apply.add_argument("--clone-missing", action="store_true")
     fleet_apply.add_argument("--pull-behind", action="store_true")
@@ -5714,7 +5693,7 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--input", default="data/github.json")
     gh_clone.add_argument("--root", default=os.getcwd())
     gh_clone.add_argument("--dry-run", action="store_true")
-    gh_clone.add_argument("--flat", action="store_true", help="clone missing repos into the root directory (see --root) (no namespace)")
+    gh_clone.add_argument("--flat", action="store_true", help="clone missing repos directly under the root directory instead of the default namespace directories (see --root)")
     gh_clone.add_argument("--tui", action="store_true")
     gh_clone.set_defaults(func=cmd_github_clone)
 
