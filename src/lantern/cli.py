@@ -25,6 +25,7 @@ from .table import render_table
 
 # Resolved path to the src/ directory for subprocess PYTHONPATH
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_VERSION_FILE = os.path.join(os.path.dirname(_SRC_DIR), "VERSION")
 
 
 # Common server presets for TUI setup
@@ -56,6 +57,16 @@ def load_dotenv() -> None:
             key, value = line.split("=", 1)
             os.environ.setdefault(key.strip(), value.strip())
 
+
+
+
+def _application_version() -> str:
+    try:
+        with open(_VERSION_FILE, "r", encoding="utf-8") as handle:
+            version = handle.read().strip()
+    except OSError:
+        return "unknown"
+    return version or "unknown"
 
 def repo_depth(root: str, path: str) -> int:
     rel = os.path.relpath(path, root)
@@ -1849,7 +1860,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
         ]
 
         action = _dialog_menu(
-            "Git Lantern",
+            f"Git Lantern (ver {_application_version()})",
             menu_text,
             menu_items,
             height,
