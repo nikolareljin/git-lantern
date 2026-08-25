@@ -3450,19 +3450,22 @@ def _recommended_actions_for_snapshot(snapshot: Dict[str, Any]) -> List[str]:
 
 
 def _snapshot_record_to_plan_row(snapshot: Dict[str, Any]) -> Dict[str, str]:
-    clean_value = "yes"
-    if bool(snapshot.get("local_missing")):
-        clean_value = "-"
-    elif str(snapshot.get("git_operation_in_progress") or "no") == "yes":
-        clean_value = "no"
+    local_missing = bool(snapshot.get("local_missing"))
+    tracked_dirty = str(snapshot.get("tracked_dirty") or ("no" if local_missing else "unknown"))
+    git_operation_in_progress = str(
+        snapshot.get("git_operation_in_progress") or ("no" if local_missing else "unknown")
+    )
+    clean_value = "-" if local_missing else (
+        "yes" if tracked_dirty == "no" and git_operation_in_progress == "no" else "no"
+    )
     return {
         "repo": str(snapshot.get("repo") or ""),
         "state": str(snapshot.get("state") or "-"),
         "branch": str(snapshot.get("current_branch") or "-"),
         "up": str(snapshot.get("current_vs_upstream") or "-"),
         "clean": clean_value,
-        "tracked_dirty": str(snapshot.get("tracked_dirty") or "no"),
-        "git_operation_in_progress": str(snapshot.get("git_operation_in_progress") or "no"),
+        "tracked_dirty": tracked_dirty,
+        "git_operation_in_progress": git_operation_in_progress,
         "action": str(snapshot.get("primary_action") or "-"),
         "latest_branch": str(snapshot.get("latest_remote_branch") or "-"),
         "prs": str(snapshot.get("open_pr_numbers") or "-"),
