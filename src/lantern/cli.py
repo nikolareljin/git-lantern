@@ -572,7 +572,7 @@ def _resolve_selected_records(records: List[Dict[str, str]], repos_csv: str) -> 
 def _is_only_clean_eligible(record: Dict[str, Any]) -> bool:
     """Return whether a record is safe for a mutating --only-clean action."""
     return (
-        str(record.get("clean") or "yes") == "yes"
+        str(record.get("clean") or "yes") in {"yes", "-"}
         and str(record.get("tracked_dirty") or "no") != "yes"
         and str(record.get("git_operation_in_progress") or "no") != "yes"
     )
