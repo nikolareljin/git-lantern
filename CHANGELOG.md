@@ -4,6 +4,13 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## 2026-08-25 — v0.8.2
+### Fixed
+
+- Restored namespaced clone destinations by default for Forge Clone and Fleet operations. Repositories such as `namespace/repo` now clone to `namespace/repo` beneath the selected root; `--flat` explicitly selects a root-level destination.
+- Updated TUI clone-layout prompts to default to using namespace directories.
+
+
 ## 2026-06-21 — v0.8.1
 ### Fixed
 
@@ -210,7 +217,7 @@ All notable changes to git-lantern are documented in this file.
 - TUI `forge -> clone` now auto-resolves repository-list JSON and auto-generates it via `forge list` when missing.
 - TUI `table`/`report` no longer prompt for JSON scan path each time; they use configured `scan_json_path`.
 - TUI `scan` writes directly to configured `scan_json_path` without repeated path prompts.
-- `clean`/`only-clean` sync gating now ignores local uncommitted/untracked files and only treats in-progress Git operations (merge/rebase/cherry-pick/etc.) as non-clean.
+- `only-clean` now skips tracked changes, in-progress Git operations, and unknown worktree state before mutating a repository.
 - `sync` now records unsuccessful repo actions with rollback attempts and writes a JSON issue log under `data/sync-logs/`.
 - `fleet apply` now reports unsuccessful operations in CLI output and includes failure/rollback details in fleet JSON logs.
 

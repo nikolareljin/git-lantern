@@ -109,6 +109,29 @@ def test_cmd_tui_about_dialog(monkeypatch, tmp_path):
     assert captured["size"] == (20, 84)
 
 
+
+
+def test_cmd_tui_main_menu_includes_application_version(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_init", lambda: (20, 84))
+    monkeypatch.setattr(cli.lantern_config, "load_config", lambda: {
+        "workspace_root": str(tmp_path),
+        "scan_json_path": str(tmp_path / "repos.json"),
+    })
+    monkeypatch.setattr(cli.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=0))
+
+    menu_titles = []
+
+    def fake_menu(title, *_args, **_kwargs):
+        menu_titles.append(title)
+        return "exit"
+
+    monkeypatch.setattr(cli, "_dialog_menu", fake_menu)
+    monkeypatch.setattr(cli, "_application_version", lambda: "1.2.3")
+
+    assert cli.cmd_tui(SimpleNamespace(tui_root="")) == 0
+    assert menu_titles == ["Git Lantern (ver 1.2.3)"]
+
 def test_cmd_tui_fleet_does_not_prompt_for_fetch_or_pr_info_before_operation(monkeypatch, tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -187,7 +210,7 @@ def test_cmd_tui_custom_select_skips_scope_and_shows_full_checklist(monkeypatch,
 
     menu_titles = []
     menu_choices = {
-        "Git Lantern": iter(["fleet", "exit"]),
+        f"Git Lantern (ver {cli._application_version()})": iter(["fleet", "exit"]),
         "Fleet": iter(["smart_sync"]),
         "Smart Sync": iter(["custom_select"]),
     }

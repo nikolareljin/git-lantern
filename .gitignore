@@ -7,6 +7,7 @@ data/
 .env
 dist/
 vendor/
+site/
 .idea/
 .vscode/
 .vs/

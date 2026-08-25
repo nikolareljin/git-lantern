@@ -201,7 +201,7 @@ def test_cmd_github_clone_dry_run_skips_repo_when_flat_destination_already_exist
     assert out == ""
 
 
-def test_cmd_github_clone_dry_run_falls_back_to_encoded_destination_on_basename_collision(tmp_path, capsys):
+def test_cmd_github_clone_dry_run_uses_namespaced_destinations_by_default(tmp_path, capsys):
     input_path = tmp_path / "repos.json"
     input_path.write_text(
         json.dumps(
@@ -234,11 +234,11 @@ def test_cmd_github_clone_dry_run_falls_back_to_encoded_destination_on_basename_
 
     out_lines = capsys.readouterr().out.splitlines()
     assert rc == 0
-    assert any(str(tmp_path / "workspace" / "shared-repo") in line for line in out_lines)
-    assert any(str(tmp_path / "workspace" / "beta%2Fshared-repo") in line for line in out_lines)
+    assert any(str(tmp_path / "workspace" / "alpha" / "shared-repo") in line for line in out_lines)
+    assert any(str(tmp_path / "workspace" / "beta" / "shared-repo") in line for line in out_lines)
 
 
-def test_cmd_github_clone_dry_run_skips_repo_when_basename_destination_already_exists(tmp_path, capsys, monkeypatch):
+def test_cmd_github_clone_dry_run_uses_namespace_when_basename_destination_exists(tmp_path, capsys, monkeypatch):
     input_path = tmp_path / "repos.json"
     workspace = tmp_path / "workspace"
     (workspace / "shared-repo").mkdir(parents=True)
@@ -271,7 +271,7 @@ def test_cmd_github_clone_dry_run_skips_repo_when_basename_destination_already_e
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert out == ""
+    assert str(workspace / "alpha" / "shared-repo") in out
 
 
 def test_cmd_github_clone_dry_run_falls_back_when_existing_basename_is_different_repo(tmp_path, capsys, monkeypatch):
@@ -308,14 +308,14 @@ def test_cmd_github_clone_dry_run_falls_back_when_existing_basename_is_different
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert str(workspace / "alpha%2Fshared-repo") in out
+    assert str(workspace / "alpha" / "shared-repo") in out
 
 
-def test_cmd_github_clone_dry_run_skips_repo_when_encoded_destination_already_exists(tmp_path, capsys, monkeypatch):
+def test_cmd_github_clone_dry_run_skips_repo_when_namespaced_destination_already_exists(tmp_path, capsys, monkeypatch):
     input_path = tmp_path / "repos.json"
     workspace = tmp_path / "workspace"
     (workspace / "shared-repo").mkdir(parents=True)
-    (workspace / "alpha%2Fshared-repo").mkdir(parents=True)
+    (workspace / "alpha" / "shared-repo").mkdir(parents=True)
     input_path.write_text(
         json.dumps(
             {
@@ -342,13 +342,13 @@ def test_cmd_github_clone_dry_run_skips_repo_when_encoded_destination_already_ex
     def fake_is_git_repo(path):
         return path in {
             str(workspace / "shared-repo"),
-            str(workspace / "alpha%2Fshared-repo"),
+            str(workspace / "alpha" / "shared-repo"),
         }
 
     def fake_get_origin_url(path):
         if path == str(workspace / "shared-repo"):
             return "git@example.com:other/shared-repo.git"
-        if path == str(workspace / "alpha%2Fshared-repo"):
+        if path == str(workspace / "alpha" / "shared-repo"):
             return "git@example.com:alpha/shared-repo.git"
         return ""
 
@@ -360,3 +360,19 @@ def test_cmd_github_clone_dry_run_skips_repo_when_encoded_destination_already_ex
     out = capsys.readouterr().out
     assert rc == 0
     assert out == ""
+
+def test_cmd_github_clone_dry_run_normalizes_windows_namespace_separators(tmp_path, capsys, monkeypatch):
+    input_path = tmp_path / "repos.json"
+    input_path.write_text(
+        json.dumps({"repos": [{"name": "org/repo", "ssh_url": "git@example.com:org/repo.git"}]}),
+        encoding="utf-8",
+    )
+    original_normpath = cli.os.path.normpath
+    monkeypatch.setattr(cli.os.path, "normpath", lambda value: original_normpath(value).replace("/", "\\"))
+
+    rc = cli.cmd_github_clone(
+        argparse.Namespace(input=str(input_path), server="", root=str(tmp_path / "workspace"), tui=False, flat=False, dry_run=True)
+    )
+
+    assert rc == 0
+    assert str(tmp_path / "workspace" / "org" / "repo") in capsys.readouterr().out
