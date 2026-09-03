@@ -238,6 +238,93 @@ def test_cmd_github_clone_dry_run_uses_namespaced_destinations_by_default(tmp_pa
     assert any(str(tmp_path / "workspace" / "beta" / "shared-repo") in line for line in out_lines)
 
 
+def test_cmd_github_clone_dry_run_prefers_full_name_for_namespaced_destination(tmp_path, capsys):
+    input_path = tmp_path / "repos.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "shared-repo",
+                        "full_name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(tmp_path / "workspace"),
+        tui=False,
+        flat=False,
+        dry_run=True,
+    )
+
+    rc = cli.cmd_github_clone(args)
+
+    assert rc == 0
+    assert str(tmp_path / "workspace" / "alpha" / "shared-repo") in capsys.readouterr().out
+
+
+def test_remote_repo_name_uses_namespaced_provider_fields():
+    cases = [
+        ({"name": "repo", "path_with_namespace": "group/subgroup/repo"}, "group/subgroup/repo"),
+        ({"name": "repo", "owner": "owner-name"}, "owner-name/repo"),
+        ({"name": "repo", "namespace": {"full_path": "group/subgroup"}}, "group/subgroup/repo"),
+        ({"name": "repo", "workspace": {"slug": "workspace-name"}}, "workspace-name/repo"),
+        ({"name": "repo", "owner": {"uuid": "ignored"}, "workspace": {"slug": "team"}}, "team/repo"),
+        ({"name": "repo", "owner": {"username": "jdoe", "name": "Jane Doe"}}, "jdoe/repo"),
+        ({"name": "My Repo", "slug": "my-repo", "workspace": {"slug": "team"}}, "team/my-repo"),
+    ]
+
+    for repo, expected in cases:
+        assert cli._remote_repo_name(repo) == expected
+
+
+def test_cmd_github_clone_reuses_existing_encoded_namespaced_destination(tmp_path, capsys, monkeypatch):
+    input_path = tmp_path / "repos.json"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "alpha").write_text("blocked", encoding="utf-8")
+    encoded_dest = workspace / "alpha%2Fshared-repo"
+    encoded_dest.mkdir(parents=True)
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "shared-repo",
+                        "full_name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(workspace),
+        tui=False,
+        flat=False,
+        dry_run=True,
+    )
+
+    monkeypatch.setattr(cli.git, "is_git_repo", lambda path: path == str(encoded_dest))
+    monkeypatch.setattr(cli.git, "get_origin_url", lambda path: "git@example.com:alpha/shared-repo.git")
+
+    rc = cli.cmd_github_clone(args)
+
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_cmd_github_clone_dry_run_uses_namespace_when_basename_destination_exists(tmp_path, capsys, monkeypatch):
     input_path = tmp_path / "repos.json"
     workspace = tmp_path / "workspace"
