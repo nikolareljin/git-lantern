@@ -134,18 +134,28 @@ def _sort_records_by_repo_name(records: List[Dict[str, Any]]) -> List[Dict[str, 
     )
 
 
+def _remote_namespace_value(value: Any) -> str:
+    if isinstance(value, dict):
+        for field in ("full_path", "path_with_namespace", "login", "path", "slug", "name", "username"):
+            extracted = str(value.get(field) or "").strip()
+            if extracted:
+                return extracted
+        return ""
+    return str(value or "").strip()
+
+
 def _remote_repo_name(repo: Dict[str, Any]) -> str:
-    for field in ("full_name", "path_with_namespace", "name"):
+    for field in ("full_name", "path_with_namespace"):
         value = str(repo.get(field) or "").strip()
-        if "/" in value:
+        if value:
             return value
     name = str(repo.get("name") or repo.get("slug") or "").strip()
-    owner_value = repo.get("owner") or repo.get("namespace") or repo.get("workspace") or ""
-    if isinstance(owner_value, dict):
-        owner_value = owner_value.get("login") or owner_value.get("path") or owner_value.get("slug") or owner_value.get("name") or ""
-    owner = str(owner_value).strip()
-    if owner and name and "/" not in name:
-        return f"{owner}/{name}"
+    if "/" in name:
+        return name
+    for field in ("owner", "namespace", "workspace"):
+        namespace = _remote_namespace_value(repo.get(field))
+        if namespace and name:
+            return f"{namespace}/{name}"
     return name
 
 
@@ -4935,21 +4945,23 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             normalized_name = normalized_name.replace("\\", "/")
             parts = [part for part in normalized_name.split("/") if part]
             flat_layout = bool(getattr(args, "flat", False))
-            destination_name = (
-                urllib.parse.quote(parts[-1], safe="")
-                if flat_layout
-                else os.path.join(*(urllib.parse.quote(part, safe="") for part in parts))
-            )
-            existing_destination = os.path.join(args.root, destination_name)
+            basename = urllib.parse.quote(parts[-1], safe="")
+            namespaced = os.path.join(*(urllib.parse.quote(part, safe="") for part in parts))
+            encoded = urllib.parse.quote(normalized_name, safe="")
+            destination_names = [basename] if flat_layout else [namespaced, encoded]
             remote_keys = _remote_repo_keys(repo)
-            if (
-                os.path.realpath(existing_destination) not in reserved_paths
-                and os.path.exists(existing_destination)
-                and git.is_git_repo(existing_destination)
-                and _normalize_repo_url(str(git.get_origin_url(existing_destination) or "")) in remote_keys
-            ):
-                dest = existing_destination
-            else:
+            dest = ""
+            for destination_name in destination_names:
+                existing_destination = os.path.join(args.root, destination_name)
+                if (
+                    os.path.realpath(existing_destination) not in reserved_paths
+                    and os.path.exists(existing_destination)
+                    and git.is_git_repo(existing_destination)
+                    and _normalize_repo_url(str(git.get_origin_url(existing_destination) or "")) in remote_keys
+                ):
+                    dest = existing_destination
+                    break
+            if not dest:
                 dest = _fleet_missing_local_destination(
                     args.root,
                     name,

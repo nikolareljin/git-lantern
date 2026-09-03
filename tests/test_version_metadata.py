@@ -24,7 +24,7 @@ def test_application_version_falls_back_to_version_file(monkeypatch, tmp_path):
     version_file.write_text("3.5.7\n", encoding="utf-8")
 
     def missing_distribution(_package):
-        raise cli.importlib_metadata.PackageNotFoundError
+        raise cli.importlib_metadata.PackageNotFoundError("git-lantern")
 
     monkeypatch.setattr(cli.importlib_metadata, "version", missing_distribution)
     monkeypatch.setattr(cli, "_VERSION_FILE", str(version_file))
