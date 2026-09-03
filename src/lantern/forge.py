@@ -173,7 +173,7 @@ def _fetch_bitbucket_repos(
                     clone_url = clone.get("href", "")
             repos.append(
                 {
-                    "name": repo.get("name"),
+                    "name": repo.get("full_name") or repo.get("slug") or repo.get("name"),
                     "private": bool(repo.get("is_private")),
                     "default_branch": (repo.get("mainbranch") or {}).get("name"),
                     "ssh_url": ssh_url,

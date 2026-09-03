@@ -238,6 +238,38 @@ def test_cmd_github_clone_dry_run_uses_namespaced_destinations_by_default(tmp_pa
     assert any(str(tmp_path / "workspace" / "beta" / "shared-repo") in line for line in out_lines)
 
 
+def test_cmd_github_clone_dry_run_prefers_full_name_for_namespaced_destination(tmp_path, capsys):
+    input_path = tmp_path / "repos.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "repos": [
+                    {
+                        "name": "shared-repo",
+                        "full_name": "alpha/shared-repo",
+                        "ssh_url": "git@example.com:alpha/shared-repo.git",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        input=str(input_path),
+        server="",
+        root=str(tmp_path / "workspace"),
+        tui=False,
+        flat=False,
+        dry_run=True,
+    )
+
+    rc = cli.cmd_github_clone(args)
+
+    assert rc == 0
+    assert str(tmp_path / "workspace" / "alpha" / "shared-repo") in capsys.readouterr().out
+
+
 def test_cmd_github_clone_dry_run_uses_namespace_when_basename_destination_exists(tmp_path, capsys, monkeypatch):
     input_path = tmp_path / "repos.json"
     workspace = tmp_path / "workspace"

@@ -1,5 +1,6 @@
 import argparse
 from datetime import datetime, timezone
+from importlib import metadata as importlib_metadata
 import json
 import os
 import re
@@ -62,6 +63,11 @@ def load_dotenv() -> None:
 
 def _application_version() -> str:
     try:
+        return importlib_metadata.version("git-lantern")
+    except importlib_metadata.PackageNotFoundError:
+        pass
+
+    try:
         with open(_VERSION_FILE, "r", encoding="utf-8") as handle:
             version = handle.read().strip()
     except OSError:
@@ -108,7 +114,7 @@ def find_repos(root: str, max_depth: int, include_hidden: bool) -> List[str]:
 
 
 def _repo_name_for_sort(record: Dict[str, Any]) -> str:
-    for field in ("repo", "name"):
+    for field in ("repo", "full_name", "path_with_namespace", "name"):
         value = str(record.get(field) or "").strip()
         if value:
             return value
@@ -126,6 +132,21 @@ def _sort_records_by_repo_name(records: List[Dict[str, Any]]) -> List[Dict[str, 
             str(record.get("path") or "").lower(),
         ),
     )
+
+
+def _remote_repo_name(repo: Dict[str, Any]) -> str:
+    for field in ("full_name", "path_with_namespace", "name"):
+        value = str(repo.get(field) or "").strip()
+        if "/" in value:
+            return value
+    name = str(repo.get("name") or repo.get("slug") or "").strip()
+    owner_value = repo.get("owner") or repo.get("namespace") or repo.get("workspace") or ""
+    if isinstance(owner_value, dict):
+        owner_value = owner_value.get("login") or owner_value.get("path") or owner_value.get("slug") or owner_value.get("name") or ""
+    owner = str(owner_value).strip()
+    if owner and name and "/" not in name:
+        return f"{owner}/{name}"
+    return name
 
 
 def build_repo_record(path: str, fetch: bool) -> Dict[str, str]:
@@ -3640,14 +3661,14 @@ def _build_fleet_snapshot(
 
     sorted_remote_repos = sorted(
         (repo for repo in remote_repos if isinstance(repo, dict)),
-        key=lambda repo: str(repo.get("name") or "").lower(),
+        key=lambda repo: _remote_repo_name(repo).lower(),
     )
 
     for repo in sorted_remote_repos:
         keys = _remote_repo_keys(repo)
         if not keys or any(k in local_by_remote_key for k in keys):
             continue
-        name = str(repo.get("name") or "").strip()
+        name = _remote_repo_name(repo)
         if not _is_safe_repo_name(name):
             if name:
                 print(f"Warning: skipping unsafe repository name: {name}", file=sys.stderr)
@@ -3863,7 +3884,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         for remote_repo in payload.get("repos", []):
             if not isinstance(remote_repo, dict):
                 continue
-            name = str(remote_repo.get("name") or "").strip()
+            name = _remote_repo_name(remote_repo)
             if not name:
                 continue
             src = str(remote_repo.get("ssh_url") or remote_repo.get("clone_url") or "").strip()
@@ -4907,7 +4928,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         planned: Dict[str, str] = {}
         reserved_paths: Set[str] = set()
         for repo in records:
-            name = str(repo.get("name") or "").strip()
+            name = _remote_repo_name(repo)
             if not _is_safe_repo_name(name):
                 continue
             normalized_name = os.path.normpath(name.replace("\\", "/"))
@@ -4946,7 +4967,7 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             return 1
         checklist_items = []
         for repo in repos:
-            name = str(repo.get("name") or "").strip()
+            name = _remote_repo_name(repo)
             if not _is_safe_repo_name(name):
                 if name:
                     print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
@@ -4982,11 +5003,11 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
             print("No repositories selected.")
             return 0
         selected_set = set(selected)
-        repos = [repo for repo in repos if repo.get("name") in selected_set]
+        repos = [repo for repo in repos if _remote_repo_name(repo) in selected_set]
         repos = _sort_records_by_repo_name(repos)
         planned_destinations = _planned_destinations(repos)
     for repo in repos:
-        name = str(repo.get("name") or "").strip()
+        name = _remote_repo_name(repo)
         ssh_url = repo.get("ssh_url")
         if not _is_safe_repo_name(name):
             if name:
