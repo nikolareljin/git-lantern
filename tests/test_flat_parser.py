@@ -277,6 +277,8 @@ def test_remote_repo_name_uses_namespaced_provider_fields():
         ({"name": "repo", "namespace": {"full_path": "group/subgroup"}}, "group/subgroup/repo"),
         ({"name": "repo", "workspace": {"slug": "workspace-name"}}, "workspace-name/repo"),
         ({"name": "repo", "owner": {"uuid": "ignored"}, "workspace": {"slug": "team"}}, "team/repo"),
+        ({"name": "repo", "owner": {"username": "jdoe", "name": "Jane Doe"}}, "jdoe/repo"),
+        ({"name": "My Repo", "slug": "my-repo", "workspace": {"slug": "team"}}, "team/my-repo"),
     ]
 
     for repo, expected in cases:

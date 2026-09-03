@@ -136,7 +136,7 @@ def _sort_records_by_repo_name(records: List[Dict[str, Any]]) -> List[Dict[str, 
 
 def _remote_namespace_value(value: Any) -> str:
     if isinstance(value, dict):
-        for field in ("full_path", "path_with_namespace", "login", "path", "slug", "name", "username"):
+        for field in ("full_path", "path_with_namespace", "login", "username", "path", "slug", "name"):
             extracted = str(value.get(field) or "").strip()
             if extracted:
                 return extracted
@@ -149,7 +149,7 @@ def _remote_repo_name(repo: Dict[str, Any]) -> str:
         value = str(repo.get(field) or "").strip()
         if value:
             return value
-    name = str(repo.get("name") or repo.get("slug") or "").strip()
+    name = str(repo.get("slug") or repo.get("name") or "").strip()
     if "/" in name:
         return name
     for field in ("owner", "namespace", "workspace"):
