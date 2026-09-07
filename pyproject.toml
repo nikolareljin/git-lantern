@@ -15,7 +15,7 @@ authors = [
 dependencies = ["argcomplete>=3.0.0"]
 
 [project.optional-dependencies]
-docs = ["mkdocs-material>=9.5,<10"]
+docs = ["mkdocs-material>=9.7.7,<10"]
 
 [project.scripts]
 lantern = "lantern.cli:main"
