@@ -262,6 +262,15 @@ lantern fleet plan --root ~/workspace --server github.com --fetch --with-prs
 
 ### `lantern fleet apply`
 
+Fleet apply synchronizes submodules to the commits recorded by each repository before
+checking worktree eligibility and after a successful clone, pull, or branch checkout.
+This repairs clean submodule directories left at an older commit by an earlier pull.
+It does not advance submodule pins to their remote tips. Local submodule edits,
+untracked files, staged pointers, and modified `.gitmodules` are preserved and reported
+as `submodules:skip-dirty`; update failures appear in the JSON log.
+Dry runs leave submodules untouched. Latest-branch selection excludes `dependabot/`
+branches and prefers `main` (or `master`) when it contains the newest eligible tip.
+
 **Purpose**: apply selected reconciliation actions.
 
 **Actions**:

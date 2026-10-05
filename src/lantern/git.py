@@ -32,7 +32,7 @@ def is_git_repo(path: str) -> bool:
 
 def fetch(repo_path: str) -> None:
     subprocess.run(
-        ["git", "-C", repo_path, "fetch", "--prune"],
+        ["git", "-C", repo_path, "fetch", "--all", "--prune"],
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -148,6 +148,57 @@ def get_working_tree_state(repo_path: str) -> Dict[str, object]:
         "allows_checkout_latest": not has_tracked_changes,
         "error": "",
     }
+
+
+def sync_submodules(repo_path: str) -> Dict[str, str]:
+    """Restore recorded gitlinks without forcing over edits or staged pointers."""
+    if not os.path.isfile(os.path.join(repo_path, ".gitmodules")):
+        return {"status": "none"}
+
+    def run(args: list) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", repo_path, *args], capture_output=True, text=True, check=False,
+        )
+
+    if has_in_progress_operation(repo_path):
+        return {"status": "skip-dirty", "detail": "Git operation in progress"}
+    config_state = run(["status", "--porcelain", "--", ".gitmodules"])
+    if config_state.returncode:
+        return {"status": "fail", "detail": config_state.stderr.strip()}
+    if config_state.stdout.strip():
+        return {"status": "skip-dirty", "detail": "Local .gitmodules changes"}
+    index = run(["ls-files", "--stage", "-z"])
+    if index.returncode:
+        return {"status": "fail", "detail": index.stderr.strip()}
+    paths = []
+    for entry in index.stdout.split("\0"):
+        if entry.startswith("160000 "):
+            metadata, path = entry.split("\t", 1)
+            if not metadata.endswith(" 0"):
+                return {"status": "skip-dirty", "detail": "Conflicted submodule pointer"}
+            paths.append(path)
+    if not paths:
+        return {"status": "none"}
+    staged = run(["diff", "--cached", "--quiet", "--", *paths])
+    if staged.returncode:
+        return {"status": "skip-dirty" if staged.returncode == 1 else "fail",
+                "detail": "Staged submodule pointer changes"}
+    # Inspect initialized modules recursively, including nested worktrees.
+    modules = run(["submodule", "foreach", "--quiet", "--recursive", "git rev-parse --show-toplevel"])
+    if modules.returncode:
+        return {"status": "fail", "detail": modules.stderr.strip()}
+    for module_path in modules.stdout.splitlines():
+        state = get_working_tree_state(module_path)
+        if not state.get("status_ok"):
+            return {"status": "fail", "detail": str(state.get("error") or module_path)}
+        if not state.get("is_clean") or has_in_progress_operation(module_path):
+            return {"status": "skip-dirty", "detail": f"Local submodule changes: {module_path}"}
+    for args in (["submodule", "sync", "--recursive"],
+                 ["submodule", "update", "--init", "--recursive", "--checkout"]):
+        result = run(args)
+        if result.returncode:
+            return {"status": "fail", "detail": result.stderr.strip()}
+    return {"status": "ok"}
 
 
 def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]:

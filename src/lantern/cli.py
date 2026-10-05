@@ -473,7 +473,7 @@ def _checkout_remote_branch(
     action_records: List[Dict[str, str]] = []
 
     if fetch_first:
-        rc_fetch = _run_git_op(path, ["fetch", "--prune"])
+        rc_fetch = _run_git_op(path, ["fetch", "--all", "--prune"])
         if rc_fetch != 0:
             statuses.append(f"{checkout_action}:{branch}:skip-git-error")
             action_records.append(
@@ -528,7 +528,7 @@ def _remote_main_ref(path: str) -> str:
 
 
 def _detect_latest_branch(path: str) -> str:
-    """Detect latest branch by most recent commit date, preferring origin refs."""
+    """Select newest non-Dependabot branch; prefer main when it contains its tip."""
     def _remote_branch_candidate(ref: str) -> str:
         candidate = str(ref or "").strip()
         if not candidate:
@@ -548,9 +548,17 @@ def _detect_latest_branch(path: str) -> str:
         )
         or ""
     )
+    remote_ref_names = set(remote_refs.splitlines())
     for ref in remote_refs.splitlines():
         candidate = _remote_branch_candidate(ref)
-        if candidate:
+        if candidate and not candidate.lower().startswith("dependabot/"):
+            for main in ("main", "master"):
+                main_ref = f"refs/remotes/origin/{main}"
+                if main_ref not in remote_ref_names and f"origin/{main}" not in remote_ref_names:
+                    continue
+                ahead = git.run_git(path, ["rev-list", "--count", f"{main_ref}..refs/remotes/origin/{candidate}"])
+                if ahead == "0":
+                    return main
             return candidate
 
     local_refs = str(
@@ -564,7 +572,7 @@ def _detect_latest_branch(path: str) -> str:
         candidate = ref.strip()
         if candidate.startswith("refs/heads/"):
             candidate = candidate[len("refs/heads/") :]
-        if candidate:
+        if candidate and not candidate.lower().startswith("dependabot/"):
             return candidate
     return "-"
 
@@ -1195,7 +1203,7 @@ def _fleet_latest_branch_is_actionable(row: Dict[str, str], include_missing_loca
         return include_missing_local
     if current and current != latest:
         return True
-    return state == "behind-remote" and current == latest
+    return (state == "behind-remote" and current == latest) or str(row.get("tracked_dirty") or "") == "yes"
 
 
 def _fleet_latest_branch_display(row: Dict[str, str]) -> str:
@@ -3922,6 +3930,18 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         original_branch = _repo_branch_name(path) if os.path.isdir(path) else ""
         statuses: List[str] = []
         action_records: List[Dict[str, str]] = []
+        if not args.dry_run and os.path.isfile(os.path.join(path, ".gitmodules")):
+            submodules = git.sync_submodules(path)
+            if submodules["status"] != "none":
+                statuses.append(f"submodules:{submodules['status']}")
+                action_records.append({"action": "submodules", **submodules})
+            if submodules["status"] == "ok":
+                # Snapshots may mark clean but stale submodule checkouts as dirty.
+                live_state = git.get_working_tree_state(path)
+                row = dict(row)
+                row["tracked_dirty"] = "no" if live_state.get("allows_checkout_latest") is True else "yes"
+                row["git_operation_in_progress"] = "no" if git.is_operation_free(path) else "yes"
+                row["clean"] = "yes" if row["git_operation_in_progress"] == "no" else "no"
         planned_actions = _fleet_action_parts_for_row(
             row=row,
             clone_missing=args.clone_missing,
@@ -4052,6 +4072,15 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     statuses.append(f"push:{'ok' if ok else 'fail'}")
                     action_records.append({"action": "push", "status": "ok" if ok else "fail"})
 
+        if not args.dry_run and any(
+            record.get("status") == "ok" and record.get("action") in {"clone", "pull"}
+            for record in action_records
+        ):
+            submodules = git.sync_submodules(path)
+            if submodules["status"] != "none":
+                statuses.append(f"submodules:{submodules['status']}")
+                action_records.append({"action": "submodules", **submodules})
+
         effective_branch = checkout_branch
         if pr_number:
             _host, owner, repo_name = _origin_owner_repo(str(git.get_origin_url(path) or ""))
@@ -4150,6 +4179,15 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                     )
                     statuses.extend(checkout_statuses)
                     action_records.extend(checkout_records)
+
+        if not args.dry_run and any(
+            record.get("status") == "ok" and record.get("action") in {"checkout", "checkout-latest"}
+            for record in action_records
+        ):
+            submodules = git.sync_submodules(path)
+            if submodules["status"] != "none":
+                statuses.append(f"submodules:{submodules['status']}")
+                action_records.append({"action": "submodules", **submodules})
 
         if not statuses:
             statuses = ["skip"]
