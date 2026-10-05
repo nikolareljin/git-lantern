@@ -69,7 +69,6 @@ def has_in_progress_operation(repo_path: str) -> bool:
         return False
     markers = (
         "MERGE_HEAD",
-        "REBASE_HEAD",
         "CHERRY_PICK_HEAD",
         "REVERT_HEAD",
         "BISECT_LOG",
@@ -77,6 +76,8 @@ def has_in_progress_operation(repo_path: str) -> bool:
     for marker in markers:
         if os.path.exists(os.path.join(git_dir, marker)):
             return True
+    # REBASE_HEAD can remain after a completed rebase; the state directories
+    # below identify an active rebase.
     if os.path.isdir(os.path.join(git_dir, "rebase-merge")):
         return True
     if os.path.isdir(os.path.join(git_dir, "rebase-apply")):

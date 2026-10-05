@@ -270,6 +270,8 @@ untracked files, staged pointers, and modified `.gitmodules` are preserved and r
 as `submodules:skip-dirty`; update failures appear in the JSON log.
 Dry runs leave submodules untouched. Latest-branch selection excludes `dependabot/`
 branches and prefers `main` (or `master`) when it contains the newest eligible tip.
+An isolated `REBASE_HEAD` left by a completed rebase is not an active operation;
+the `rebase-merge` and `rebase-apply` state directories still block unsafe actions.
 
 **Purpose**: apply selected reconciliation actions.
 

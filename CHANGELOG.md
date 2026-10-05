@@ -11,6 +11,8 @@ All notable changes to git-lantern are documented in this file.
   local edits or staged gitlinks, and reports synchronization results in its log.
 - Latest-branch selection excludes Dependabot branches and prefers main/master
   when the newest eligible tip is already contained there; fetch refreshes all remotes.
+- Completed rebases with a leftover `REBASE_HEAD` no longer block fleet operations;
+  active rebases are detected using their state directories.
 
 ## 2026-08-25 — v0.8.2
 ### Fixed
