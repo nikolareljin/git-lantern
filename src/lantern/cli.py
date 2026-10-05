@@ -4828,16 +4828,16 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
         [r.strip() for r in repos_list if r.strip()] or None
     )
 
-    forge_url = (
-        getattr(args, "forge_url", "")
-        or os.environ.get("FORGE_MIND_URL", "")
+    portfolio_url = (
+        getattr(args, "portfolio_url", "")
+        or os.environ.get("LANTERN_PORTFOLIO_API_URL", "")
         or "http://localhost:8000"
     ).strip()
 
     jobs, warnings = _pr_sweep.discover_eligible_prs(
         owner=owner,
         token=token,
-        forge_url=forge_url,
+        portfolio_url=portfolio_url,
         skip_forks=not getattr(args, "include_forks", False),
         skip_frozen=getattr(args, "skip_frozen", True),
         repos_filter=repos_filter,
@@ -5733,18 +5733,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="skip_frozen",
         action="store_true",
         default=True,
-        help="exclude repos that forge-mind marks as frozen/archived (default: true)",
+        help="exclude repos that the portfolio API marks as frozen/archived (default: true)",
     )
     pr_sweep_parser.add_argument(
         "--no-skip-frozen",
         dest="skip_frozen",
         action="store_false",
-        help="include repos that forge-mind marks as frozen/archived",
+        help="include repos that the portfolio API marks as frozen/archived",
     )
     pr_sweep_parser.add_argument(
-        "--forge-url",
+        "--portfolio-url",
         default="",
-        help="forge-mind base URL (default: $FORGE_MIND_URL or http://localhost:8000)",
+        help="portfolio API base URL (default: $LANTERN_PORTFOLIO_API_URL or http://localhost:8000)",
     )
     pr_sweep_parser.add_argument(
         "repos",

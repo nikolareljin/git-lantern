@@ -61,7 +61,7 @@ All notable changes to git-lantern are documented in this file.
 - Added `lantern pr sweep` command for automated discovery of open pull requests with
   unresolved review threads across a personal GitHub namespace. The command:
   - Filters out forked and archived repositories automatically.
-  - Queries a local forge-mind instance (`--forge-url`, `$FORGE_MIND_URL`, or
+  - Queries a local portfolio API instance (`--portfolio-url`, `$LANTERN_PORTFOLIO_API_URL`, or
     `http://localhost:8000`) to exclude frozen/archived projects; falls back gracefully
     with a warning when unreachable.
   - Accepts optional positional `REPO...` arguments to restrict the sweep to specific
@@ -73,8 +73,8 @@ All notable changes to git-lantern are documented in this file.
   - Scope: discovery and listing only. The command does not dispatch fix subagents
     itself; it emits the eligible PRs for a downstream workflow (e.g. `implement_pr.txt`).
   - Restricted to GitHub servers; selecting a non-GitHub provider fails fast.
-  - Added `src/lantern/pr_sweep.py` (discovery logic) and `src/lantern/forge_client.py`
-    (forge-mind HTTP client).
+  - Added `src/lantern/pr_sweep.py` (discovery logic) and `src/lantern/portfolio_client.py`
+    (portfolio API HTTP client).
 
 ## 2026-04-13 — v0.6.0
 ### Fixed

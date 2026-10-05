@@ -1,7 +1,7 @@
 """Discovery logic for the `lantern pr sweep` command.
 
 Finds open PRs with unresolved review threads across personal GitHub repos,
-applying filters for forks, archived repos, and forge-mind frozen projects.
+applying filters for forks, archived repos, and portfolio API frozen projects.
 """
 
 import json
@@ -11,7 +11,7 @@ import urllib.error
 from typing import Dict, List, Optional, Set, Tuple
 
 from . import github
-from . import forge_client as _forge_client
+from . import portfolio_client as _portfolio_client
 
 
 def gh_authenticated_user() -> Optional[str]:
@@ -139,7 +139,7 @@ def fetch_pr_unresolved_thread_count(owner: str, repo: str, pr_number: int) -> i
 def discover_eligible_prs(
     owner: str,
     token: Optional[str],
-    forge_url: str,
+    portfolio_url: str,
     skip_forks: bool,
     skip_frozen: bool,
     repos_filter: Optional[List[str]] = None,
@@ -150,9 +150,9 @@ def discover_eligible_prs(
     Args:
         owner:        GitHub username whose repos to scan.
         token:        GitHub personal access token (optional, falls back to gh auth).
-        forge_url:    Base URL of a forge-mind instance for the frozen-repo check.
+        portfolio_url: Base URL of a portfolio API instance for the frozen-repo check.
         skip_forks:   Exclude forked repositories.
-        skip_frozen:  Exclude repos that forge-mind considers frozen/archived.
+        skip_frozen:  Exclude repos that the portfolio API considers frozen/archived.
         repos_filter: If given, restrict scan to these ``owner/repo`` full names.
         base_url:     GitHub API base URL (empty string means ``https://api.github.com``).
 
@@ -202,14 +202,14 @@ def discover_eligible_prs(
         lower_filter: Set[str] = {s.lower() for s in repos_filter}
         candidates = [r for r in candidates if r["full_name"].lower() in lower_filter]
 
-    # 4. Frozen check via forge-mind.
+    # 4. Frozen check via the optional portfolio API.
     frozen: Set[str] = set()
-    if skip_frozen and forge_url:
+    if skip_frozen and portfolio_url:
         try:
-            frozen = _forge_client.fetch_frozen_repos(forge_url)
+            frozen = _portfolio_client.fetch_frozen_repos(portfolio_url)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
             warnings.append(
-                f"Warning: could not reach forge-mind at {forge_url!r}; skipping frozen filter."
+                f"Warning: could not reach portfolio API at {portfolio_url!r}; skipping frozen filter."
             )
 
     eligible_repos = [r for r in candidates if r["full_name"].lower() not in frozen]
