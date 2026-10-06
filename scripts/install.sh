@@ -102,10 +102,34 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
 fi
 
 run_cmd "$VENV_DIR/bin/python" -m pip install --upgrade pip
+
+# Build the wheel as the invoking user from a clean copy of the source tree so
+# stale or root-owned build artifacts in the checkout (build/, *.egg-info) can
+# never break the build, and so a sudo install leaves no root-owned files behind.
+STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/git-lantern-install.XXXXXX")"
+trap 'rm -rf "$STAGE_DIR"' EXIT
+SRC_DIR="$STAGE_DIR/src"
+WHEEL_DIR="$STAGE_DIR/wheels"
+mkdir -p "$SRC_DIR" "$WHEEL_DIR"
+tar -C "$ROOT_DIR" \
+  --exclude='./.git' --exclude='./build' --exclude='./dist' \
+  --exclude='./venv' --exclude='./.venv' --exclude='*.egg-info' \
+  -cf - . | tar -C "$SRC_DIR" -xf -
+
+if ! "$VENV_DIR/bin/python" -m pip wheel --no-deps --wheel-dir "$WHEEL_DIR" "$SRC_DIR"; then
+  echo "Failed to build the git-lantern wheel." >&2
+  exit 1
+fi
+WHEEL_FILE="$(find "$WHEEL_DIR" -maxdepth 1 -name 'git_lantern-*.whl' | head -n 1)"
+if [[ -z "$WHEEL_FILE" ]]; then
+  echo "Built wheel not found in $WHEEL_DIR." >&2
+  exit 1
+fi
+
 if $DEV_EXTRAS; then
-  run_cmd "$VENV_DIR/bin/pip" install --upgrade "${ROOT_DIR}[dev]"
+  run_cmd "$VENV_DIR/bin/pip" install --upgrade --force-reinstall "${WHEEL_FILE}[dev]"
 else
-  run_cmd "$VENV_DIR/bin/pip" install --upgrade "$ROOT_DIR"
+  run_cmd "$VENV_DIR/bin/pip" install --upgrade --force-reinstall "$WHEEL_FILE"
 fi
 
 run_cmd ln -sf "$VENV_DIR/bin/lantern" "$BIN_LINK"

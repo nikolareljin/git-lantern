@@ -18,6 +18,10 @@ All notable changes to git-lantern are documented in this file.
   falls back to HTTPS. Clones no longer stop on terminal password, passphrase or host-key
   prompts, and failures report the cause (missing SSH key, untrusted host key, missing HTTPS
   credentials) with fix instructions in the output, the JSON log and the TUI summary.
+- `./install` builds the wheel as the invoking user from a clean temporary copy of the
+  source tree. Leftover or root-owned `build/` artifacts in the checkout (for example from
+  an earlier `sudo` install) no longer fail the build with "Permission denied", and sudo
+  installs no longer leave root-owned files in the repository.
 
 ## 2026-08-25 — v0.8.2
 ### Fixed
