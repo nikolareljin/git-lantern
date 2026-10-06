@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from lantern import cli
 
 
@@ -30,3 +32,13 @@ def test_application_version_falls_back_to_version_file(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_VERSION_FILE", str(version_file))
 
     assert cli._application_version() == "3.5.7"
+
+
+def test_version_flag_prints_application_version(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_application_version", lambda: "3.5.7")
+
+    with pytest.raises(SystemExit) as result:
+        cli.build_parser().parse_args(["--version"])
+
+    assert result.value.code == 0
+    assert capsys.readouterr().out == "3.5.7\n"

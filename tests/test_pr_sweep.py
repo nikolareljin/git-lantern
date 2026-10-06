@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lantern import pr_sweep, forge_client
+from lantern import portfolio_client, pr_sweep
 
 
 # ---------------------------------------------------------------------------
-# forge_client tests
+# portfolio_client tests
 # ---------------------------------------------------------------------------
 
 
@@ -28,7 +28,7 @@ def test_fetch_frozen_repos_parses_response():
     mock_resp.__exit__ = MagicMock(return_value=False)
 
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        frozen = forge_client.fetch_frozen_repos("http://localhost:8000")
+        frozen = portfolio_client.fetch_frozen_repos("http://localhost:8000")
 
     assert "owner/frozen-repo" in frozen
     assert "owner/mixed-case" in frozen  # lowercased
@@ -40,7 +40,7 @@ def test_fetch_frozen_repos_raises_on_network_error():
 
     with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
         with pytest.raises(urllib.error.URLError):
-            forge_client.fetch_frozen_repos("http://localhost:8000")
+            portfolio_client.fetch_frozen_repos("http://localhost:8000")
 
 
 def test_fetch_frozen_repos_empty_list():
@@ -50,7 +50,7 @@ def test_fetch_frozen_repos_empty_list():
     mock_resp.__exit__ = MagicMock(return_value=False)
 
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        frozen = forge_client.fetch_frozen_repos("http://localhost:8000")
+        frozen = portfolio_client.fetch_frozen_repos("http://localhost:8000")
 
     assert frozen == set()
 
@@ -226,7 +226,7 @@ def test_discover_eligible_prs_excludes_forks(monkeypatch):
     jobs, warnings = pr_sweep.discover_eligible_prs(
         owner="user",
         token=None,
-        forge_url="",
+        portfolio_url="",
         skip_forks=True,
         skip_frozen=False,
     )
@@ -249,7 +249,7 @@ def test_discover_eligible_prs_excludes_archived(monkeypatch):
     )
 
     jobs, _ = pr_sweep.discover_eligible_prs(
-        owner="user", token=None, forge_url="", skip_forks=True, skip_frozen=False
+        owner="user", token=None, portfolio_url="", skip_forks=True, skip_frozen=False
     )
 
     assert all(j["repo"] == "user/live" for j in jobs)
@@ -269,7 +269,7 @@ def test_discover_eligible_prs_preserves_archived_flag_in_rest_fallback(monkeypa
     )
 
     jobs, _ = pr_sweep.discover_eligible_prs(
-        owner="user", token=None, forge_url="", skip_forks=True, skip_frozen=False
+        owner="user", token=None, portfolio_url="", skip_forks=True, skip_frozen=False
     )
 
     assert [j["repo"] for j in jobs] == ["user/live"]
@@ -287,7 +287,7 @@ def test_discover_eligible_prs_excludes_frozen(monkeypatch):
         lambda owner, repo, token, **kw: [_make_pr(1)],
     )
     monkeypatch.setattr(
-        forge_client,
+        portfolio_client,
         "fetch_frozen_repos",
         lambda url, **kw: {"user/frozen-proj"},
     )
@@ -295,7 +295,7 @@ def test_discover_eligible_prs_excludes_frozen(monkeypatch):
     jobs, warnings = pr_sweep.discover_eligible_prs(
         owner="user",
         token=None,
-        forge_url="http://localhost:8000",
+        portfolio_url="http://localhost:8000",
         skip_forks=True,
         skip_frozen=True,
     )
@@ -306,8 +306,8 @@ def test_discover_eligible_prs_excludes_frozen(monkeypatch):
     assert warnings == []
 
 
-def test_discover_eligible_prs_forge_mind_fallback(monkeypatch):
-    """Graceful degradation when forge-mind is unreachable."""
+def test_discover_eligible_prs_portfolio_api_fallback(monkeypatch):
+    """Graceful degradation when the portfolio API is unreachable."""
     repos = [{"full_name": "user/repo-a", "fork": False, "archived": False}]
     monkeypatch.setattr(pr_sweep, "list_owner_repos", lambda owner: repos)
     monkeypatch.setattr(pr_sweep, "fetch_pr_unresolved_thread_count", lambda *_: 1)
@@ -318,7 +318,7 @@ def test_discover_eligible_prs_forge_mind_fallback(monkeypatch):
 
     import urllib.error
     monkeypatch.setattr(
-        forge_client,
+        portfolio_client,
         "fetch_frozen_repos",
         lambda url, **kw: (_ for _ in ()).throw(urllib.error.URLError("connection refused")),
     )
@@ -326,14 +326,14 @@ def test_discover_eligible_prs_forge_mind_fallback(monkeypatch):
     jobs, warnings = pr_sweep.discover_eligible_prs(
         owner="user",
         token=None,
-        forge_url="http://localhost:8000",
+        portfolio_url="http://localhost:8000",
         skip_forks=True,
         skip_frozen=True,
     )
 
-    # Should still return results despite forge-mind failure.
+    # Should still return results despite the portfolio API failure.
     assert len(jobs) == 1
-    assert any("forge-mind" in w for w in warnings)
+    assert any("portfolio API" in w for w in warnings)
 
 
 def test_discover_eligible_prs_repos_filter(monkeypatch):
@@ -351,7 +351,7 @@ def test_discover_eligible_prs_repos_filter(monkeypatch):
     jobs, _ = pr_sweep.discover_eligible_prs(
         owner="user",
         token=None,
-        forge_url="",
+        portfolio_url="",
         skip_forks=True,
         skip_frozen=False,
         repos_filter=["user/repo-a"],
@@ -371,7 +371,7 @@ def test_discover_eligible_prs_skips_prs_with_zero_unresolved(monkeypatch):
     )
 
     jobs, _ = pr_sweep.discover_eligible_prs(
-        owner="user", token=None, forge_url="", skip_forks=True, skip_frozen=False
+        owner="user", token=None, portfolio_url="", skip_forks=True, skip_frozen=False
     )
 
     assert jobs == []
@@ -387,7 +387,7 @@ def test_discover_eligible_prs_skips_prs_with_unknown_unresolved_count(monkeypat
     )
 
     jobs, warnings = pr_sweep.discover_eligible_prs(
-        owner="user", token=None, forge_url="", skip_forks=True, skip_frozen=False
+        owner="user", token=None, portfolio_url="", skip_forks=True, skip_frozen=False
     )
 
     assert jobs == []

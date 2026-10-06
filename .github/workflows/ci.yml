@@ -15,3 +15,47 @@ jobs:
       lint_command: "./scripts/lint.sh"
       test_command: "./scripts/test.sh"
       build_command: "./scripts/build.sh"
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Lint and test
+        run: |
+          set -euo pipefail
+          ./scripts/build.sh
+          ./scripts/lint.sh
+          ./scripts/test.sh
+      - name: Install and synchronize a disposable workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/git-lantern-macos"
+          prefix="$fixture/opt/git-lantern"
+          bin_dir="$fixture/bin"
+          remote="$fixture/remote.git"
+          seed="$fixture/seed"
+          workspace="$fixture/workspace"
+          mkdir -p "$fixture" "$workspace"
+          ./install --prefix "$prefix" --bin-link "$bin_dir/lantern"
+          "$bin_dir/lantern" --version
+          git init --bare "$remote"
+          git -C "$remote" symbolic-ref HEAD refs/heads/main
+          git init -b main "$seed"
+          git -C "$seed" config user.name "CI Test"
+          git -C "$seed" config user.email "ci@example.invalid"
+          git -C "$seed" remote add origin "$remote"
+          printf 'first\n' > "$seed/status.txt"
+          git -C "$seed" add status.txt
+          git -C "$seed" commit -m "seed"
+          git -C "$seed" push -u origin main
+          git clone "$remote" "$workspace/demo"
+          printf 'second\n' >> "$seed/status.txt"
+          git -C "$seed" commit -am "advance"
+          git -C "$seed" push
+          "$bin_dir/lantern" sync --root "$workspace" --pull --only-clean --only-upstream
+          test "$(git -C "$workspace/demo" rev-parse HEAD)" = "$(git -C "$seed" rev-parse HEAD)"

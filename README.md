@@ -182,6 +182,25 @@ sudo pacman -S dialog
 
 See `docs/use-cases.md#interactive-tui-mode` for detailed TUI workflows.
 
+### macOS installation
+
+On macOS, `./install` uses a per-user prefix by default and creates
+`~/.local/bin/lantern`. Add `~/.local/bin` to your shell `PATH` if it is not
+already present. Git Lantern requires Python 3.8+ and Git; install Git through
+Xcode Command Line Tools or Homebrew before running the installer.
+
+```bash
+git clone https://github.com/nikolareljin/git-lantern.git
+cd git-lantern
+./install
+lantern --version
+lantern sync --root "$HOME/workspace" --pull --only-clean --only-upstream
+```
+
+Use `./install --dry-run` to print the resolved prefix and launcher path
+without changing the machine. Use explicit `--prefix` and `--bin-link` values
+when another tool owns the installation paths.
+
 ## Shell completion
 
 Lantern ships bash completion via argcomplete.

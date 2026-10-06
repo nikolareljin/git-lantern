@@ -748,11 +748,8 @@ def test_cmd_fleet_apply_snapshot_clone_uses_snapshot_origin(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(cli, "_fleet_server_context", lambda _args: ("github", "", "", "", {}, {}))
     monkeypatch.setattr(cli, "render_table", lambda rows, _cols: rows[0]["result"])
-    monkeypatch.setattr(
-        cli.subprocess,
-        "run",
-        lambda args, check=False, **kwargs: seen.append(args) or type("Proc", (), {"returncode": 0})(),
-    )
+    monkeypatch.setattr(cli.git, "check_remote_access", lambda url: (True, ""))
+    monkeypatch.setattr(cli.git, "clone_repo", lambda url, dest: seen.append((url, dest)) or (True, ""))
 
     rc = cli.cmd_fleet_apply(
         _make_apply_args(snapshot=str(snapshot_path), clone_missing=True, dry_run=False, root=str(tmp_path))
@@ -760,7 +757,7 @@ def test_cmd_fleet_apply_snapshot_clone_uses_snapshot_origin(monkeypatch, tmp_pa
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert seen == [["git", "clone", "git@example.com:demo.git", str(repo_path)]]
+    assert seen == [("git@example.com:demo.git", str(repo_path))]
     assert "clone:ok" in out
 
 

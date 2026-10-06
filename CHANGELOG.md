@@ -13,6 +13,15 @@ All notable changes to git-lantern are documented in this file.
   when the newest eligible tip is already contained there; fetch refreshes all remotes.
 - Completed rebases with a leftover `REBASE_HEAD` no longer block fleet operations;
   active rebases are detected using their state directories.
+- Fleet apply and Forge Clone no longer fail every clone on machines without an SSH key.
+  New `--clone-protocol auto|ssh|https` (default `auto`) checks SSH once per host and
+  falls back to HTTPS. Clones no longer stop on terminal password, passphrase or host-key
+  prompts, and failures report the cause (missing SSH key, untrusted host key, missing HTTPS
+  credentials) with fix instructions in the output, the JSON log and the TUI summary.
+- `./install` builds the wheel as the invoking user from a clean temporary copy of the
+  source tree. Leftover or root-owned `build/` artifacts in the checkout (for example from
+  an earlier `sudo` install) no longer fail the build with "Permission denied", and sudo
+  installs no longer leave root-owned files in the repository.
 
 ## 2026-08-25 — v0.8.2
 ### Fixed
@@ -61,7 +70,7 @@ All notable changes to git-lantern are documented in this file.
 - Added `lantern pr sweep` command for automated discovery of open pull requests with
   unresolved review threads across a personal GitHub namespace. The command:
   - Filters out forked and archived repositories automatically.
-  - Queries a local forge-mind instance (`--forge-url`, `$FORGE_MIND_URL`, or
+  - Queries a local portfolio API instance (`--portfolio-url`, `$LANTERN_PORTFOLIO_API_URL`, or
     `http://localhost:8000`) to exclude frozen/archived projects; falls back gracefully
     with a warning when unreachable.
   - Accepts optional positional `REPO...` arguments to restrict the sweep to specific
@@ -73,8 +82,8 @@ All notable changes to git-lantern are documented in this file.
   - Scope: discovery and listing only. The command does not dispatch fix subagents
     itself; it emits the eligible PRs for a downstream workflow (e.g. `implement_pr.txt`).
   - Restricted to GitHub servers; selecting a non-GitHub provider fails fast.
-  - Added `src/lantern/pr_sweep.py` (discovery logic) and `src/lantern/forge_client.py`
-    (forge-mind HTTP client).
+  - Added `src/lantern/pr_sweep.py` (discovery logic) and `src/lantern/portfolio_client.py`
+    (portfolio API HTTP client).
 
 ## 2026-04-13 — v0.6.0
 ### Fixed

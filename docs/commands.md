@@ -277,6 +277,12 @@ the `rebase-merge` and `rebase-apply` state directories still block unsafe actio
 
 **Actions**:
 - `--clone-missing`: clone repos in `missing-local` state
+- `--clone-protocol auto|ssh|https` (default `auto`): `auto` checks SSH access once per host and
+  falls back to HTTPS when the host rejects SSH (for example, no SSH key on this machine);
+  `ssh` skips clones when SSH is rejected; `https` always clones over HTTPS.
+  Clones do not stop on terminal prompts for passwords, passphrases or host keys. When access fails, the run
+  explains what is missing (SSH key, trusted host key, or HTTPS credentials) and how to fix it;
+  failed clones list their reason in the output and in `--log-json`.
 - `--pull-behind`: run `git pull --ff-only` for repos in `behind-remote`
 - `--push-ahead`: run `git push` for repos in `ahead-remote`
 - `--checkout-branch <name>`: checkout/update named branch across selected repos
@@ -576,8 +582,11 @@ lantern forge list --server github.com --all-orgs --with-user --output data/gith
 
 **What it does**:
 - Reads `--input` (default `data/github.json`).
-- Clones each repo by its `ssh_url` into `--root`.
+- Clones each repo into `--root` over SSH, or HTTPS when the host rejects SSH
+  (`--clone-protocol auto|ssh|https`, default `auto`).
 - Skips repos already present.
+- Reports failed clones with a reason and how to fix missing SSH keys or HTTPS credentials;
+  exits non-zero when any clone fails.
 - With `--dry-run`, prints the clone commands without executing.
 
 **Example**:
@@ -653,7 +662,7 @@ lantern pr sweep [OPTIONS] [REPO...]
 - Lists every repo owned by `--owner` (default: the authenticated GitHub user from
   `gh api user --jq .login`).
 - Filters out forks and archived repos automatically.
-- Optionally queries a forge-mind instance to skip frozen/archived projects.
+- Optionally queries a portfolio API instance to skip frozen/archived projects.
 - For each remaining repo, finds open PRs and counts unresolved review threads via
   the GitHub GraphQL API; only PRs with at least one unresolved thread are listed.
 - Discovery and listing only — it does **not** dispatch fixes itself. Use the output
@@ -668,9 +677,9 @@ lantern pr sweep [OPTIONS] [REPO...]
 - `--server <name>`: configured server name (must be a GitHub provider).
 - `--token <token>`: GitHub personal access token (overrides config/`gh`).
 - `--include-forks`: include forked repositories (default: exclude forks).
-- `--skip-frozen` / `--no-skip-frozen`: toggle the forge-mind frozen filter
+- `--skip-frozen` / `--no-skip-frozen`: toggle the portfolio API frozen filter
   (default: enabled).
-- `--forge-url <url>`: forge-mind base URL (default: `$FORGE_MIND_URL` or
+- `--portfolio-url <url>`: portfolio API base URL (default: `$LANTERN_PORTFOLIO_API_URL` or
   `http://localhost:8000`).
 - `--dry-run`: print the eligible PR table and exit (no selection prompt).
 - `--json`: emit selected jobs as JSON for machine consumption.
@@ -687,7 +696,7 @@ lantern pr sweep --owner nikolareljin --dry-run
 # Restrict the sweep to specific repos
 lantern pr sweep nikolareljin/git-lantern nikolareljin/ci-helpers --dry-run
 
-# Skip the forge-mind frozen filter
+# Skip the portfolio API frozen filter
 lantern pr sweep --no-skip-frozen --dry-run
 
 # Machine-readable output for a downstream fix workflow
