@@ -15,8 +15,8 @@ All notable changes to git-lantern are documented in this file.
   active rebases are detected using their state directories.
 - Fleet apply and Forge Clone no longer fail every clone on machines without an SSH key.
   New `--clone-protocol auto|ssh|https` (default `auto`) checks SSH once per host and
-  falls back to HTTPS. Clones run without interactive prompts, so a run cannot hang, and
-  failures report the cause (missing SSH key, untrusted host key, missing HTTPS
+  falls back to HTTPS. Clones no longer stop on terminal password, passphrase or host-key
+  prompts, and failures report the cause (missing SSH key, untrusted host key, missing HTTPS
   credentials) with fix instructions in the output, the JSON log and the TUI summary.
 
 ## 2026-08-25 — v0.8.2

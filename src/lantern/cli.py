@@ -1407,7 +1407,10 @@ def _fleet_short_summary_from_log(log_path: str) -> str:
     ]
     if clone_failures:
         lines.append(f"Failed clones: {len(clone_failures)}")
-        lines.extend(f"- {f.get('repo')}: {f.get('reason') or f.get('status')}" for f in clone_failures[:15])
+        lines.extend(
+            f"- {f.get('repo')}: {f.get('reason') if f.get('reason') not in (None, '', '-') else f.get('status')}"
+            for f in clone_failures[:15]
+        )
         if len(clone_failures) > 15:
             lines.append(f"- ... and {len(clone_failures) - 15} more")
         lines.append("")
@@ -3380,7 +3383,17 @@ def _clone_failure_reason(protocol: str, error: str) -> str:
             return "ssh-host-key-unknown"
     if "could not read username" in text or "terminal prompts disabled" in text or "authentication failed" in text:
         return "https-auth-required"
-    if "could not resolve host" in text or "timed out" in text or "connection refused" in text:
+    network_markers = (
+        "could not resolve host",
+        "timed out",
+        "connection refused",
+        "connection closed",
+        "connection reset",
+        "no route to host",
+        "network is unreachable",
+        "kex_exchange_identification",
+    )
+    if any(marker in text for marker in network_markers):
         return "network-error"
     if "not found" in text or "does not exist" in text or "access rights" in text:
         return "not-found-or-no-access"
@@ -3413,7 +3426,10 @@ def _clone_failure_hint(reason: str, host: str) -> str:
             f"Configure a git credential helper.{github_hint} Or add an SSH key and use --clone-protocol ssh."
         )
     if reason == "network-error":
-        return f"Could not reach {host}. Check the network connection and retry."
+        return (
+            f"Could not reach {host} over the selected protocol. Check the network; if SSH (port 22) "
+            "is blocked here, rerun with --clone-protocol https."
+        )
     return ""
 
 
@@ -3448,7 +3464,7 @@ class _CloneAccess:
             if reason not in _HOST_LEVEL_SSH_FAILURES:
                 # Repo-specific failures (deleted repo, no access) do not mean SSH is unusable.
                 ok, reason = True, ""
-            self._ssh_by_host[host] = (ok, reason, git._last_error_line(error) if not ok else "")
+            self._ssh_by_host[host] = (ok, reason, git.last_error_line(error) if not ok else "")
         return self._ssh_by_host[host]
 
     def plan(self, ssh_url: str, https_url: str, probe: bool = True) -> Dict[str, str]:
@@ -4147,7 +4163,8 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             clone_protocol = clone_plan["protocol"]
             if args.dry_run:
                 statuses.append("clone:dry-run")
-                action_records.append({"action": "clone", "status": "dry-run", "protocol": clone_protocol})
+                # Dry runs do not probe SSH, so the final protocol is not known yet.
+                action_records.append({"action": "clone", "status": "dry-run"})
                 clone_ok = False
             elif clone_plan.get("reason") == "missing-url":
                 statuses.append("clone:missing-url")

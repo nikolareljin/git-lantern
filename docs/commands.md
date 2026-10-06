@@ -280,7 +280,7 @@ the `rebase-merge` and `rebase-apply` state directories still block unsafe actio
 - `--clone-protocol auto|ssh|https` (default `auto`): `auto` checks SSH access once per host and
   falls back to HTTPS when the host rejects SSH (for example, no SSH key on this machine);
   `ssh` skips clones when SSH is rejected; `https` always clones over HTTPS.
-  Clones never prompt for passwords, passphrases or host keys. When access fails, the run
+  Clones do not stop on terminal prompts for passwords, passphrases or host keys. When access fails, the run
   explains what is missing (SSH key, trusted host key, or HTTPS credentials) and how to fix it;
   failed clones list their reason in the output and in `--log-json`.
 - `--pull-behind`: run `git pull --ff-only` for repos in `behind-remote`

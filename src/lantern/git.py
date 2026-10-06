@@ -213,13 +213,29 @@ def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]
     return int(parts[0]), int(parts[1])
 
 
+def _user_ssh_command() -> str:
+    # Read only user/system scope: a clone never sees the local config of the
+    # repository lantern happens to be started from.
+    for scope in ("--global", "--system"):
+        result = subprocess.run(
+            ["git", "config", scope, "--get", "core.sshCommand"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    return ""
+
+
 def noninteractive_env() -> Dict[str, str]:
     """Environment for network git commands that must fail instead of prompting."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     if env.get("GIT_SSH"):
         return env
-    ssh_command = env.get("GIT_SSH_COMMAND") or run_git(".", ["config", "--get", "core.sshCommand"]) or "ssh"
+    ssh_command = env.get("GIT_SSH_COMMAND") or _user_ssh_command() or "ssh"
     try:
         program = os.path.basename(shlex.split(ssh_command)[0]) if ssh_command.strip() else ""
     except ValueError:
@@ -231,7 +247,7 @@ def noninteractive_env() -> Dict[str, str]:
     return env
 
 
-def _last_error_line(stderr: str) -> str:
+def last_error_line(stderr: str) -> str:
     lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
     # The SSH line names the actual cause; git's own "fatal:" line after it is generic.
     for line in lines:
@@ -273,7 +289,7 @@ def clone_repo(url: str, dest: str) -> Tuple[bool, str]:
         env=noninteractive_env(),
     )
     ok = result.returncode == 0
-    return ok, "" if ok else _last_error_line(result.stderr or "")
+    return ok, "" if ok else last_error_line(result.stderr or "")
 
 
 def get_origin_url(repo_path: str) -> Optional[str]:

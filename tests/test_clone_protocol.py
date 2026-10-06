@@ -209,3 +209,83 @@ def test_forge_clone_reports_failures_and_returns_nonzero(monkeypatch, tmp_path,
     assert "https-auth-required" in captured.out
     assert "SSH key required" in captured.err
     assert "HTTPS credentials for github.com are not configured" in captured.err
+
+
+def test_noninteractive_env_adds_batch_mode_to_ssh(monkeypatch):
+    monkeypatch.delenv("GIT_SSH", raising=False)
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i ~/.ssh/work")
+
+    env = cli.git.noninteractive_env()
+
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_SSH_COMMAND"].startswith("ssh -i ~/.ssh/work -o BatchMode=yes")
+
+
+def test_noninteractive_env_leaves_custom_ssh_wrappers_alone(monkeypatch):
+    monkeypatch.delenv("GIT_SSH", raising=False)
+    monkeypatch.setenv("GIT_SSH_COMMAND", "/usr/local/bin/my-ssh-wrapper --flag")
+
+    assert cli.git.noninteractive_env()["GIT_SSH_COMMAND"] == "/usr/local/bin/my-ssh-wrapper --flag"
+
+
+def test_noninteractive_env_ignores_local_repo_ssh_command(monkeypatch):
+    monkeypatch.delenv("GIT_SSH", raising=False)
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return type("Proc", (), {"returncode": 1, "stdout": ""})()
+
+    monkeypatch.setattr(cli.git.subprocess, "run", fake_run)
+
+    env = cli.git.noninteractive_env()
+
+    assert env["GIT_SSH_COMMAND"].startswith("ssh -o BatchMode=yes")
+    assert seen and all(cmd[2] in {"--global", "--system"} for cmd in seen)
+
+
+def test_auto_falls_back_to_https_when_ssh_port_is_blocked(monkeypatch):
+    access = cli._CloneAccess("auto")
+    monkeypatch.setattr(
+        cli.git,
+        "check_remote_access",
+        lambda url: (False, "kex_exchange_identification: Connection closed by remote host"),
+    )
+
+    plan = access.plan("git@github.com:owner/repo.git", "")
+
+    assert plan == {"protocol": "https", "url": "https://github.com/owner/repo.git"}
+    assert access.notices[0]["reason"] == "network-error"
+    assert "--clone-protocol https" in access.notices[0]["message"]
+
+
+def test_dry_run_does_not_probe_or_claim_a_protocol(monkeypatch, tmp_path, capsys):
+    _patch_common(monkeypatch)
+    snapshot_path = _write_snapshot(tmp_path, ["alpha"])
+    monkeypatch.setattr(
+        cli.git, "check_remote_access", lambda url: (_ for _ in ()).throw(AssertionError("dry run must not probe"))
+    )
+    log_path = tmp_path / "log.json"
+
+    rc = cli.cmd_fleet_apply(_apply_args(tmp_path, snapshot_path, dry_run=True, log_json=str(log_path)))
+
+    assert rc == 0
+    clone_action = json.loads(log_path.read_text(encoding="utf-8"))["results"][0]["actions"][0]
+    assert clone_action == {"action": "clone", "status": "dry-run"}
+
+
+def test_summary_falls_back_to_status_when_failure_has_no_reason(tmp_path):
+    log_path = tmp_path / "log.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "summary": {"repos_processed": 1},
+                "results": [],
+                "failures": [{"repo": "owner/alpha", "action": "clone", "status": "missing-url", "reason": "-"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert "- owner/alpha: missing-url" in cli._fleet_short_summary_from_log(str(log_path))
