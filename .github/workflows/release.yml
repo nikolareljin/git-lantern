@@ -20,3 +20,101 @@ jobs:
     uses: nikolareljin/ci-helpers/.github/workflows/create-github-release.yml@production
     with:
       release_tag: ${{ inputs.release_tag }}
+
+  homebrew:
+    needs: github-release
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      TAP_REPOSITORY: nikolareljin/homebrew-tap
+      TAP_BRANCH: homebrew/git-lantern-${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 @ 2026-09-10
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.+-]+)?$ ]]
+
+      - name: Generate Homebrew formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/git-lantern-${RELEASE_TAG}.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" \
+            "https://github.com/${{ github.repository }}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          archive_sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          python3 - "$RUNNER_TEMP/git-lantern.rb" "$RELEASE_TAG" "$archive_sha" <<'PY'
+          import sys
+
+          path, version, archive_sha = sys.argv[1:]
+          formula = f'''class GitLantern < Formula
+            include Language::Python::Virtualenv
+
+            desc "Local and GitHub repository visibility and status toolkit"
+            homepage "https://github.com/nikolareljin/git-lantern"
+            url "https://github.com/nikolareljin/git-lantern/archive/refs/tags/{version}.tar.gz"
+            sha256 "{archive_sha}"
+            license "MIT"
+
+            depends_on "python@3.12"
+
+            resource "argcomplete" do
+              url "https://files.pythonhosted.org/packages/87/6f/5a73f04007ca950701765949209f068da628bd11f9c2da287278ce91e0ee/argcomplete-3.7.2.tar.gz"
+              sha256 "aad8b69a0b9969edb62db0d1752354c0d50717b10e0cbb00e2a958381b9fc6b9"
+            end
+
+            def install
+              virtualenv_install_with_resources
+            end
+
+            test do
+              system bin/"lantern", "--help"
+            end
+          end
+          '''
+          open(path, "w").write(formula)
+          PY
+
+      - name: Validate generated formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew style "$RUNNER_TEMP/git-lantern.rb"
+          brew install --build-from-source "$RUNNER_TEMP/git-lantern.rb"
+          brew test git-lantern
+          lantern --help
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 @ 2026-09-10
+        with:
+          repository: nikolareljin/homebrew-tap
+          ref: main
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Open Homebrew tap pull request
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          if git -C homebrew-tap ls-remote --exit-code --heads origin "$TAP_BRANCH"; then
+            git -C homebrew-tap fetch origin "$TAP_BRANCH"
+            git -C homebrew-tap switch --track -c "$TAP_BRANCH" "origin/$TAP_BRANCH"
+          else
+            git -C homebrew-tap switch -c "$TAP_BRANCH"
+          fi
+          cp "$RUNNER_TEMP/git-lantern.rb" homebrew-tap/Formula/git-lantern.rb
+          git -C homebrew-tap add Formula/git-lantern.rb
+          git -C homebrew-tap diff --cached --quiet && exit 0
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap commit -m "feat: add Git Lantern ${RELEASE_TAG} formula"
+          git -C homebrew-tap push --set-upstream origin "$TAP_BRANCH"
+          gh pr create --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --base main \
+            --title "feat: add Git Lantern ${RELEASE_TAG} formula" \
+            --body "Adds the macOS formula generated from the verified ${RELEASE_TAG} source archive."
