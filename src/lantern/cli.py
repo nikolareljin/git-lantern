@@ -5508,6 +5508,11 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     parser = argparse.ArgumentParser(prog="lantern")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=_application_version(),
+    )
     add_tui_root_argument(parser)
     parser.add_argument(
         "--tui", "-t",
