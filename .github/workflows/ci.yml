@@ -44,6 +44,7 @@ jobs:
           ./install --prefix "$prefix" --bin-link "$bin_dir/lantern"
           "$bin_dir/lantern" --version
           git init --bare "$remote"
+          git -C "$remote" symbolic-ref HEAD refs/heads/main
           git init -b main "$seed"
           git -C "$seed" config user.name "CI Test"
           git -C "$seed" config user.email "ci@example.invalid"
