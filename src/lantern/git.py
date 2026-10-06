@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 from typing import Dict, Optional, Tuple, TypedDict
 
@@ -210,6 +211,69 @@ def count_ahead_behind(repo_path: str, left: str, right: str) -> Tuple[int, int]
     if len(parts) != 2:
         return 0, 0
     return int(parts[0]), int(parts[1])
+
+
+def noninteractive_env() -> Dict[str, str]:
+    """Environment for network git commands that must fail instead of prompting."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if env.get("GIT_SSH"):
+        return env
+    ssh_command = env.get("GIT_SSH_COMMAND") or run_git(".", ["config", "--get", "core.sshCommand"]) or "ssh"
+    try:
+        program = os.path.basename(shlex.split(ssh_command)[0]) if ssh_command.strip() else ""
+    except ValueError:
+        program = ""
+    if program in {"ssh", "ssh.exe"}:
+        # BatchMode stops passphrase, password and host key prompts from blocking.
+        ssh_command = f"{ssh_command} -o BatchMode=yes -o ConnectTimeout=15"
+    env["GIT_SSH_COMMAND"] = ssh_command
+    return env
+
+
+def _last_error_line(stderr: str) -> str:
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    # The SSH line names the actual cause; git's own "fatal:" line after it is generic.
+    for line in lines:
+        if "permission denied" in line.lower() or "host key verification failed" in line.lower():
+            return line
+    for line in reversed(lines):
+        if line.lower().startswith(("fatal:", "error:")):
+            return line
+    return lines[-1] if lines else ""
+
+
+def check_remote_access(url: str, timeout: int = 30) -> Tuple[bool, str]:
+    """Return whether the remote answers without prompting, plus git's error output."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--", url, "HEAD"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=noninteractive_env(),
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timed out after {timeout}s"
+    return result.returncode == 0, (result.stderr or "").strip()
+
+
+def clone_repo(url: str, dest: str) -> Tuple[bool, str]:
+    """Clone without prompting; return success and git's error output."""
+    result = subprocess.run(
+        ["git", "clone", "--", url, dest],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=noninteractive_env(),
+    )
+    ok = result.returncode == 0
+    return ok, "" if ok else _last_error_line(result.stderr or "")
 
 
 def get_origin_url(repo_path: str) -> Optional[str]:

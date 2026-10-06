@@ -277,6 +277,12 @@ the `rebase-merge` and `rebase-apply` state directories still block unsafe actio
 
 **Actions**:
 - `--clone-missing`: clone repos in `missing-local` state
+- `--clone-protocol auto|ssh|https` (default `auto`): `auto` checks SSH access once per host and
+  falls back to HTTPS when the host rejects SSH (for example, no SSH key on this machine);
+  `ssh` skips clones when SSH is rejected; `https` always clones over HTTPS.
+  Clones never prompt for passwords, passphrases or host keys. When access fails, the run
+  explains what is missing (SSH key, trusted host key, or HTTPS credentials) and how to fix it;
+  failed clones list their reason in the output and in `--log-json`.
 - `--pull-behind`: run `git pull --ff-only` for repos in `behind-remote`
 - `--push-ahead`: run `git push` for repos in `ahead-remote`
 - `--checkout-branch <name>`: checkout/update named branch across selected repos
@@ -576,8 +582,11 @@ lantern forge list --server github.com --all-orgs --with-user --output data/gith
 
 **What it does**:
 - Reads `--input` (default `data/github.json`).
-- Clones each repo by its `ssh_url` into `--root`.
+- Clones each repo into `--root` over SSH, or HTTPS when the host rejects SSH
+  (`--clone-protocol auto|ssh|https`, default `auto`).
 - Skips repos already present.
+- Reports failed clones with a reason and how to fix missing SSH keys or HTTPS credentials;
+  exits non-zero when any clone fails.
 - With `--dry-run`, prints the clone commands without executing.
 
 **Example**:

@@ -1395,6 +1395,22 @@ def _fleet_short_summary_from_log(log_path: str) -> str:
         if len(branch_updates) > 15:
             lines.append(f"- ... and {len(branch_updates) - 15} more")
         lines.append("")
+    notices = payload.get("clone_access", []) if isinstance(payload.get("clone_access"), list) else []
+    messages = [str(n.get("message") or "") for n in notices if isinstance(n, dict) and n.get("message")]
+    if messages:
+        lines.append("Clone access problems:")
+        lines.extend(f"- {message}" for message in messages)
+        lines.append("")
+    clone_failures = [
+        f for f in (payload.get("failures", []) if isinstance(payload.get("failures"), list) else [])
+        if isinstance(f, dict) and f.get("action") == "clone"
+    ]
+    if clone_failures:
+        lines.append(f"Failed clones: {len(clone_failures)}")
+        lines.extend(f"- {f.get('repo')}: {f.get('reason') or f.get('status')}" for f in clone_failures[:15])
+        if len(clone_failures) > 15:
+            lines.append(f"- ... and {len(clone_failures) - 15} more")
+        lines.append("")
     lines.append(f"Full log: {log_path}")
     return "\n".join(lines)
 
@@ -2890,7 +2906,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     cmd_args = [sys.executable, "-m", "lantern", "forge", "clone", "--input", input_file, "--root", clone_root, "--tui"]
                     if not use_namespace:
                         cmd_args.append("--flat")
-                    _run_lantern_subprocess(cmd_args, height, width, capture=False)
+                    result = _run_lantern_subprocess(cmd_args, height, width, capture=False)
+                    if result.returncode != 0:
+                        # Keep failed clones and SSH/HTTPS access hints on screen before the menu redraws.
+                        try:
+                            input("\nSome repositories could not be cloned. Press Enter to return to the menu...")
+                        except EOFError:
+                            pass
 
             elif forge_action in ("snippets", "snippets_file"):
                 config = lantern_config.load_config()
@@ -3300,6 +3322,168 @@ def _remote_repo_keys(repo: Dict[str, Any]) -> Set[str]:
         if normalized:
             keys.add(normalized)
     return keys
+
+
+CLONE_PROTOCOLS = ("auto", "ssh", "https")
+
+
+def _is_ssh_url(url: str) -> bool:
+    raw = (url or "").strip()
+    return raw.startswith("ssh://") or bool(re.match(r"^[\w.-]+@[\w.-]+:", raw))
+
+
+def _url_host(url: str) -> str:
+    raw = (url or "").strip()
+    match = re.match(r"^[\w.-]+@([\w.-]+):", raw)
+    if match:
+        return match.group(1).lower()
+    try:
+        return (urllib.parse.urlparse(raw).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _https_url_from_ssh(url: str) -> str:
+    """Derive the HTTPS clone URL for an SSH remote (git@host:path or ssh://git@host[:port]/path)."""
+    raw = (url or "").strip()
+    match = re.match(r"^[\w.-]+@([\w.-]+):(?!\d+/)(.+)$", raw)
+    if match:
+        return f"https://{match.group(1)}/{match.group(2).lstrip('/')}"
+    if raw.startswith("ssh://"):
+        parsed = urllib.parse.urlparse(raw)
+        if parsed.hostname and parsed.path.strip("/"):
+            return f"https://{parsed.hostname}/{parsed.path.lstrip('/')}"
+    return ""
+
+
+def _clone_url_pair(ssh_url: str, https_url: str) -> Tuple[str, str]:
+    """Normalize a repo's SSH and HTTPS clone URLs, deriving whichever is missing when possible."""
+    ssh_url = (ssh_url or "").strip()
+    https_url = (https_url or "").strip()
+    if ssh_url and not _is_ssh_url(ssh_url):
+        if not https_url and ssh_url.startswith("https://"):
+            https_url = ssh_url
+        ssh_url = ""
+    if https_url and not https_url.startswith("https://"):
+        https_url = ""
+    if ssh_url and not https_url:
+        https_url = _https_url_from_ssh(ssh_url)
+    return ssh_url, https_url
+
+
+def _clone_failure_reason(protocol: str, error: str) -> str:
+    text = (error or "").lower()
+    if protocol == "ssh":
+        if "permission denied (publickey" in text or "permission denied (password" in text:
+            return "ssh-key-required"
+        if "host key verification failed" in text:
+            return "ssh-host-key-unknown"
+    if "could not read username" in text or "terminal prompts disabled" in text or "authentication failed" in text:
+        return "https-auth-required"
+    if "could not resolve host" in text or "timed out" in text or "connection refused" in text:
+        return "network-error"
+    if "not found" in text or "does not exist" in text or "access rights" in text:
+        return "not-found-or-no-access"
+    if "already exists and is not an empty directory" in text:
+        return "destination-exists"
+    return "clone-error"
+
+
+_HOST_LEVEL_SSH_FAILURES = {"ssh-key-required", "ssh-host-key-unknown", "network-error"}
+
+
+def _clone_failure_hint(reason: str, host: str) -> str:
+    host = host or "the git host"
+    if reason == "ssh-key-required":
+        github_hint = " For GitHub: gh ssh-key add ~/.ssh/id_ed25519.pub." if "github" in host else ""
+        return (
+            f"SSH key required: {host} rejected SSH authentication (no accepted key). "
+            f"Create a key with 'ssh-keygen -t ed25519' and add the public key to your {host} account."
+            f"{github_hint} Or rerun with --clone-protocol https."
+        )
+    if reason == "ssh-host-key-unknown":
+        return (
+            f"SSH host key for {host} is not trusted yet. Run 'ssh -T git@{host}' once, verify the "
+            "fingerprint and accept it, or rerun with --clone-protocol https."
+        )
+    if reason == "https-auth-required":
+        github_hint = " For GitHub: gh auth setup-git." if "github" in host else ""
+        return (
+            f"HTTPS credentials for {host} are not configured, so private repositories cannot be cloned. "
+            f"Configure a git credential helper.{github_hint} Or add an SSH key and use --clone-protocol ssh."
+        )
+    if reason == "network-error":
+        return f"Could not reach {host}. Check the network connection and retry."
+    return ""
+
+
+class _CloneAccess:
+    """Choose a clone URL per repository and collect host-level access problems.
+
+    SSH access is probed once per host. In auto mode a host that rejects SSH
+    falls back to HTTPS; in ssh mode its clones are skipped with the reason.
+    """
+
+    def __init__(self, protocol: str = "auto") -> None:
+        self.protocol = protocol if protocol in CLONE_PROTOCOLS else "auto"
+        self._ssh_by_host: Dict[str, Tuple[bool, str, str]] = {}
+        self.notices: List[Dict[str, str]] = []
+        self._noticed: Set[Tuple[str, str]] = set()
+
+    def _notice(self, host: str, reason: str, detail: str, fallback: str = "") -> None:
+        key = (host, reason)
+        if key in self._noticed:
+            return
+        self._noticed.add(key)
+        message = _clone_failure_hint(reason, host)
+        if fallback:
+            message = f"{message} Using {fallback} for {host} in this run."
+        self.notices.append({"host": host, "reason": reason, "detail": detail, "message": message})
+
+    def _ssh_state(self, ssh_url: str) -> Tuple[bool, str, str]:
+        host = _url_host(ssh_url)
+        if host not in self._ssh_by_host:
+            ok, error = git.check_remote_access(ssh_url)
+            reason = "" if ok else _clone_failure_reason("ssh", error)
+            if reason not in _HOST_LEVEL_SSH_FAILURES:
+                # Repo-specific failures (deleted repo, no access) do not mean SSH is unusable.
+                ok, reason = True, ""
+            self._ssh_by_host[host] = (ok, reason, git._last_error_line(error) if not ok else "")
+        return self._ssh_by_host[host]
+
+    def plan(self, ssh_url: str, https_url: str, probe: bool = True) -> Dict[str, str]:
+        """Return {protocol, url} for a clone, or {protocol, reason, detail} when it cannot run."""
+        ssh_url, https_url = _clone_url_pair(ssh_url, https_url)
+        if self.protocol == "https" or (self.protocol == "auto" and not ssh_url):
+            if https_url:
+                return {"protocol": "https", "url": https_url}
+            return {"protocol": "https", "reason": "missing-url", "detail": "no HTTPS clone URL"}
+        if not ssh_url:
+            return {"protocol": "ssh", "reason": "missing-url", "detail": "no SSH clone URL"}
+        if not probe:
+            return {"protocol": "ssh", "url": ssh_url}
+        host = _url_host(ssh_url)
+        ok, reason, detail = self._ssh_state(ssh_url)
+        if ok:
+            return {"protocol": "ssh", "url": ssh_url}
+        if self.protocol == "auto" and https_url:
+            self._notice(host, reason, detail, fallback="HTTPS")
+            return {"protocol": "https", "url": https_url}
+        self._notice(host, reason, detail)
+        return {"protocol": "ssh", "reason": reason, "detail": detail}
+
+    def record_failure(self, protocol: str, url: str, error: str) -> str:
+        reason = _clone_failure_reason(protocol, error)
+        if reason in _HOST_LEVEL_SSH_FAILURES or reason == "https-auth-required":
+            self._notice(_url_host(url), reason, error)
+        return reason
+
+    def print_notices(self) -> None:
+        sys.stdout.flush()
+        for notice in self.notices:
+            print(f"\n{notice['message']}", file=sys.stderr)
+            if notice.get("detail"):
+                print(f"  git: {notice['detail']}", file=sys.stderr)
 
 
 def _fleet_server_context(args: argparse.Namespace) -> Tuple[str, str, str, str, Optional[Dict[str, str]], Dict[str, Any]]:
@@ -3885,19 +4069,20 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    clone_sources: Dict[str, str] = {}
+    # repo name -> (ssh_url, https_url); either may be empty.
+    clone_sources: Dict[str, Tuple[str, str]] = {}
     if getattr(args, "snapshot", "") and not getattr(args, "refresh", False):
         for row in rows:
             name = str(row.get("repo") or "").strip()
             if name:
-                clone_sources.setdefault(name, "")
+                clone_sources.setdefault(name, ("", ""))
         for snapshot in snapshot_payload.get("repos", []) if isinstance(snapshot_payload.get("repos"), list) else []:
             if not isinstance(snapshot, dict):
                 continue
             name = str(snapshot.get("repo") or "").strip()
             src = str(snapshot.get("origin_url") or "").strip()
             if name and src and src != "-":
-                clone_sources[name] = src
+                clone_sources[name] = _clone_url_pair(src, "")
     else:
         for remote_repo in payload.get("repos", []):
             if not isinstance(remote_repo, dict):
@@ -3905,9 +4090,13 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             name = _remote_repo_name(remote_repo)
             if not name:
                 continue
-            src = str(remote_repo.get("ssh_url") or remote_repo.get("clone_url") or "").strip()
-            if src:
-                clone_sources[name] = src
+            pair = _clone_url_pair(
+                str(remote_repo.get("ssh_url") or ""),
+                str(remote_repo.get("clone_url") or ""),
+            )
+            if any(pair):
+                clone_sources[name] = pair
+    clone_access = _CloneAccess(str(getattr(args, "clone_protocol", "auto") or "auto"))
 
     selected = _parse_repo_filter(args.repos)
     if checkout_latest_branch and not selected:
@@ -3953,46 +4142,66 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
         )
         clone_ok = state != "missing-local"
         if state == "missing-local" and args.clone_missing:
+            ssh_src, https_src = clone_sources.get(repo, ("", ""))
+            clone_plan = clone_access.plan(ssh_src, https_src, probe=not args.dry_run)
+            clone_protocol = clone_plan["protocol"]
             if args.dry_run:
                 statuses.append("clone:dry-run")
-                action_records.append({"action": "clone", "status": "dry-run"})
+                action_records.append({"action": "clone", "status": "dry-run", "protocol": clone_protocol})
+                clone_ok = False
+            elif clone_plan.get("reason") == "missing-url":
+                statuses.append("clone:missing-url")
+                action_records.append({"action": "clone", "status": "missing-url", "protocol": clone_protocol})
+                clone_ok = False
+            elif clone_plan.get("reason"):
+                # The host rejected SSH up front; skip instead of failing every clone the same way.
+                statuses.append(f"clone:{clone_plan['reason']}")
+                action_records.append(
+                    {
+                        "action": "clone",
+                        "status": "fail",
+                        "protocol": clone_protocol,
+                        "reason": clone_plan["reason"],
+                        "detail": clone_plan.get("detail", ""),
+                    }
+                )
                 clone_ok = False
             else:
                 parent = os.path.dirname(path)
                 if parent:
                     os.makedirs(parent, exist_ok=True)
-                clone_src = clone_sources.get(repo, "")
-                if not clone_src:
-                    statuses.append("clone:missing-url")
-                    action_records.append({"action": "clone", "status": "missing-url"})
-                    clone_ok = False
+                clone_src = clone_plan["url"]
+                ok, clone_error = git.clone_repo(clone_src, path)
+                clone_record = {"action": "clone", "status": "ok" if ok else "fail", "protocol": clone_protocol}
+                if ok:
+                    statuses.append(f"clone:ok:{clone_protocol}")
                 else:
-                    proc = subprocess.run(["git", "clone", clone_src, path], check=False)
-                    ok = proc.returncode == 0
-                    statuses.append(f"clone:{'ok' if ok else 'fail'}")
-                    action_records.append({"action": "clone", "status": "ok" if ok else "fail"})
-                    clone_ok = ok
-                    if not ok:
-                        rollback_status = "no"
-                        rollback_detail = "none"
-                        # Best-effort cleanup for failed clone destination.
-                        if os.path.isdir(path):
-                            try:
-                                if not os.listdir(path):
-                                    os.rmdir(path)
-                                    rollback_status = "yes"
-                                    rollback_detail = "cleanup-empty-dir:ok"
-                                else:
-                                    rollback_detail = "cleanup-empty-dir:skipped-non-empty"
-                            except OSError:
-                                rollback_detail = "cleanup-empty-dir:fail"
-                        action_records.append(
-                            {
-                                "action": "rollback",
-                                "status": rollback_status,
-                                "detail": rollback_detail,
-                            }
-                        )
+                    reason = clone_access.record_failure(clone_protocol, clone_src, clone_error)
+                    statuses.append(f"clone:{reason}")
+                    clone_record.update({"reason": reason, "detail": clone_error})
+                action_records.append(clone_record)
+                clone_ok = ok
+                if not ok:
+                    rollback_status = "no"
+                    rollback_detail = "none"
+                    # Best-effort cleanup for failed clone destination.
+                    if os.path.isdir(path):
+                        try:
+                            if not os.listdir(path):
+                                os.rmdir(path)
+                                rollback_status = "yes"
+                                rollback_detail = "cleanup-empty-dir:ok"
+                            else:
+                                rollback_detail = "cleanup-empty-dir:skipped-non-empty"
+                        except OSError:
+                            rollback_detail = "cleanup-empty-dir:fail"
+                    action_records.append(
+                        {
+                            "action": "rollback",
+                            "status": rollback_status,
+                            "detail": rollback_detail,
+                        }
+                    )
         elif state == "behind-remote" and args.pull_behind:
             if args.only_clean and not _is_only_clean_eligible(row):
                 statuses.append("pull:skip-dirty")
@@ -4226,13 +4435,15 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                         "repo": repo_name,
                         "action": action_name,
                         "status": status,
+                        "reason": str(action.get("reason") or "-"),
                         "path": path,
                     }
                 )
     if failures:
         failures = _sort_records_by_repo_name(failures)
         print("\nUnsuccessful fleet operations:")
-        print(render_table(failures, ["repo", "action", "status", "path"]))
+        print(render_table(failures, ["repo", "action", "status", "reason", "path"]))
+    clone_access.print_notices()
     if args.log_json:
         action_totals: Dict[str, int] = {}
         updated_repos = 0
@@ -4273,6 +4484,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
                 "fetch": bool(args.fetch),
                 "include_hidden": bool(args.include_hidden),
                 "max_depth": int(args.max_depth),
+                "clone_protocol": clone_access.protocol,
             },
             "summary": {
                 "repos_targeted": len(target_rows),
@@ -4284,6 +4496,7 @@ def cmd_fleet_apply(args: argparse.Namespace) -> int:
             },
             "branch_updates": branch_updates,
             "failures": failures,
+            "clone_access": clone_access.notices,
             "results": detailed_results,
         }
         log_dir = os.path.dirname(args.log_json)
@@ -5056,28 +5269,44 @@ def cmd_github_clone(args: argparse.Namespace) -> int:
         repos = [repo for repo in repos if _remote_repo_name(repo) in selected_set]
         repos = _sort_records_by_repo_name(repos)
         planned_destinations = _planned_destinations(repos)
+    clone_access = _CloneAccess(str(getattr(args, "clone_protocol", "auto") or "auto"))
+    failures: List[Dict[str, str]] = []
     for repo in repos:
         name = _remote_repo_name(repo)
-        ssh_url = repo.get("ssh_url")
         if not _is_safe_repo_name(name):
             if name:
                 print(f"Skipping unsafe repository name: {name}", file=sys.stderr)
             continue
-        if not ssh_url:
+        ssh_url, https_url = _clone_url_pair(str(repo.get("ssh_url") or ""), str(repo.get("clone_url") or ""))
+        if not ssh_url and not https_url:
             continue
         dest = planned_destinations.get(name)
         if not dest:
             continue
         if os.path.exists(dest):
             continue
+        clone_plan = clone_access.plan(ssh_url, https_url, probe=not args.dry_run)
+        if args.dry_run:
+            if clone_plan.get("url"):
+                print(f"[DRY RUN] git clone {clone_plan['url']} {dest}")
+            continue
+        if clone_plan.get("reason"):
+            failures.append({"repo": name, "reason": clone_plan["reason"], "path": dest})
+            continue
         parent = os.path.dirname(dest)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        if args.dry_run:
-            print(f"[DRY RUN] git clone {ssh_url} {dest}")
-            continue
-        subprocess.run(["git", "clone", ssh_url, dest], check=False)
-    return 0
+        print(f"Cloning {name} ({clone_plan['protocol']}) into {dest}")
+        ok, clone_error = git.clone_repo(clone_plan["url"], dest)
+        if not ok:
+            reason = clone_access.record_failure(clone_plan["protocol"], clone_plan["url"], clone_error)
+            failures.append({"repo": name, "reason": reason, "path": dest})
+            print(f"  failed: {clone_error or reason}", file=sys.stderr)
+    if failures:
+        print("\nFailed clones:")
+        print(render_table(_sort_records_by_repo_name(failures), ["repo", "reason", "path"]))
+    clone_access.print_notices()
+    return 1 if failures else 0
 
 
 def cmd_github_gists_list(args: argparse.Namespace) -> int:
@@ -5682,6 +5911,12 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--flat", action="store_true", help="identify/clone missing repos directly under the root directory instead of the default namespace directories (see --root)")
     fleet_apply.add_argument("--repos", default="", help="comma-separated repo names to target")
     fleet_apply.add_argument("--clone-missing", action="store_true")
+    fleet_apply.add_argument(
+        "--clone-protocol",
+        choices=CLONE_PROTOCOLS,
+        default="auto",
+        help="protocol for cloning missing repos: auto (SSH, falling back to HTTPS when the host rejects SSH), ssh, or https",
+    )
     fleet_apply.add_argument("--pull-behind", action="store_true")
     fleet_apply.add_argument("--push-ahead", action="store_true")
     fleet_apply.add_argument("--checkout-branch", default="", help="checkout/update this branch on selected repos (tracks origin/<branch>)")
@@ -5814,6 +6049,12 @@ def build_parser() -> argparse.ArgumentParser:
     gh_clone.add_argument("--dry-run", action="store_true")
     gh_clone.add_argument("--flat", action="store_true", help="clone missing repos directly under the root directory instead of the default namespace directories (see --root)")
     gh_clone.add_argument("--tui", action="store_true")
+    gh_clone.add_argument(
+        "--clone-protocol",
+        choices=CLONE_PROTOCOLS,
+        default="auto",
+        help="protocol for cloning: auto (SSH, falling back to HTTPS when the host rejects SSH), ssh, or https",
+    )
     gh_clone.set_defaults(func=cmd_github_clone)
 
     gh_gists = forge_sub.add_parser("gists", help="GitHub gists utilities")
