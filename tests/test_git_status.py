@@ -1,6 +1,20 @@
 import subprocess
 
+import pytest
+
 from lantern import git
+
+
+@pytest.mark.parametrize("active_state", [None, "rebase-merge", "rebase-apply"])
+def test_leftover_rebase_head_requires_active_rebase_state(tmp_path, monkeypatch, active_state):
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+    (git_dir / "REBASE_HEAD").write_text("old-commit\n")
+    if active_state:
+        (git_dir / active_state).mkdir()
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs:
+                        subprocess.CompletedProcess([], 0, stdout=".git\n"))
+    assert git.has_in_progress_operation(str(tmp_path)) is bool(active_state)
 
 
 def test_get_working_tree_state_reports_clean(monkeypatch):

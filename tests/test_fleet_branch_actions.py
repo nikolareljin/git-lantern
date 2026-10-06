@@ -468,7 +468,7 @@ def test_cmd_fleet_apply_skips_latest_checkout_when_git_status_fails(monkeypatch
 
 
 def test_checkout_remote_branch_short_circuits_when_fetch_fails(monkeypatch):
-    monkeypatch.setattr(cli, "_run_git_op", lambda _path, args, quiet=True: 1 if args == ["fetch", "--prune"] else 0)
+    monkeypatch.setattr(cli, "_run_git_op", lambda _path, args, quiet=True: 1 if args == ["fetch", "--all", "--prune"] else 0)
 
     statuses, records = cli._checkout_remote_branch(
         path="/tmp/demo",

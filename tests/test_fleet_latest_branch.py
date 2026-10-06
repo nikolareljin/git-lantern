@@ -60,3 +60,22 @@ def test_cmd_fleet_plan_always_includes_latest_branch_column(monkeypatch, capsys
     out = capsys.readouterr().out
     assert rc == 0
     assert "latest_branch" in out
+
+
+def test_detect_latest_branch_excludes_dependabot(monkeypatch):
+    monkeypatch.setattr(cli.git, "run_git", lambda _path, args:
+                        "refs/remotes/origin/dependabot/pip/pkg\nrefs/remotes/origin/feature"
+                        if args[0] == "for-each-ref" else "")
+    assert cli._detect_latest_branch("/tmp/repo") == "feature"
+
+
+def test_detect_latest_branch_prefers_main_containing_latest_tip(monkeypatch):
+    def fake_git(_path, args):
+        if args[0] == "for-each-ref":
+            return "refs/remotes/origin/release/1.0\nrefs/remotes/origin/main"
+        if args[0] == "rev-list":
+            return "0"
+        return ""
+
+    monkeypatch.setattr(cli.git, "run_git", fake_git)
+    assert cli._detect_latest_branch("/tmp/repo") == "main"
