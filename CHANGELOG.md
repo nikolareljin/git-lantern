@@ -4,6 +4,8 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-06
+
 ### Fixed
 
 - Fleet apply now synchronizes recorded submodule commits before safety checks and
