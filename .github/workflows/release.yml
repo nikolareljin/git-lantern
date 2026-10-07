@@ -7,6 +7,11 @@ on:
         description: "Semver version to release, no leading 'v' (e.g. 0.8.0 or 0.8.0-rc1)"
         required: true
         type: string
+      publish_homebrew_only:
+        description: "Publish the Homebrew formula without recreating the GitHub Release"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -17,12 +22,14 @@ jobs:
     # and falling back to GitHub auto-generated notes otherwise. Dispatched by
     # auto-tag.yml after a release/x.y.z -> main merge (which always supplies
     # release_tag), or runnable manually with an explicit tag.
+    if: ${{ !inputs.publish_homebrew_only }}
     uses: nikolareljin/ci-helpers/.github/workflows/create-github-release.yml@production
     with:
       release_tag: ${{ inputs.release_tag }}
 
   homebrew:
     needs: github-release
+    if: ${{ always() && (needs.github-release.result == 'success' || needs.github-release.result == 'skipped') }}
     runs-on: macos-latest
     timeout-minutes: 20
     env:
@@ -118,6 +125,10 @@ jobs:
           git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C homebrew-tap commit -m "feat: add Git Lantern ${RELEASE_TAG} formula"
           git -C homebrew-tap push --set-upstream origin "$TAP_BRANCH"
-          gh pr create --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --base main \
-            --title "feat: add Git Lantern ${RELEASE_TAG} formula" \
-            --body "Adds the macOS formula generated from the verified ${RELEASE_TAG} source archive."
+          if gh pr list --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --state open --json url --jq 'length > 0' | grep -qx true; then
+            echo "Homebrew tap pull request already exists for ${TAP_BRANCH}."
+          else
+            gh pr create --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --base main \
+              --title "feat: add Git Lantern ${RELEASE_TAG} formula" \
+              --body "Adds the macOS formula generated from the verified ${RELEASE_TAG} source archive."
+          fi
