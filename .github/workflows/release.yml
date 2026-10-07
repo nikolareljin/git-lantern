@@ -83,8 +83,11 @@ jobs:
         run: |
           set -euo pipefail
           brew style "$RUNNER_TEMP/git-lantern.rb"
-          brew install --build-from-source "$RUNNER_TEMP/git-lantern.rb"
-          brew test git-lantern
+          brew tap-new nikolareljin/tap
+          tap_path="$(brew --repository)/Library/Taps/nikolareljin/homebrew-tap/Formula"
+          cp "$RUNNER_TEMP/git-lantern.rb" "$tap_path/git-lantern.rb"
+          brew install --build-from-source nikolareljin/tap/git-lantern
+          brew test nikolareljin/tap/git-lantern
           lantern --help
 
       - name: Check out Homebrew tap
