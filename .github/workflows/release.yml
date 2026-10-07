@@ -1,6 +1,9 @@
 name: release
 
 on:
+  push:
+    tags:
+      - '*.*.*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -17,25 +20,40 @@ permissions:
   contents: write
 
 jobs:
+  validate_release_tag:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.release_tag.outputs.value }}
+    steps:
+      - id: release_tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.+-]+)?$ ]]
+          printf 'value=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
   github-release:
     # Create the GitHub Release for the tag, using CHANGELOG notes when present
     # and falling back to GitHub auto-generated notes otherwise. Dispatched by
     # auto-tag.yml after a release/x.y.z -> main merge (which always supplies
     # release_tag), or runnable manually with an explicit tag.
-    if: ${{ !inputs.publish_homebrew_only }}
+    needs: validate_release_tag
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.publish_homebrew_only }}
     uses: nikolareljin/ci-helpers/.github/workflows/create-github-release.yml@production
     with:
-      release_tag: ${{ inputs.release_tag }}
+      release_tag: ${{ needs.validate_release_tag.outputs.release_tag }}
 
   homebrew:
-    needs: github-release
-    if: ${{ always() && (needs.github-release.result == 'success' || needs.github-release.result == 'skipped') }}
+    needs: [validate_release_tag, github-release]
+    if: ${{ always() && needs.validate_release_tag.result == 'success' && (needs.github-release.result == 'success' || needs.github-release.result == 'skipped') }}
     runs-on: macos-latest
     timeout-minutes: 20
     env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_TAG: ${{ needs.validate_release_tag.outputs.release_tag }}
       TAP_REPOSITORY: nikolareljin/homebrew-tap
-      TAP_BRANCH: homebrew/git-lantern-${{ inputs.release_tag }}
+      TAP_BRANCH: homebrew/git-lantern-${{ needs.validate_release_tag.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 @ 2026-09-10
 
