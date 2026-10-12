@@ -360,3 +360,37 @@ class InputChecks(HooksTestBase):
         self.assertEqual(self.calls(), [])
         self.assertEqual(self.run_cmd("apply"), 0)
         self.assertEqual(self.calls(), ["a"])
+
+
+class OnlySelection(HooksTestBase):
+    def setUp(self):
+        super().setUp()
+        self.a = self.clone("utils", "git@github.com:me/utils.git", root=os.path.join(self.root, "tools"))
+        self.b = self.clone("utils", "git@github.com:my-llc/utils.git", root=os.path.join(self.root, "clients", "x"))
+        self.c = self.clone("solo", "git@github.com:me/solo.git")
+
+    def test_unique_name_selects_that_clone(self):
+        self.assertEqual(self.run_cmd("apply", "--only", "SOLO"), 0)
+        self.assertEqual(self.calls(), ["solo"])
+
+    def test_shared_name_is_refused(self):
+        with mock.patch("sys.stderr"):
+            self.assertEqual(self.run_cmd("apply", "--only", "utils"), 2)
+        self.assertEqual(self.calls(), [])
+
+    def test_unknown_item_is_refused(self):
+        with mock.patch("sys.stderr"):
+            self.assertEqual(self.run_cmd("apply", "--only", "solo,nope"), 2)
+        self.assertEqual(self.calls(), [])
+
+    def test_paths_relative_to_root_cwd_and_absolute(self):
+        cwd = os.getcwd()
+        os.chdir(os.path.join(self.root, "tools"))
+        self.addCleanup(os.chdir, cwd)
+        self.assertEqual(self.run_cmd("apply", "--only", "./utils"), 0)       # cwd-relative: tools/utils
+        self.assertEqual(self.calls(), ["utils"])
+        open(self.log, "w").close()
+        self.assertEqual(self.run_cmd("apply", "--only", self.a), 0)          # absolute: already set up
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.run_cmd("apply", "--only", "clients/x/utils"), 0)   # --root-relative
+        self.assertEqual(self.calls(), ["utils"])

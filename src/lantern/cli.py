@@ -5901,7 +5901,8 @@ def build_parser() -> argparse.ArgumentParser:
         hp.add_argument("--root", default=os.getcwd())
         hp.add_argument("--max-depth", type=int, default=6)
         hp.add_argument("--include-hidden", action="store_true")
-        hp.add_argument("--only", default="", help="comma-separated clone directory names")
+        hp.add_argument("--only", default="", help="comma-separated clones: a directory name, or a path (absolute, or relative to "
+                        "the current directory or --root)")
         if name in ("apply", "remove"):
             hp.add_argument("--agents", default="",
                             help="also the AI agent hooks: claude,codex,gemini,copilot,cursor or all")
@@ -6268,7 +6269,12 @@ def cmd_fleet_apply_and_repair(args: argparse.Namespace) -> int:
         repos = find_repos(args.root, getattr(args, "max_depth", 6), getattr(args, "include_hidden", False))
         # Only the clones fleet apply was told to touch (--repos), and on stderr,
         # so the fleet output on stdout stays as it was for callers that parse it.
-        scope = argparse.Namespace(only=str(getattr(args, "repos", "") or ""))
+        # Matched by name here, not through hooks --only, which refuses a name
+        # two clones share: fleet treats every clone of that name as in scope.
+        names = {n.strip().lower() for n in str(getattr(args, "repos", "") or "").split(",") if n.strip()}
+        if names:
+            repos = [r for r in repos if os.path.basename(r).lower() in names]
+        scope = argparse.Namespace(only="", root=args.root)
         with contextlib.redirect_stdout(sys.stderr):
             if lantern_hooks.cmd_repair(repos, scope, quiet=True) != 0:
                 rc = rc or 1

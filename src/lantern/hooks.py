@@ -236,16 +236,51 @@ def linked_worktree_of(path: str) -> Optional[str]:
     return os.path.dirname(common)
 
 
-def _selected(repos: List[str], only: str, quiet: bool = False) -> List[str]:
-    names = {n.strip().lower() for n in (only or "").split(",") if n.strip()}
+def _resolve_only(repos: List[str], only: str, root: str) -> Optional[List[str]]:
+    """The clones named by --only, or None when it is empty. Each item is a
+    path (absolute, or relative to the current directory or --root) or a
+    clone directory name; a name that fits two clones, or an item that fits
+    none, is refused."""
+    items = [n.strip() for n in (only or "").split(",") if n.strip()]
+    if not items:
+        return None
+    real = {os.path.realpath(r): r for r in repos}
+    picked: List[str] = []
+    for item in items:
+        if os.path.isabs(item) or "/" in item or os.sep in item:
+            tries = [os.path.realpath(item)] + ([] if os.path.isabs(item) else [os.path.realpath(os.path.join(root, item))])
+            hits = [real[t] for t in tries if t in real][:1]
+        else:
+            hits = [r for r in repos if os.path.basename(r).lower() == item.lower()]
+        if not hits:
+            raise HooksError("--only {}: no clone under --root matches".format(item))
+        if len(hits) > 1:
+            raise HooksError("--only {} matches {} clones; give a path instead:\n  {}".format(
+                item, len(hits), "\n  ".join(hits)))
+        if hits[0] not in picked:
+            picked.append(hits[0])
+    return picked
+
+
+def _label(path: str, args) -> str:
+    """A clone as shown in output: its path under --root, so two clones with
+    the same directory name stay apart."""
+    root = getattr(args, "root", None) or os.getcwd()
+    try:
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+    except ValueError:                  # another drive on Windows
+        return path
+    return path if rel == ".." or rel.startswith(".." + os.sep) else rel
+
+
+def _selected(repos: List[str], args, quiet: bool = False) -> List[str]:
+    only = _resolve_only(repos, getattr(args, "only", ""), getattr(args, "root", None) or os.getcwd())
     picked = []
-    for r in repos:
-        if names and os.path.basename(r).lower() not in names:
-            continue
+    for r in (repos if only is None else only):
         main = linked_worktree_of(r)
         if main:
             if not quiet:
-                print("{:<40} worktree of {}, set up through it".format(os.path.basename(r), main))
+                print("{:<40} worktree of {}, set up through it".format(_label(r, args), main))
             continue
         picked.append(r)
     return picked
@@ -253,20 +288,21 @@ def _selected(repos: List[str], only: str, quiet: bool = False) -> List[str]:
 
 def cmd_status(repos: List[str], args) -> int:
     script, owners = _setup(args)
+    selected = _selected(repos, args)
     print("owners: {}   script-helpers: {}".format(",".join(owners), os.path.dirname(os.path.dirname(script))))
     failed = 0
-    for path in _selected(repos, getattr(args, "only", "")):
+    for path in selected:
         if not is_owned(path, owners):
-            print("{:<40} not owned, left alone".format(os.path.basename(path)))
+            print("{:<40} not owned, left alone".format(_label(path, args)))
             continue
         st = repo_state(script, path)
         if st is None:
-            print("{:<40} status failed".format(os.path.basename(path)))
+            print("{:<40} status failed".format(_label(path, args)))
             failed += 1
             continue
         flag = "  TAKEN OVER (lantern hooks repair)" if st.get("taken_over") == "yes" else ""
         print("{:<40} git hooks: {:<8} agents: {}{}".format(
-            os.path.basename(path), st.get("mode", "?"), ",".join(present_agents(st)) or "-", flag))
+            _label(path, args), st.get("mode", "?"), ",".join(present_agents(st)) or "-", flag))
     return 1 if failed else 0
 
 
@@ -276,8 +312,8 @@ def cmd_apply(repos: List[str], args) -> int:
     dry = bool(getattr(args, "dry_run", False))
     batch = int(getattr(args, "batch", 0) or 0)
     failed = done = 0
-    for path in _selected(repos, getattr(args, "only", "")):
-        name = os.path.basename(path)
+    for path in _selected(repos, args):
+        name = _label(path, args)
         if not is_owned(path, owners):
             print("{:<40} not owned, left alone".format(name))
             continue
@@ -310,18 +346,18 @@ def cmd_apply(repos: List[str], args) -> int:
 def cmd_repair(repos: List[str], args, quiet: bool = False) -> int:
     script, owners = _setup(args)
     failed = 0
-    for path in _selected(repos, getattr(args, "only", "")):
+    for path in _selected(repos, args):
         if not is_owned(path, owners):
             continue
         state = repo_state(script, path)
         if state is None:
-            print("{:<40} status failed, skipped".format(os.path.basename(path)))
+            print("{:<40} status failed, skipped".format(_label(path, args)))
             failed += 1
             continue
         if state.get("taken_over") != "yes":
             continue
         rc, out = run_setup(script, path, ["--repair"])
-        print("{:<40} repair: {}".format(os.path.basename(path), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
+        print("{:<40} repair: {}".format(_label(path, args), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
         if rc != 0:
             failed += 1
             print("    " + out.strip().replace("\n", "\n    "))
@@ -334,12 +370,12 @@ def cmd_remove(repos: List[str], args) -> int:
     script, owners = _setup(args)
     agents = agent_list(getattr(args, "agents", ""))
     failed = 0
-    for path in _selected(repos, getattr(args, "only", "")):
+    for path in _selected(repos, args):
         if not is_owned(path, owners):
             continue
         st = repo_state(script, path)
         if st is None:
-            print("{:<40} status failed, skipped".format(os.path.basename(path)))
+            print("{:<40} status failed, skipped".format(_label(path, args)))
             failed += 1
             continue
         # No --agents: everything this setup added (agent hooks, then the git
@@ -350,7 +386,7 @@ def cmd_remove(repos: List[str], args) -> int:
             steps.append(["--uninstall"])
         for step in steps:
             rc, out = run_setup(script, path, step)
-            print("{:<40} {}: {}".format(os.path.basename(path), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
+            print("{:<40} {}: {}".format(_label(path, args), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
             if rc != 0:
                 failed += 1
                 print("    " + out.strip().replace("\n", "\n    "))
@@ -377,31 +413,38 @@ def cmd_import(repos: List[str], args) -> int:
     script, owners = _setup(args)
     data = load_export(args.file)
     local: Dict[str, List[str]] = {}
-    for path in _selected(repos, "", quiet=True):
+    selected = set(_selected(repos, args, quiet=True))
+    elsewhere = set()                   # cloned here, but left out by --only
+    for path in repos:
         if is_owned(path, owners):
-            local.setdefault(normalize_remote(origin_url(path)), []).append(path)
+            remote = normalize_remote(origin_url(path))
+            if path in selected:
+                local.setdefault(remote, []).append(path)
+            else:
+                elsewhere.add(remote)
     failed = 0
     unmatched = []
     for entry in data["repos"]:
         paths = local.get(entry["remote"])
         if not paths:
-            unmatched.append(entry["remote"])
+            if entry["remote"] not in elsewhere:
+                unmatched.append(entry["remote"])
             continue
         agents = list(entry["agents"])
         for path in paths:              # every clone of that repository here
             st = repo_state(script, path)
             if st is None:
-                print("{:<40} status failed, skipped".format(os.path.basename(path)))
+                print("{:<40} status failed, skipped".format(_label(path, args)))
                 failed += 1
                 continue
             steps = plan_apply(st, agents) if entry.get("git_hooks") else agent_commands(
                 [a for a in agents if a not in present_agents(st)])
             for step in steps:
                 if getattr(args, "dry_run", False):
-                    print("{:<40} would run: {}".format(os.path.basename(path), describe(step)))
+                    print("{:<40} would run: {}".format(_label(path, args), describe(step)))
                     continue
                 rc, out = run_setup(script, path, step)
-                print("{:<40} {}: {}".format(os.path.basename(path), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
+                print("{:<40} {}: {}".format(_label(path, args), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
                 if rc != 0:
                     failed += 1
                     print("    " + out.strip().replace("\n", "\n    "))

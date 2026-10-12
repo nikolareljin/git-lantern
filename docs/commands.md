@@ -350,7 +350,7 @@ git config --global script-helpers.owners me,my-llc       # your namespaces
 git config --global script-helpers.home ~/Projects/script-helpers   # 0.50.0 or newer
 lantern hooks status
 lantern hooks apply --dry-run                              # the plan, nothing changed
-lantern hooks apply --batch 10 [--agents claude,codex|all] [--only repo-a,repo-b]
+lantern hooks apply --batch 10 [--agents claude,codex|all] [--only repo-a,clients/x/repo-b]
 lantern hooks repair                                       # re-chain after husky & co.
 lantern hooks remove [--agents codex]                      # all of ours, or those agents
 lantern hooks export hooks.json                            # this machine
@@ -374,6 +374,10 @@ lantern hooks import hooks.json [--dry-run]                # another machine
   `npm install` can let husky replace `core.hooksPath`), only in the clones it
   was told to touch (`--repos`), reporting on stderr; `--no-hooks-repair` skips
   that.
+- `--only` takes a comma-separated list. Each item is a clone's directory
+  name (`utils`) or its path, absolute or relative to the current directory
+  or `--root` (`clients/x/utils`). A name shared by two clones, or an item
+  that matches no clone, is refused (exit 2) with the matching paths listed.
 - A linked worktree (`git worktree add`) shares its main clone's config, so it
   is listed as "worktree of <main>" and set up only through the main clone.
 - `import` checks the whole file first (each entry needs `remote`, `git_hooks`
