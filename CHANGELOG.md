@@ -4,6 +4,12 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- script-helpers submodule moved from 0.15.0+76 to 0.50.0, the release with per-repository
+  hooks that chain to existing ones (`setup-hooks.sh --status --porcelain`, `--repair`),
+  which `lantern hooks` builds on.
+
 ## [0.8.3] - 2026-10-06
 
 ### Fixed
