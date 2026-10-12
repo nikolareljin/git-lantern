@@ -308,17 +308,16 @@ class RealScriptHelpers(HooksTestBase):
         os.environ["XDG_DATA_HOME"] = os.path.join(self.tmp.name, "data")
         os.environ["LOCALAPPDATA"] = os.environ["XDG_DATA_HOME"]
         path = self.clone("mine", "git@github.com:me/mine.git")
-        git("config", "core.hooksPath", "/opt/employer-hooks", cwd=path)
+        # A native absolute path: on Windows a POSIX one (/opt/...) is rewritten
+        # by Git Bash on its way to git.exe (script-helpers issue 177).
+        employer = os.path.join(self.tmp.name, "employer-hooks").replace(os.sep, "/")
+        git("config", "core.hooksPath", employer, cwd=path)
         self.assertEqual(self.run_cmd("apply"), 0)
         state = hooks.repo_state(hooks.find_setup_script(), path)
-        self.assertEqual((state.get("mode"), state.get("previous")), ("chained", "/opt/employer-hooks"))
+        self.assertEqual((state.get("mode"), state.get("previous")), ("chained", employer))
         self.assertEqual(self.run_cmd("remove"), 0)
         got = subprocess.run(["git", "-C", path, "config", "core.hooksPath"], stdout=subprocess.PIPE, text=True).stdout.strip()
-        self.assertEqual(got, "/opt/employer-hooks")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(got, employer)
 
 
 class InputChecks(HooksTestBase):
@@ -467,3 +466,7 @@ class WindowsBash(unittest.TestCase):
         with mock.patch.object(hooks, "find_bash", return_value=os.path.join(self.tmp.name, "no-bash")):
             with self.assertRaises(hooks.HooksError):
                 hooks.run_setup("x.sh", self.tmp.name, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
