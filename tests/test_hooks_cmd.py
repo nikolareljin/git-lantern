@@ -49,7 +49,7 @@ class HooksTestBase(unittest.TestCase):
         os.makedirs(os.path.join(self.home, "scripts"))
         with open(os.path.join(self.home, "VERSION"), "w") as fh:
             fh.write("0.50.0\n")
-        with open(os.path.join(self.home, "scripts", "setup-hooks.sh"), "w") as fh:
+        with open(os.path.join(self.home, "scripts", "setup-hooks.sh"), "w", newline="\n") as fh:
             fh.write(FAKE_SETUP)
         self.log = os.path.join(base, "calls.log")
         open(self.log, "w").close()
@@ -404,9 +404,13 @@ class WindowsBash(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def nt(self, env=None, git=None, exec_path=""):
+        env = dict(env or {})
+        if git:
+            os.makedirs(os.path.dirname(git), exist_ok=True)
+            open(git, "w").close()
+            env.setdefault("PATH", os.path.dirname(git))
         return [mock.patch.object(hooks.os, "name", "nt"),
-                mock.patch.dict(os.environ, env or {}, clear=True),
-                mock.patch.object(hooks.shutil, "which", return_value=git),
+                mock.patch.dict(os.environ, env, clear=True),
                 mock.patch.object(hooks, "_git", return_value=exec_path)]
 
     def run_nt(self, **kw):
@@ -443,6 +447,17 @@ class WindowsBash(unittest.TestCase):
     def test_standard_install_folder(self):
         bash = self.make("LocalAppData", "Programs", "Git", "bin", "bash.exe")
         self.assertEqual(self.run_nt(env={"LOCALAPPDATA": os.path.join(self.tmp.name, "LocalAppData")}), bash)
+
+    def test_git_in_a_relative_path_entry_is_ignored(self):
+        planted = self.make("clone", "bin", "bash.exe")
+        git = os.path.join(self.tmp.name, "clone", "cmd", "git.exe")
+        open(self.make("clone", "cmd", "git.exe"), "w").close()
+        cwd = os.getcwd()
+        os.chdir(os.path.join(self.tmp.name, "clone"))
+        self.addCleanup(os.chdir, cwd)
+        with self.assertRaises(hooks.HooksError):
+            self.run_nt(env={"PATH": os.pathsep.join(["cmd", "."])})
+        self.assertTrue(os.path.isfile(planted) and os.path.isfile(git))
 
     def test_no_git_bash_is_refused(self):
         with self.assertRaises(hooks.HooksError):

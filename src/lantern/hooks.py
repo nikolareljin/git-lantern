@@ -12,7 +12,6 @@ copy. lantern only decides which clones and which options.
 import json
 import os
 import re
-import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
@@ -25,10 +24,21 @@ class HooksError(Exception):
     """A configuration problem: no owners, no usable setup-hooks.sh (exit 2)."""
 
 
+def _windows_git() -> Optional[str]:
+    """git.exe from an absolute PATH entry. Windows looks for a bare "git" in
+    the current directory first, so an untrusted clone could plant one."""
+    return next((os.path.join(d, "git.exe") for d in os.environ.get("PATH", "").split(os.pathsep)
+                 if os.path.isabs(d) and os.path.isfile(os.path.join(d, "git.exe"))), None)
+
+
 def _git(args: List[str], cwd: Optional[str] = None) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, check=False, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            text=True, encoding="utf-8", errors="replace")
+    exe = (_windows_git() or "git.exe-not-on-PATH") if os.name == "nt" else "git"
+    try:
+        result = subprocess.run([exe, *args], cwd=cwd, check=False, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
     return result.stdout.strip()
 
 
@@ -106,7 +116,7 @@ def find_bash() -> str:
     candidates = []
     if os.environ.get("CLAUDE_CODE_GIT_BASH_PATH"):
         candidates.append(os.environ["CLAUDE_CODE_GIT_BASH_PATH"])
-    git = shutil.which("git")
+    git = _windows_git()       # absolute PATH entries only; see _windows_git
     if git:
         d = os.path.dirname(git)
         for up in (d, os.path.dirname(d), os.path.dirname(os.path.dirname(d))):
