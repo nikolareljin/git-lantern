@@ -352,7 +352,7 @@ lantern hooks status
 lantern hooks apply --dry-run                              # the plan, nothing changed
 lantern hooks apply --batch 10 [--agents claude,codex|all] [--only repo-a,repo-b]
 lantern hooks repair                                       # re-chain after husky & co.
-lantern hooks remove [--agents codex]                      # restores what was there
+lantern hooks remove [--agents codex]                      # all of ours, or those agents
 lantern hooks export hooks.json                            # this machine
 lantern hooks import hooks.json [--dry-run]                # another machine
 ```
@@ -362,10 +362,14 @@ lantern hooks import hooks.json [--dry-run]                # another machine
 - Hooks a clone already runs keep running: script-helpers chains them
   (`setup-hooks.sh`), and `remove` restores the previous `core.hooksPath`.
 - `setup-hooks.sh` comes from `script-helpers.home` (or `SCRIPT_HELPERS_HOME`),
-  else lantern's vendored copy; one older than 0.50.0 is refused (exit 2).
+  else lantern's vendored copy. One older than 0.50.0, or a configured home
+  without it, is refused (exit 2), never replaced by the vendored copy.
+- `remove` without `--agents` takes out everything the setup added (agent
+  hooks, then the git hooks, restoring the previous `core.hooksPath`).
 - The export lists repositories by remote (`github.com/<owner>/<repo>`) with
   what is set up, never a local path, so `import` finds them wherever they are
-  cloned. Repositories not cloned on the importing machine are reported.
+  cloned, every clone of a repository included. Repositories not cloned on the
+  importing machine are reported.
 - `lantern fleet apply` repairs taken-over clones after it runs (a pull that ran
   `npm install` can let husky replace `core.hooksPath`); `--no-hooks-repair`
   skips that.

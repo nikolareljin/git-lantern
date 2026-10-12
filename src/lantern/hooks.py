@@ -60,12 +60,14 @@ def _version_tuple(text: str) -> Tuple[int, ...]:
 
 def find_setup_script() -> str:
     """The setup-hooks.sh to run. HooksError when none is usable."""
-    candidates = []
+    # A configured home is used or refused, never skipped: falling back to the
+    # vendored copy would hide a mistyped path behind an older script.
     home = os.environ.get("SCRIPT_HELPERS_HOME") or _git(["config", "--global", "--get", "script-helpers.home"])
     if home:
-        candidates.append(os.path.expanduser(home))
-    here = os.path.dirname(os.path.abspath(__file__))
-    candidates.append(os.path.normpath(os.path.join(here, "..", "..", "scripts", "script-helpers")))
+        candidates = [os.path.expanduser(home)]
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates = [os.path.normpath(os.path.join(here, "..", "..", "scripts", "script-helpers"))]
     tried = []
     for root in candidates:
         script = os.path.join(root, "scripts", "setup-hooks.sh")
@@ -162,6 +164,7 @@ def normalize_remote(url: str) -> str:
 
 def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str, object]:
     entries = []
+    by_remote: Dict[str, Dict[str, object]] = {}
     for path in repos:
         if not is_owned(path, owners):
             continue
@@ -169,9 +172,14 @@ def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str
         agents = present_agents(state)
         if state.get("mode", "none") == "none" and not agents:
             continue
-        entries.append({"remote": normalize_remote(origin_url(path)),
-                        "git_hooks": state.get("mode", "none") != "none",
-                        "agents": agents})
+        remote = normalize_remote(origin_url(path))
+        if remote in by_remote:          # another clone of the same repository: one entry, the union
+            e = by_remote[remote]
+            e["git_hooks"] = e["git_hooks"] or state.get("mode", "none") != "none"
+            e["agents"] += [a for a in agents if a not in e["agents"]]
+            continue
+        by_remote[remote] = {"remote": remote, "git_hooks": state.get("mode", "none") != "none", "agents": agents}
+        entries.append(by_remote[remote])
     return {"version": EXPORT_VERSION, "kind": "lantern-hooks", "owners": owners, "repos": entries}
 
 
@@ -275,7 +283,10 @@ def cmd_remove(repos: List[str], args) -> int:
         if not is_owned(path, owners):
             continue
         st = repo_state(script, path)
-        steps = agent_commands([a for a in agents if a in present_agents(st)], uninstall=True)
+        # No --agents: everything this setup added (agent hooks, then the git
+        # hooks). With --agents: only those agents.
+        wanted = agents or present_agents(st)
+        steps = agent_commands([a for a in wanted if a in present_agents(st)], uninstall=True)
         if not agents and st.get("mode", "none") != "none":
             steps.append(["--uninstall"])
         for step in steps:
@@ -303,33 +314,34 @@ def cmd_export(repos: List[str], args) -> int:
 def cmd_import(repos: List[str], args) -> int:
     script, owners = _setup(args)
     data = load_export(args.file)
-    local = {}
+    local: Dict[str, List[str]] = {}
     for path in repos:
         if is_owned(path, owners):
-            local.setdefault(normalize_remote(origin_url(path)), path)
+            local.setdefault(normalize_remote(origin_url(path)), []).append(path)
     failed = 0
     unmatched = []
     for entry in data["repos"]:
         if not isinstance(entry, dict):
             continue
-        path = local.get(str(entry.get("remote") or ""))
-        if not path:
+        paths = local.get(str(entry.get("remote") or ""))
+        if not paths:
             unmatched.append(str(entry.get("remote")))
             continue
         agents = [a for a in entry.get("agents") or [] if a in ("claude", *AGENTS)]
-        st = repo_state(script, path)
-        steps = plan_apply(st, agents) if entry.get("git_hooks") else agent_commands(
-            [a for a in agents if a not in present_agents(st)])
-        for step in steps:
-            if getattr(args, "dry_run", False):
-                print("{:<40} would run: {}".format(os.path.basename(path), describe(step)))
-                continue
-            rc, out = run_setup(script, path, step)
-            print("{:<40} {}: {}".format(os.path.basename(path), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
-            if rc != 0:
-                failed += 1
-                print("    " + out.strip().replace("\n", "\n    "))
-                break
+        for path in paths:              # every clone of that repository here
+            st = repo_state(script, path)
+            steps = plan_apply(st, agents) if entry.get("git_hooks") else agent_commands(
+                [a for a in agents if a not in present_agents(st)])
+            for step in steps:
+                if getattr(args, "dry_run", False):
+                    print("{:<40} would run: {}".format(os.path.basename(path), describe(step)))
+                    continue
+                rc, out = run_setup(script, path, step)
+                print("{:<40} {}: {}".format(os.path.basename(path), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
+                if rc != 0:
+                    failed += 1
+                    print("    " + out.strip().replace("\n", "\n    "))
+                    break
     for remote in unmatched:
         print("not cloned here (or not under an owner): {}".format(remote))
     return 1 if failed else 0

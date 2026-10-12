@@ -153,6 +153,18 @@ class OwnershipAndApply(HooksTestBase):
         self.run_cmd("remove")
         self.assertEqual(self.calls(), ["mine --uninstall"])
 
+    def test_remove_without_agents_removes_everything_ours(self):
+        self.clone("mine", "git@github.com:me/mine.git")
+        self.run_cmd("apply", "--agents", "claude,codex")
+        open(self.log, "w").close()
+        self.run_cmd("remove")
+        self.assertEqual(self.calls(), ["mine --claude-repo --uninstall", "mine --agent-repo codex --uninstall", "mine --uninstall"])
+
+    def test_a_configured_home_that_is_unusable_is_refused_not_skipped(self):
+        self.clone("mine", "git@github.com:me/mine.git")
+        with mock.patch.dict(os.environ, {"SCRIPT_HELPERS_HOME": os.path.join(self.tmp.name, "nowhere")}):
+            self.assertEqual(self.run_cmd("status"), 2)
+
     def test_a_failure_is_exit_1(self):
         self.clone("mine", "git@github.com:me/mine.git")
         with mock.patch.object(hooks, "plan_apply", return_value=[["--fail"]]):
@@ -187,6 +199,24 @@ class ExportImport(HooksTestBase):
         open(self.log, "w").close()
         self.assertEqual(self.run_cmd("import", out, "--root", other), 0)
         self.assertEqual(self.calls(), ["renamed-mine", "renamed-mine --claude-repo"])
+
+    def test_two_clones_of_one_repository(self):
+        self.clone("one", "git@github.com:me/mine.git")
+        self.clone("two", "https://github.com/me/mine")
+        self.run_cmd("apply", "--agents", "codex", "--only", "one")
+        self.run_cmd("apply", "--agents", "claude", "--only", "two")
+        out = os.path.join(self.tmp.name, "hooks.json")
+        self.run_cmd("export", out)
+        repos = json.load(open(out))["repos"]
+        self.assertEqual(len(repos), 1)                              # one entry per repository
+        self.assertEqual(sorted(repos[0]["agents"]), ["claude", "codex"])
+        other = os.path.join(self.tmp.name, "other")
+        os.makedirs(other)
+        self.clone("a", "git@github.com:me/mine.git", root=other)
+        self.clone("b", "https://github.com/me/mine.git", root=other)
+        open(self.log, "w").close()
+        self.run_cmd("import", out, "--root", other)
+        self.assertEqual(sorted(c.split()[0] for c in self.calls()), ["a", "a", "a", "b", "b", "b"])   # both clones
 
     def test_bad_export_is_exit_2(self):
         bad = os.path.join(self.tmp.name, "bad.json")
