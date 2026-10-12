@@ -394,3 +394,35 @@ class OnlySelection(HooksTestBase):
         self.assertEqual(self.calls(), [])
         self.assertEqual(self.run_cmd("apply", "--only", "clients/x/utils"), 0)   # --root-relative
         self.assertEqual(self.calls(), ["utils"])
+
+
+class WindowsBash(unittest.TestCase):
+    def setUp(self):
+        hooks._BASH = None
+        self.addCleanup(setattr, hooks, "_BASH", None)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_git_bash_is_found_from_git_exec_path_not_wsl(self):
+        git_root = os.path.join(self.tmp.name, "Git")
+        os.makedirs(os.path.join(git_root, "bin"))
+        bash = os.path.join(git_root, "bin", "bash.exe")
+        open(bash, "w").close()
+        exec_path = os.path.join(git_root, "mingw64", "libexec", "git-core")
+        with mock.patch.object(hooks.os, "name", "nt"), \
+                mock.patch.object(hooks, "_git", return_value=exec_path), \
+                mock.patch.object(hooks.shutil, "which", return_value=r"C:\Windows\System32\bash.exe"):
+            self.assertEqual(hooks.find_bash(), bash)
+
+    def test_only_wsl_bash_is_refused(self):
+        with mock.patch.object(hooks.os, "name", "nt"), mock.patch.object(hooks, "_git", return_value=""), \
+                mock.patch.dict(os.environ, {"SystemRoot": r"C:\Windows"}), \
+                mock.patch.object(hooks.os.path, "normcase", side_effect=str.lower), \
+                mock.patch.object(hooks.shutil, "which", return_value=r"C:\Windows\System32\bash.exe"):
+            with self.assertRaises(hooks.HooksError):
+                hooks.find_bash()
+
+    def test_missing_bash_is_a_configuration_error(self):
+        with mock.patch.object(hooks, "find_bash", return_value=os.path.join(self.tmp.name, "no-bash")):
+            with self.assertRaises(hooks.HooksError):
+                hooks.run_setup("x.sh", self.tmp.name, [])

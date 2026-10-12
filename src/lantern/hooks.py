@@ -12,6 +12,7 @@ copy. lantern only decides which clones and which options.
 import json
 import os
 import re
+import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
@@ -26,7 +27,8 @@ class HooksError(Exception):
 
 def _git(args: List[str], cwd: Optional[str] = None) -> str:
     result = subprocess.run(["git", *args], cwd=cwd, check=False, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            text=True, encoding="utf-8", errors="replace")
     return result.stdout.strip()
 
 
@@ -75,7 +77,7 @@ def find_setup_script() -> str:
             tried.append("{} (no scripts/setup-hooks.sh)".format(root))
             continue
         try:
-            with open(os.path.join(root, "VERSION")) as fh:
+            with open(os.path.join(root, "VERSION"), encoding="utf-8") as fh:
                 version = fh.read().strip()
         except OSError:
             version = ""
@@ -87,11 +89,46 @@ def find_setup_script() -> str:
                      ". Set one: git config --global script-helpers.home <script-helpers checkout>")
 
 
+_BASH: Optional[str] = None
+
+
+def find_bash() -> str:
+    """The bash that runs setup-hooks.sh. On Windows that is Git for Windows'
+    bash: a bare "bash" there resolves to System32's WSL launcher first, which
+    cannot run a script given by its Windows path."""
+    global _BASH
+    if _BASH:
+        return _BASH
+    if os.name != "nt":
+        _BASH = "bash"
+        return _BASH
+    exec_path = _git(["--exec-path"])          # <Git>/mingw64/libexec/git-core
+    candidates = []
+    if exec_path:
+        d = os.path.normpath(exec_path)
+        for _ in range(4):
+            d = os.path.dirname(d)
+            candidates.append(os.path.join(d, "bin", "bash.exe"))
+    found = shutil.which("bash")
+    system = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows"))
+    if found and not os.path.normcase(found).startswith(system):
+        candidates.append(found)
+    for c in candidates:
+        if os.path.isfile(c):
+            _BASH = c
+            return c
+    raise HooksError("Git Bash not found (bash.exe next to git); install Git for Windows")
+
+
 def run_setup(script: str, path: str, args: List[str]) -> Tuple[int, str]:
     # stdin closed: setup-hooks.sh must never wait on the terminal for an answer.
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-    result = subprocess.run(["bash", script, *args], cwd=path, check=False, stdin=subprocess.DEVNULL, env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        result = subprocess.run([find_bash(), script.replace(os.sep, "/"), *args], cwd=path, check=False,
+                                stdin=subprocess.DEVNULL, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise HooksError("cannot run bash: {}".format(exc))
     return result.returncode, result.stdout
 
 
@@ -190,7 +227,7 @@ def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str
 
 def load_export(path: str) -> Dict[str, object]:
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except OSError as exc:
         raise HooksError("cannot read {}: {}".format(path, exc.strerror or exc))
@@ -230,10 +267,10 @@ def linked_worktree_of(path: str) -> Optional[str]:
     out = _git(["rev-parse", "--git-dir", "--git-common-dir"], cwd=path).splitlines()
     if len(out) != 2:
         return None
-    git_dir, common = (os.path.realpath(os.path.join(path, d)) for d in out)   # both may be relative
+    git_dir, common = (os.path.normcase(os.path.realpath(os.path.join(path, d))) for d in out)   # both may be relative
     if git_dir == common:
         return None
-    return os.path.dirname(common)
+    return os.path.dirname(os.path.realpath(os.path.join(path, out[1])))
 
 
 def _resolve_only(repos: List[str], only: str, root: str) -> Optional[List[str]]:
@@ -244,11 +281,12 @@ def _resolve_only(repos: List[str], only: str, root: str) -> Optional[List[str]]
     items = [n.strip() for n in (only or "").split(",") if n.strip()]
     if not items:
         return None
-    real = {os.path.realpath(r): r for r in repos}
+    real = {os.path.normcase(os.path.realpath(r)): r for r in repos}
     picked: List[str] = []
     for item in items:
         if os.path.isabs(item) or "/" in item or os.sep in item:
-            tries = [os.path.realpath(item)] + ([] if os.path.isabs(item) else [os.path.realpath(os.path.join(root, item))])
+            tries = [os.path.normcase(os.path.realpath(t)) for t in
+                     [item] + ([] if os.path.isabs(item) else [os.path.join(root, item)])]
             hits = [real[t] for t in tries if t in real][:1]
         else:
             hits = [r for r in repos if os.path.basename(r).lower() == item.lower()]
@@ -401,7 +439,7 @@ def cmd_export(repos: List[str], args) -> int:
         print(text, end="")
     else:
         try:
-            with open(args.file, "w") as fh:
+            with open(args.file, "w", encoding="utf-8") as fh:
                 fh.write(text)
         except OSError as exc:
             raise HooksError("cannot write {}: {}".format(args.file, exc.strerror or exc))
