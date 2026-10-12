@@ -371,8 +371,11 @@ lantern hooks import hooks.json [--dry-run]                # another machine
   cloned, every clone of a repository included. Repositories not cloned on the
   importing machine are reported.
 - `lantern fleet apply` repairs taken-over clones after it runs (a pull that ran
-  `npm install` can let husky replace `core.hooksPath`); `--no-hooks-repair`
-  skips that.
+  `npm install` can let husky replace `core.hooksPath`), only in the clones it
+  was told to touch (`--repos`), reporting on stderr; `--no-hooks-repair` skips
+  that.
+- A clone whose status cannot be read is reported as failed (exit 1) and left
+  alone; it is never treated as "nothing set up".
 - Exit codes: 0 done, 1 a clone failed, 2 configuration (no owners, no usable
   script-helpers, a bad `--agents` value or export file).
 

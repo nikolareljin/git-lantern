@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
 import json
@@ -2669,6 +2670,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             base = [sys.executable, "-m", "lantern", "hooks", hooks_action, "--root", session["root"],
                     "--max-depth", str(session["max_depth"])]
+            if session["include_hidden"]:
+                base.append("--include-hidden")
             if hooks_action == "apply":
                 plan = _run_lantern_subprocess([*base, "--dry-run"], height, width)
                 _dialog_textbox_from_text("Hooks: plan", (plan.stdout or "") + (plan.stderr or ""), height, width)
@@ -6227,6 +6230,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_hooks(args: argparse.Namespace) -> int:
     """lantern hooks <status|apply|repair|remove|export|import>: see src/lantern/hooks.py."""
+    if not os.path.isdir(args.root):
+        print(f"lantern hooks: --root {args.root} is not a directory", file=sys.stderr)
+        return 2
     repos = find_repos(args.root, args.max_depth, args.include_hidden)
     handler = {
         "status": lantern_hooks.cmd_status, "apply": lantern_hooks.cmd_apply,
@@ -6249,8 +6255,12 @@ def cmd_fleet_apply_and_repair(args: argparse.Namespace) -> int:
         return rc
     try:
         repos = find_repos(args.root, getattr(args, "max_depth", 6), getattr(args, "include_hidden", False))
-        if lantern_hooks.cmd_repair(repos, args, quiet=True) != 0:
-            rc = rc or 1
+        # Only the clones fleet apply was told to touch (--repos), and on stderr,
+        # so the fleet output on stdout stays as it was for callers that parse it.
+        scope = argparse.Namespace(only=str(getattr(args, "repos", "") or ""))
+        with contextlib.redirect_stdout(sys.stderr):
+            if lantern_hooks.cmd_repair(repos, scope, quiet=True) != 0:
+                rc = rc or 1
     except lantern_hooks.HooksError:
         pass
     return rc

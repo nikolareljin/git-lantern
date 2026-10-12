@@ -20,6 +20,7 @@ state="$(git rev-parse --git-dir)/fake-hooks"
 mode=none; taken=no; agents=""; claude=no
 [[ -f "$state" ]] && source "$state"
 echo "$(basename "$(pwd)") $*" >> "$FAKE_LOG"
+[[ -f "$(git rev-parse --git-dir)/fail-status" && "$*" == "--status --porcelain" ]] && { echo "boom"; exit 1; }
 case "$*" in
   "--status --porcelain") printf 'mode=%s\ttaken_over=%s\tclaude_repo=%s\tagents=%s\n' "$mode" "$taken" "$claude" "$agents"; exit 0 ;;
   "") mode=chained; taken=no ;;
@@ -103,7 +104,10 @@ class OwnershipAndApply(HooksTestBase):
         for url in ("git@github.com:Me/Repo.git", "https://github.com/me/repo", "ssh://git@github.com/me/repo.git",
                     "https://token@github.com/me/repo/", "ssh://git@github.com:22/me/repo"):
             self.assertEqual(hooks.github_slug(url), ("me", "repo"), url)
-        for url in ("git@gitlab.com:me/repo.git", "https://github.com.evil.example/me/repo", "", None):
+        for url in ("ssh://git@ssh.github.com:443/me/repo", "https://www.github.com/me/repo"):
+            self.assertEqual(hooks.github_slug(url), ("me", "repo"), url)
+        for url in ("git@gitlab.com:me/repo.git", "https://github.com.evil.example/me/repo",
+                    "https://evilgithub.com/me/repo", "https://www.github.com.evil/me/repo", "", None):
             self.assertIsNone(hooks.github_slug(url), url)
 
     def test_apply_touches_only_owned_clones(self):
@@ -165,6 +169,15 @@ class OwnershipAndApply(HooksTestBase):
         with mock.patch.dict(os.environ, {"SCRIPT_HELPERS_HOME": os.path.join(self.tmp.name, "nowhere")}):
             self.assertEqual(self.run_cmd("status"), 2)
 
+    def test_a_failed_status_is_a_failure_never_an_install(self):
+        path = self.clone("mine", "git@github.com:me/mine.git")
+        open(os.path.join(path, ".git", "fail-status"), "w").close()
+        self.assertEqual(self.run_cmd("apply"), 1)
+        self.assertEqual(self.calls(), [])                  # nothing installed
+        self.assertEqual(self.run_cmd("status"), 1)
+        self.assertEqual(self.run_cmd("remove"), 1)
+        self.assertEqual(self.run_cmd("export", os.path.join(self.tmp.name, "x.json")), 2)
+
     def test_a_failure_is_exit_1(self):
         self.clone("mine", "git@github.com:me/mine.git")
         with mock.patch.object(hooks, "plan_apply", return_value=[["--fail"]]):
@@ -218,6 +231,16 @@ class ExportImport(HooksTestBase):
         self.run_cmd("import", out, "--root", other)
         self.assertEqual(sorted(c.split()[0] for c in self.calls()), ["a", "a", "a", "b", "b", "b"])   # both clones
 
+    def test_unreadable_or_unwritable_files_are_exit_2_not_a_traceback(self):
+        self.clone("mine", "git@github.com:me/mine.git")
+        notjson = os.path.join(self.tmp.name, "notjson")
+        with open(notjson, "w") as fh:
+            fh.write("not json")
+        self.assertEqual(self.run_cmd("import", notjson), 2)
+        self.assertEqual(self.run_cmd("import", os.path.join(self.tmp.name, "missing.json")), 2)
+        self.assertEqual(self.run_cmd("export", os.path.join(self.tmp.name, "no", "dir", "x.json")), 2)
+        self.assertEqual(self.run_cmd("status", "--root", os.path.join(self.tmp.name, "nope")), 2)
+
     def test_bad_export_is_exit_2(self):
         bad = os.path.join(self.tmp.name, "bad.json")
         with open(bad, "w") as fh:
@@ -243,6 +266,22 @@ class FleetApplyRepairs(HooksTestBase):
         with mock.patch.object(cli, "cmd_fleet_apply", return_value=0):
             cli.cmd_fleet_apply_and_repair(args)
         self.assertEqual(self.calls(), [])
+
+    def test_fleet_apply_repairs_only_its_repos_and_keeps_stdout(self):
+        for n in ("a", "b"):
+            p = self.clone(n, "git@github.com:me/{}.git".format(n))
+            self.run_cmd("apply", "--only", n)
+            with open(os.path.join(p, ".git", "fake-hooks"), "a") as fh:
+                fh.write("taken=yes\n")
+        open(self.log, "w").close()
+        args = argparse.Namespace(root=self.root, max_depth=6, include_hidden=False, dry_run=False,
+                                  no_hooks_repair=False, repos="a")
+        import io
+        out = io.StringIO()
+        with mock.patch.object(cli, "cmd_fleet_apply", return_value=0), mock.patch("sys.stdout", out):
+            cli.cmd_fleet_apply_and_repair(args)
+        self.assertEqual(self.calls(), ["a --repair"])
+        self.assertEqual(out.getvalue(), "")
 
     def test_fleet_apply_without_owners_is_unchanged(self):
         args = argparse.Namespace(root=self.root, max_depth=6, include_hidden=False, dry_run=False, no_hooks_repair=False)

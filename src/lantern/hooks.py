@@ -25,7 +25,7 @@ class HooksError(Exception):
 
 
 def _git(args: List[str], cwd: Optional[str] = None) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, check=False,
+    result = subprocess.run(["git", *args], cwd=cwd, check=False, stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     return result.stdout.strip()
 
@@ -35,7 +35,7 @@ def configured_owners() -> List[str]:
     return [o.lower() for o in re.split(r"[,\s]+", raw) if o]
 
 
-_GITHUB = re.compile(r"^(?:https?://(?:[^@/]+@)?|ssh://(?:[^@/]+@)?|[^@/]+@)?github\.com(?::\d+)?[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$", re.I)
+_GITHUB = re.compile(r"^(?:https?://(?:[^@/]+@)?|ssh://(?:[^@/]+@)?|[^@/]+@)?(?:www\.|ssh\.)?github\.com(?::\d+)?[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$", re.I)
 
 
 def github_slug(url: Optional[str]) -> Optional[Tuple[str, str]]:
@@ -88,16 +88,19 @@ def find_setup_script() -> str:
 
 
 def run_setup(script: str, path: str, args: List[str]) -> Tuple[int, str]:
-    result = subprocess.run(["bash", script, *args], cwd=path, check=False,
+    # stdin closed: setup-hooks.sh must never wait on the terminal for an answer.
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    result = subprocess.run(["bash", script, *args], cwd=path, check=False, stdin=subprocess.DEVNULL, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     return result.returncode, result.stdout
 
 
-def repo_state(script: str, path: str) -> Dict[str, str]:
-    """setup-hooks.sh --status --porcelain as a dict; {} when it fails."""
+def repo_state(script: str, path: str) -> Optional[Dict[str, str]]:
+    """setup-hooks.sh --status --porcelain as a dict; None when it fails, which
+    callers treat as a failed clone (never as "nothing installed")."""
     rc, out = run_setup(script, path, ["--status", "--porcelain"])
-    if rc != 0:
-        return {}
+    if rc != 0 or "mode=" not in out:
+        return None
     line = out.strip().splitlines()[-1] if out.strip() else ""
     state = {}
     for field in line.split("\t"):
@@ -169,6 +172,8 @@ def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str
         if not is_owned(path, owners):
             continue
         state = repo_state(script, path)
+        if state is None:
+            raise HooksError("status failed in {}; nothing exported".format(path))
         agents = present_agents(state)
         if state.get("mode", "none") == "none" and not agents:
             continue
@@ -184,8 +189,13 @@ def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str
 
 
 def load_export(path: str) -> Dict[str, object]:
-    with open(path) as fh:
-        data = json.load(fh)
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except OSError as exc:
+        raise HooksError("cannot read {}: {}".format(path, exc.strerror or exc))
+    except ValueError as exc:
+        raise HooksError("{} is not JSON: {}".format(path, exc))
     if not isinstance(data, dict) or data.get("kind") != "lantern-hooks" or not isinstance(data.get("repos"), list):
         raise HooksError("{} is not a lantern hooks export".format(path))
     if data.get("version") != EXPORT_VERSION:
@@ -213,18 +223,20 @@ def _selected(repos: List[str], only: str) -> List[str]:
 def cmd_status(repos: List[str], args) -> int:
     script, owners = _setup(args)
     print("owners: {}   script-helpers: {}".format(",".join(owners), os.path.dirname(os.path.dirname(script))))
+    failed = 0
     for path in _selected(repos, getattr(args, "only", "")):
         if not is_owned(path, owners):
             print("{:<40} not owned, left alone".format(os.path.basename(path)))
             continue
         st = repo_state(script, path)
-        if not st:
+        if st is None:
             print("{:<40} status failed".format(os.path.basename(path)))
+            failed += 1
             continue
         flag = "  TAKEN OVER (lantern hooks repair)" if st.get("taken_over") == "yes" else ""
         print("{:<40} git hooks: {:<8} agents: {}{}".format(
             os.path.basename(path), st.get("mode", "?"), ",".join(present_agents(st)) or "-", flag))
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_apply(repos: List[str], args) -> int:
@@ -238,7 +250,12 @@ def cmd_apply(repos: List[str], args) -> int:
         if not is_owned(path, owners):
             print("{:<40} not owned, left alone".format(name))
             continue
-        steps = plan_apply(repo_state(script, path), agents)
+        state = repo_state(script, path)
+        if state is None:
+            print("{:<40} status failed, skipped".format(name))
+            failed += 1
+            continue
+        steps = plan_apply(state, agents)
         if not steps:
             print("{:<40} up to date".format(name))
             continue
@@ -263,7 +280,14 @@ def cmd_repair(repos: List[str], args, quiet: bool = False) -> int:
     script, owners = _setup(args)
     failed = 0
     for path in _selected(repos, getattr(args, "only", "")):
-        if not is_owned(path, owners) or repo_state(script, path).get("taken_over") != "yes":
+        if not is_owned(path, owners):
+            continue
+        state = repo_state(script, path)
+        if state is None:
+            print("{:<40} status failed, skipped".format(os.path.basename(path)))
+            failed += 1
+            continue
+        if state.get("taken_over") != "yes":
             continue
         rc, out = run_setup(script, path, ["--repair"])
         print("{:<40} repair: {}".format(os.path.basename(path), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
@@ -283,6 +307,10 @@ def cmd_remove(repos: List[str], args) -> int:
         if not is_owned(path, owners):
             continue
         st = repo_state(script, path)
+        if st is None:
+            print("{:<40} status failed, skipped".format(os.path.basename(path)))
+            failed += 1
+            continue
         # No --agents: everything this setup added (agent hooks, then the git
         # hooks). With --agents: only those agents.
         wanted = agents or present_agents(st)
@@ -305,8 +333,11 @@ def cmd_export(repos: List[str], args) -> int:
     if args.file == "-":
         print(text, end="")
     else:
-        with open(args.file, "w") as fh:
-            fh.write(text)
+        try:
+            with open(args.file, "w") as fh:
+                fh.write(text)
+        except OSError as exc:
+            raise HooksError("cannot write {}: {}".format(args.file, exc.strerror or exc))
         print("exported {} repositories to {}".format(len(data["repos"]), args.file))
     return 0
 
@@ -330,6 +361,10 @@ def cmd_import(repos: List[str], args) -> int:
         agents = [a for a in entry.get("agents") or [] if a in ("claude", *AGENTS)]
         for path in paths:              # every clone of that repository here
             st = repo_state(script, path)
+            if st is None:
+                print("{:<40} status failed, skipped".format(os.path.basename(path)))
+                failed += 1
+                continue
             steps = plan_apply(st, agents) if entry.get("git_hooks") else agent_commands(
                 [a for a in agents if a not in present_agents(st)])
             for step in steps:
