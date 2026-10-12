@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
 import json
@@ -21,6 +22,7 @@ from . import config as lantern_config
 from . import forge
 from . import git
 from . import github
+from . import hooks as lantern_hooks
 from . import todo_issues
 from .table import render_table
 
@@ -1906,6 +1908,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("todo_issues", "Create GitHub issues from TODO.txt"),
             ("lazygit", "Open repository in lazygit"),
             ("fleet", "Unified fleet plan/apply (clone, pull, push)"),
+            ("hooks", "Security hooks on your repositories (status, apply, repair)"),
             ("scan", "Scan repositories to JSON"),
             ("table", "Render table from JSON scan"),
             ("find", "Find repositories by name/remote"),
@@ -2654,6 +2657,28 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     width,
                 )
 
+        elif action == "hooks":
+            if not _validate_session_root(session["root"], height, width):
+                continue
+            hooks_action = _dialog_menu("Hooks", "script-helpers hooks on the clones under the workspace root:", [
+                ("status", "What is set up in each clone"),
+                ("apply", "Set up git hooks where missing (shows the plan first)"),
+                ("repair", "Re-chain clones whose core.hooksPath another tool replaced"),
+                ("back", "Back to main menu"),
+            ], height, width)
+            if hooks_action in (None, "back"):
+                continue
+            base = [sys.executable, "-m", "lantern", "hooks", hooks_action, "--root", session["root"],
+                    "--max-depth", str(session["max_depth"])]
+            if session["include_hidden"]:
+                base.append("--include-hidden")
+            if hooks_action == "apply":
+                plan = _run_lantern_subprocess([*base, "--dry-run"], height, width)
+                _dialog_textbox_from_text("Hooks: plan", (plan.stdout or "") + (plan.stderr or ""), height, width)
+                if plan.returncode != 0 or not _dialog_yesno("Hooks", "Apply this plan?", height, width):
+                    continue
+            result = _run_lantern_subprocess(base, height, width)
+            _dialog_textbox_from_text(f"Hooks: {hooks_action}", (result.stdout or "") + (result.stderr or ""), height, width)
         elif action == "lazygit":
             if not _validate_session_root(session["root"], height, width):
                 continue
@@ -5864,6 +5889,32 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--only-upstream", action="store_true")
     sync.set_defaults(func=cmd_sync)
 
+    hooks_p = sub.add_parser("hooks", help="script-helpers per-repository hooks across your repositories")
+    hooks_sub = hooks_p.add_subparsers(dest="hooks_command", required=True)
+    for name, text in (("status", "what is set up in each clone"),
+                       ("apply", "set up the hooks in owned clones that lack them"),
+                       ("repair", "re-chain owned clones whose core.hooksPath another tool replaced"),
+                       ("remove", "undo the setup (restores what was there before)"),
+                       ("export", "write the setup of owned clones to a file, for another machine"),
+                       ("import", "apply an export to the clones found here")):
+        hp = hooks_sub.add_parser(name, help=text)
+        hp.add_argument("--root", default=os.getcwd())
+        hp.add_argument("--max-depth", type=int, default=6)
+        hp.add_argument("--include-hidden", action="store_true")
+        hp.add_argument("--only", default="", help="comma-separated clones: a directory name, or a path (absolute, or relative to "
+                        "the current directory or --root)")
+        if name in ("apply", "remove"):
+            hp.add_argument("--agents", default="",
+                            help="also the AI agent hooks: claude,codex,gemini,copilot,cursor or all")
+        if name in ("apply", "import"):
+            hp.add_argument("--dry-run", action="store_true", help="print what would run, change nothing")
+        if name == "apply":
+            hp.add_argument("--batch", type=_non_negative_int, default=0,
+                            help="set up at most N clones this run (0: all)")
+        if name in ("export", "import"):
+            hp.add_argument("file", help="export file ('-' for stdout with export)")
+        hp.set_defaults(func=cmd_hooks)
+
     fleet = sub.add_parser("fleet", help="unified multi-repo management (plan/apply)")
     fleet_sub = fleet.add_subparsers(dest="fleet_command", required=True)
 
@@ -5948,7 +5999,9 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--snapshot", default="", help="reuse a previously generated fleet snapshot JSON")
     fleet_apply.add_argument("--refresh", action="store_true", help="ignore --snapshot and rebuild fleet context before apply")
     fleet_apply.add_argument("--log-json", default="", help="write full fleet apply execution log to JSON")
-    fleet_apply.set_defaults(func=cmd_fleet_apply)
+    fleet_apply.add_argument("--no-hooks-repair", action="store_true",
+                             help="do not re-chain owned clones whose core.hooksPath another tool replaced")
+    fleet_apply.set_defaults(func=cmd_fleet_apply_and_repair)
 
     fleet_dirty = fleet_sub.add_parser("dirty", help="list repositories with tracked local changes")
     fleet_dirty.add_argument("--root", default=os.getcwd())
@@ -6175,6 +6228,59 @@ def build_parser() -> argparse.ArgumentParser:
 
 
     return parser
+
+
+def _non_negative_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        n = -1
+    if n < 0:
+        raise argparse.ArgumentTypeError("expected a whole number >= 0, got {!r}".format(value))
+    return n
+
+
+def cmd_hooks(args: argparse.Namespace) -> int:
+    """lantern hooks <status|apply|repair|remove|export|import>: see src/lantern/hooks.py."""
+    if not os.path.isdir(args.root):
+        print(f"lantern hooks: --root {args.root} is not a directory", file=sys.stderr)
+        return 2
+    repos = find_repos(args.root, args.max_depth, args.include_hidden)
+    handler = {
+        "status": lantern_hooks.cmd_status, "apply": lantern_hooks.cmd_apply,
+        "repair": lantern_hooks.cmd_repair, "remove": lantern_hooks.cmd_remove,
+        "export": lantern_hooks.cmd_export, "import": lantern_hooks.cmd_import,
+    }[args.hooks_command]
+    try:
+        return handler(repos, args)
+    except lantern_hooks.HooksError as exc:
+        print(f"lantern hooks: {exc}", file=sys.stderr)
+        return 2
+
+
+def cmd_fleet_apply_and_repair(args: argparse.Namespace) -> int:
+    """fleet apply, then re-chain owned clones whose core.hooksPath another tool
+    replaced (a pull that ran npm install, husky). Skipped quietly when no owners
+    or no script-helpers 0.50.0+ are configured, or with --no-hooks-repair."""
+    rc = cmd_fleet_apply(args)
+    if getattr(args, "no_hooks_repair", False) or getattr(args, "dry_run", False):
+        return rc
+    try:
+        repos = find_repos(args.root, getattr(args, "max_depth", 6), getattr(args, "include_hidden", False))
+        # Only the clones fleet apply was told to touch (--repos), and on stderr,
+        # so the fleet output on stdout stays as it was for callers that parse it.
+        # Matched by name here, not through hooks --only, which refuses a name
+        # two clones share: fleet treats every clone of that name as in scope.
+        names = {n.strip().lower() for n in str(getattr(args, "repos", "") or "").split(",") if n.strip()}
+        if names:
+            repos = [r for r in repos if os.path.basename(r).lower() in names]
+        scope = argparse.Namespace(only="", root=args.root)
+        with contextlib.redirect_stdout(sys.stderr):
+            if lantern_hooks.cmd_repair(repos, scope, quiet=True) != 0:
+                rc = rc or 1
+    except lantern_hooks.HooksError:
+        pass
+    return rc
 
 
 def main() -> None:

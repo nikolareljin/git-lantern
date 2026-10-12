@@ -59,3 +59,22 @@ jobs:
           git -C "$seed" push
           "$bin_dir/lantern" sync --root "$workspace" --pull --only-clean --only-upstream
           test "$(git -C "$workspace/demo" rev-parse HEAD)" = "$(git -C "$seed" rev-parse HEAD)"
+
+  # lantern hooks on Windows: setup-hooks.sh runs under Git Bash, found the way
+  # setup-hooks.ps1 finds it.
+  windows-hooks:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: lantern hooks tests
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pytest
+          $env:PYTHONPATH = "src"
+          python -m pytest -q tests/test_hooks_cmd.py
