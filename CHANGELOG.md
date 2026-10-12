@@ -4,6 +4,8 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-12
+
 ### Added
 
 - `lantern hooks status|apply|repair|remove|export|import`: the script-helpers
@@ -13,6 +15,11 @@ All notable changes to git-lantern are documented in this file.
   what was there before. Export and import match repositories by remote, not
   path. `fleet apply` re-chains clones another tool took over
   (`--no-hooks-repair` skips it). TUI menu entry "hooks".
+- `lantern hooks` runs on Linux, macOS and Windows (setup-hooks.sh under Git
+  Bash, found the way script-helpers' `setup-hooks.ps1` finds it). `--only`
+  takes a clone name or a path; a name two clones share is refused. `import`
+  checks the whole file before changing anything. A linked worktree is set up
+  through its main clone. CI runs the hooks tests on windows-latest.
 
 ### Changed
 
