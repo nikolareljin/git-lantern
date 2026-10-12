@@ -95,29 +95,37 @@ _BASH: Optional[str] = None
 def find_bash() -> str:
     """The bash that runs setup-hooks.sh. On Windows that is Git for Windows'
     bash: a bare "bash" there resolves to System32's WSL launcher first, which
-    cannot run a script given by its Windows path."""
+    cannot run a script given by its Windows path. The lookup order is
+    script-helpers' scripts/setup-hooks.ps1 (Find-GitBash); keep the two equal."""
     global _BASH
     if _BASH:
         return _BASH
     if os.name != "nt":
         _BASH = "bash"
         return _BASH
-    exec_path = _git(["--exec-path"])          # <Git>/mingw64/libexec/git-core
     candidates = []
-    if exec_path:
-        d = os.path.normpath(exec_path)
-        for _ in range(4):
-            d = os.path.dirname(d)
-            candidates.append(os.path.join(d, "bin", "bash.exe"))
-    found = shutil.which("bash")
-    system = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows"))
-    if found and not os.path.normcase(found).startswith(system):
-        candidates.append(found)
+    if os.environ.get("CLAUDE_CODE_GIT_BASH_PATH"):
+        candidates.append(os.environ["CLAUDE_CODE_GIT_BASH_PATH"])
+    git = shutil.which("git")
+    if git:
+        d = os.path.dirname(git)
+        for up in (d, os.path.dirname(d), os.path.dirname(os.path.dirname(d))):
+            candidates.append(os.path.join(up, "bin", "bash.exe"))
+        exec_path = _git(["--exec-path"])      # <Git>/mingw64/libexec/git-core
+        if exec_path:
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.normpath(exec_path))))
+            candidates.append(os.path.join(root, "bin", "bash.exe"))
+    for var in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        base = os.environ.get(var)
+        if base:
+            candidates.append(os.path.join(base, "Git", "bin", "bash.exe"))
+            candidates.append(os.path.join(base, "Programs", "Git", "bin", "bash.exe"))
     for c in candidates:
         if os.path.isfile(c):
             _BASH = c
             return c
-    raise HooksError("Git Bash not found (bash.exe next to git); install Git for Windows")
+    raise HooksError("Git Bash not found; install Git for Windows, or set CLAUDE_CODE_GIT_BASH_PATH "
+                     "to its bin\\bash.exe")
 
 
 def run_setup(script: str, path: str, args: List[str]) -> Tuple[int, str]:

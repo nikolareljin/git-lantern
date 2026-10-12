@@ -403,24 +403,50 @@ class WindowsBash(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def test_git_bash_is_found_from_git_exec_path_not_wsl(self):
-        git_root = os.path.join(self.tmp.name, "Git")
-        os.makedirs(os.path.join(git_root, "bin"))
-        bash = os.path.join(git_root, "bin", "bash.exe")
-        open(bash, "w").close()
-        exec_path = os.path.join(git_root, "mingw64", "libexec", "git-core")
-        with mock.patch.object(hooks.os, "name", "nt"), \
-                mock.patch.object(hooks, "_git", return_value=exec_path), \
-                mock.patch.object(hooks.shutil, "which", return_value=r"C:\Windows\System32\bash.exe"):
-            self.assertEqual(hooks.find_bash(), bash)
+    def nt(self, env=None, git=None, exec_path=""):
+        return [mock.patch.object(hooks.os, "name", "nt"),
+                mock.patch.dict(os.environ, env or {}, clear=True),
+                mock.patch.object(hooks.shutil, "which", return_value=git),
+                mock.patch.object(hooks, "_git", return_value=exec_path)]
 
-    def test_only_wsl_bash_is_refused(self):
-        with mock.patch.object(hooks.os, "name", "nt"), mock.patch.object(hooks, "_git", return_value=""), \
-                mock.patch.dict(os.environ, {"SystemRoot": r"C:\Windows"}), \
-                mock.patch.object(hooks.os.path, "normcase", side_effect=str.lower), \
-                mock.patch.object(hooks.shutil, "which", return_value=r"C:\Windows\System32\bash.exe"):
-            with self.assertRaises(hooks.HooksError):
-                hooks.find_bash()
+    def run_nt(self, **kw):
+        patches = self.nt(**kw)
+        for p in patches:
+            p.start()
+        try:
+            return hooks.find_bash()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+    def make(self, *parts):
+        path = os.path.join(self.tmp.name, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+        return path
+
+    def test_override_wins(self):
+        bash = self.make("custom", "bash.exe")
+        self.make("Git", "bin", "bash.exe")
+        self.assertEqual(self.run_nt(env={"CLAUDE_CODE_GIT_BASH_PATH": bash},
+                                     git=os.path.join(self.tmp.name, "Git", "cmd", "git.exe")), bash)
+
+    def test_bash_next_to_git_exe(self):
+        bash = self.make("Git", "bin", "bash.exe")
+        self.assertEqual(self.run_nt(git=os.path.join(self.tmp.name, "Git", "cmd", "git.exe")), bash)
+
+    def test_bash_from_exec_path(self):
+        bash = self.make("Git", "bin", "bash.exe")
+        exec_path = os.path.join(self.tmp.name, "Git", "mingw64", "libexec", "git-core")
+        self.assertEqual(self.run_nt(git=os.path.join(self.tmp.name, "elsewhere", "git.exe"), exec_path=exec_path), bash)
+
+    def test_standard_install_folder(self):
+        bash = self.make("LocalAppData", "Programs", "Git", "bin", "bash.exe")
+        self.assertEqual(self.run_nt(env={"LOCALAPPDATA": os.path.join(self.tmp.name, "LocalAppData")}), bash)
+
+    def test_no_git_bash_is_refused(self):
+        with self.assertRaises(hooks.HooksError):
+            self.run_nt()
 
     def test_missing_bash_is_a_configuration_error(self):
         with mock.patch.object(hooks, "find_bash", return_value=os.path.join(self.tmp.name, "no-bash")):
