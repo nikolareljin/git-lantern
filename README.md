@@ -127,6 +127,7 @@ Git Lantern
 ├── todo_issues  - Create GitHub issues from TODO.txt
 ├── lazygit      - Open selected repository in lazygit
 ├── fleet        - Unified fleet plan/apply/logs (clone/pull/push/report)
+├── hooks        - Security hooks on your repositories (status/apply/repair)
 ├── scan         - Scan repositories to JSON
 ├── table        - Render table from JSON scan
 ├── find         - Find repositories by name/remote
@@ -268,6 +269,14 @@ Skip or speed up:
 SKIP_LANTERN_PRECOMMIT=1 git commit -m "..."
 LANTERN_PRECOMMIT_FAST=1 git commit -m "..."
 ```
+
+## Security hooks on your repositories
+
+`lantern hooks status|apply|repair|remove|export|import` sets up the
+script-helpers per-repository hooks in the clones under `--root` whose origin
+is under your owners (`git config --global script-helpers.owners`); other
+clones are never changed, and hooks they already run keep running. See
+[docs/commands.md](docs/commands.md#security-hooks-across-your-repositories).
 
 ## CI workflows
 

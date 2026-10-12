@@ -4,6 +4,16 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `lantern hooks status|apply|repair|remove|export|import`: the script-helpers
+  per-repository hooks (and, with `--agents`, the AI agent hooks) in every clone
+  whose origin is under `script-helpers.owners`; other clones are never changed.
+  `apply --dry-run` shows the plan, `--batch N` limits a run, `remove` restores
+  what was there before. Export and import match repositories by remote, not
+  path. `fleet apply` re-chains clones another tool took over
+  (`--no-hooks-repair` skips it). TUI menu entry "hooks".
+
 ## [0.8.3] - 2026-10-06
 
 ### Fixed

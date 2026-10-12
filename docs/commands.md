@@ -147,6 +147,7 @@ Git Lantern (main menu)
 ├── status          - Show repository status table (uses session settings)
 ├── lazygit         - Open selected repository in lazygit
 ├── fleet           - Unified plan/apply/logs for clone/pull/push/report
+├── hooks           - Security hooks on your repositories (status/apply/repair)
 ├── scan            - Scan repos to JSON file (uses session settings)
 ├── table           - Render table from a JSON scan file
 ├── find            - Find repos by name/remote (uses session settings)
@@ -337,6 +338,39 @@ lantern fleet logs --latest
 lantern fleet logs --input data/fleet-logs/fleet-apply-20260213T120000Z.json
 lantern fleet logs --latest --no-pretty --show-results
 ```
+
+## Security hooks across your repositories
+
+`lantern hooks` sets up the script-helpers per-repository hooks (git hooks and,
+optionally, the AI agent hooks) in every clone under `--root` whose `origin` is
+on github.com under one of your owners:
+
+```bash
+git config --global script-helpers.owners me,my-llc       # your namespaces
+git config --global script-helpers.home ~/Projects/script-helpers   # 0.50.0 or newer
+lantern hooks status
+lantern hooks apply --dry-run                              # the plan, nothing changed
+lantern hooks apply --batch 10 [--agents claude,codex|all] [--only repo-a,repo-b]
+lantern hooks repair                                       # re-chain after husky & co.
+lantern hooks remove [--agents codex]                      # restores what was there
+lantern hooks export hooks.json                            # this machine
+lantern hooks import hooks.json [--dry-run]                # another machine
+```
+
+- A clone whose `origin` is not under an owner (an employer's, someone else's)
+  is listed as "not owned, left alone" and never changed.
+- Hooks a clone already runs keep running: script-helpers chains them
+  (`setup-hooks.sh`), and `remove` restores the previous `core.hooksPath`.
+- `setup-hooks.sh` comes from `script-helpers.home` (or `SCRIPT_HELPERS_HOME`),
+  else lantern's vendored copy; one older than 0.50.0 is refused (exit 2).
+- The export lists repositories by remote (`github.com/<owner>/<repo>`) with
+  what is set up, never a local path, so `import` finds them wherever they are
+  cloned. Repositories not cloned on the importing machine are reported.
+- `lantern fleet apply` repairs taken-over clones after it runs (a pull that ran
+  `npm install` can let husky replace `core.hooksPath`); `--no-hooks-repair`
+  skips that.
+- Exit codes: 0 done, 1 a clone failed, 2 configuration (no owners, no usable
+  script-helpers, a bad `--agents` value or export file).
 
 ## Local repository commands
 
