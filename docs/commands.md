@@ -374,6 +374,10 @@ lantern hooks import hooks.json [--dry-run]                # another machine
   `npm install` can let husky replace `core.hooksPath`), only in the clones it
   was told to touch (`--repos`), reporting on stderr; `--no-hooks-repair` skips
   that.
+- A linked worktree (`git worktree add`) shares its main clone's config, so it
+  is listed as "worktree of <main>" and set up only through the main clone.
+- `import` checks the whole file first (each entry needs `remote`, `git_hooks`
+  true/false and an `agents` list) and changes nothing if any entry is wrong.
 - A clone whose status cannot be read is reported as failed (exit 1) and left
   alone; it is never treated as "nothing set up".
 - Exit codes: 0 done, 1 a clone failed, 2 configuration (no owners, no usable

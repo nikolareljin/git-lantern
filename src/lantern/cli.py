@@ -5908,7 +5908,8 @@ def build_parser() -> argparse.ArgumentParser:
         if name in ("apply", "import"):
             hp.add_argument("--dry-run", action="store_true", help="print what would run, change nothing")
         if name == "apply":
-            hp.add_argument("--batch", type=int, default=0, help="set up at most N clones this run")
+            hp.add_argument("--batch", type=_non_negative_int, default=0,
+                            help="set up at most N clones this run (0: all)")
         if name in ("export", "import"):
             hp.add_argument("file", help="export file ('-' for stdout with export)")
         hp.set_defaults(func=cmd_hooks)
@@ -6226,6 +6227,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
     return parser
+
+
+def _non_negative_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        n = -1
+    if n < 0:
+        raise argparse.ArgumentTypeError("expected a whole number >= 0, got {!r}".format(value))
+    return n
 
 
 def cmd_hooks(args: argparse.Namespace) -> int:

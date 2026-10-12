@@ -319,3 +319,44 @@ class RealScriptHelpers(HooksTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InputChecks(HooksTestBase):
+    def write_export(self, repos, version=1):
+        path = os.path.join(self.tmp.name, "x.json")
+        with open(path, "w") as fh:
+            json.dump({"kind": "lantern-hooks", "version": version, "repos": repos}, fh)
+        return path
+
+    def test_negative_batch_is_refused(self):
+        with self.assertRaises(SystemExit) as ctx, mock.patch("sys.stderr"):
+            self.run_cmd("apply", "--batch", "-1")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_import_refuses_malformed_entries_before_touching_clones(self):
+        self.clone("sub", "git@github.com:me/sub.git")
+        bad = [{"remote": "github.com/me/sub", "git_hooks": "no", "agents": []},
+               {"remote": "github.com/me/sub", "git_hooks": True, "agents": "codex"},
+               {"remote": "github.com/me/sub", "git_hooks": True, "agents": 5},
+               {"remote": "github.com/me/sub", "git_hooks": True, "agents": ["--global"]},
+               {"remote": "", "git_hooks": True, "agents": []}]
+        with mock.patch("sys.stderr"):
+            for entry in bad:
+                self.assertEqual(self.run_cmd("import", self.write_export([entry])), 2, entry)
+            self.assertEqual(self.run_cmd("import", self.write_export([], version=True)), 2)
+        self.assertEqual(self.calls(), [])
+
+    def test_import_matches_an_unnormalized_remote(self):
+        self.clone("sub", "git@github.com:me/sub.git")
+        entry = {"remote": "git@github.com:Me/Sub.git", "git_hooks": True, "agents": []}
+        self.assertEqual(self.run_cmd("import", self.write_export([entry])), 0)
+        self.assertEqual(self.calls(), ["sub"])
+
+    def test_linked_worktree_is_left_to_its_main_clone(self):
+        main = self.clone("a", "git@github.com:me/a.git")
+        git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "x", cwd=main)
+        git("worktree", "add", "-q", os.path.join(self.root, "a-wt"), cwd=main)
+        self.assertEqual(self.run_cmd("apply", "--only", "a-wt"), 0)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.run_cmd("apply"), 0)
+        self.assertEqual(self.calls(), ["a"])

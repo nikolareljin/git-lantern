@@ -198,9 +198,18 @@ def load_export(path: str) -> Dict[str, object]:
         raise HooksError("{} is not JSON: {}".format(path, exc))
     if not isinstance(data, dict) or data.get("kind") != "lantern-hooks" or not isinstance(data.get("repos"), list):
         raise HooksError("{} is not a lantern hooks export".format(path))
-    if data.get("version") != EXPORT_VERSION:
+    version = data.get("version")
+    if type(version) is not int or version != EXPORT_VERSION:
         raise HooksError("{}: export version {} is not supported (this lantern reads {})".format(
-            path, data.get("version"), EXPORT_VERSION))
+            path, version, EXPORT_VERSION))
+    for i, entry in enumerate(data["repos"]):
+        ok = (isinstance(entry, dict) and isinstance(entry.get("remote"), str) and entry["remote"].strip()
+              and isinstance(entry.get("git_hooks"), bool) and isinstance(entry.get("agents"), list)
+              and all(a in ("claude", *AGENTS) for a in entry["agents"]))
+        if not ok:
+            raise HooksError("{}: repos[{}] needs remote (text), git_hooks (true/false) and agents "
+                             "(a list of claude,{})".format(path, i, ",".join(AGENTS)))
+        entry["remote"] = normalize_remote(entry["remote"])
     return data
 
 
@@ -215,9 +224,31 @@ def _setup(args) -> Tuple[str, List[str]]:
     return find_setup_script(), owners
 
 
-def _selected(repos: List[str], only: str) -> List[str]:
+def linked_worktree_of(path: str) -> Optional[str]:
+    """The main clone of a linked worktree, else None. Worktrees share the
+    main clone's config, so changing one would change the other."""
+    out = _git(["rev-parse", "--git-dir", "--git-common-dir"], cwd=path).splitlines()
+    if len(out) != 2:
+        return None
+    git_dir, common = (os.path.realpath(os.path.join(path, d)) for d in out)   # both may be relative
+    if git_dir == common:
+        return None
+    return os.path.dirname(common)
+
+
+def _selected(repos: List[str], only: str, quiet: bool = False) -> List[str]:
     names = {n.strip().lower() for n in (only or "").split(",") if n.strip()}
-    return [r for r in repos if not names or os.path.basename(r).lower() in names]
+    picked = []
+    for r in repos:
+        if names and os.path.basename(r).lower() not in names:
+            continue
+        main = linked_worktree_of(r)
+        if main:
+            if not quiet:
+                print("{:<40} worktree of {}, set up through it".format(os.path.basename(r), main))
+            continue
+        picked.append(r)
+    return picked
 
 
 def cmd_status(repos: List[str], args) -> int:
@@ -346,19 +377,17 @@ def cmd_import(repos: List[str], args) -> int:
     script, owners = _setup(args)
     data = load_export(args.file)
     local: Dict[str, List[str]] = {}
-    for path in repos:
+    for path in _selected(repos, "", quiet=True):
         if is_owned(path, owners):
             local.setdefault(normalize_remote(origin_url(path)), []).append(path)
     failed = 0
     unmatched = []
     for entry in data["repos"]:
-        if not isinstance(entry, dict):
-            continue
-        paths = local.get(str(entry.get("remote") or ""))
+        paths = local.get(entry["remote"])
         if not paths:
-            unmatched.append(str(entry.get("remote")))
+            unmatched.append(entry["remote"])
             continue
-        agents = [a for a in entry.get("agents") or [] if a in ("claude", *AGENTS)]
+        agents = list(entry["agents"])
         for path in paths:              # every clone of that repository here
             st = repo_state(script, path)
             if st is None:
