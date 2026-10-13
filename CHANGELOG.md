@@ -4,6 +4,12 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `lantern hooks`: a clone whose setup runs only the repository's own hooks
+  (script-helpers `unscanned=yes`) is flagged by `status` and repaired by
+  `repair` and `apply`, like a takeover.
+
 ## [0.9.0] - 2026-10-12
 
 ### Added

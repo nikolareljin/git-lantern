@@ -200,12 +200,19 @@ def plan_apply(state: Dict[str, str], agents: List[str]) -> List[List[str]]:
     mode = state.get("mode", "none")
     if mode == "none":
         steps.append([])                      # the per-repository setup itself
-    elif state.get("taken_over") == "yes":
+    elif needs_repair(state):
         steps.append(["--repair"])
     have = set(present_agents(state))
     missing = [a for a in agents if a not in have]
     steps.extend(agent_commands(missing))
     return steps
+
+
+def needs_repair(state: Dict[str, str]) -> bool:
+    """Another tool took core.hooksPath over, or the setup points straight at the
+    repository's own hooks, so the current security checks do not run there
+    (script-helpers reports that as unscanned=yes)."""
+    return state.get("taken_over") == "yes" or state.get("unscanned") == "yes"
 
 
 def describe(step: List[str]) -> str:
@@ -356,7 +363,8 @@ def cmd_status(repos: List[str], args) -> int:
             print("{:<40} status failed".format(_label(path, args)))
             failed += 1
             continue
-        flag = "  TAKEN OVER (lantern hooks repair)" if st.get("taken_over") == "yes" else ""
+        flag = ("  TAKEN OVER (lantern hooks repair)" if st.get("taken_over") == "yes" else
+                "  OWN HOOKS ONLY, NOT SCANNED (lantern hooks repair)" if st.get("unscanned") == "yes" else "")
         print("{:<40} git hooks: {:<8} agents: {}{}".format(
             _label(path, args), st.get("mode", "?"), ",".join(present_agents(st)) or "-", flag))
     return 1 if failed else 0
@@ -410,7 +418,7 @@ def cmd_repair(repos: List[str], args, quiet: bool = False) -> int:
             print("{:<40} status failed, skipped".format(_label(path, args)))
             failed += 1
             continue
-        if state.get("taken_over") != "yes":
+        if not needs_repair(state):
             continue
         rc, out = run_setup(script, path, ["--repair"])
         print("{:<40} repair: {}".format(_label(path, args), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))

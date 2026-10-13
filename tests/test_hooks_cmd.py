@@ -17,14 +17,14 @@ from lantern import hooks
 
 FAKE_SETUP = r'''#!/usr/bin/env bash
 state="$(git rev-parse --git-dir)/fake-hooks"
-mode=none; taken=no; agents=""; claude=no
+mode=none; taken=no; agents=""; claude=no; unscanned=no
 [[ -f "$state" ]] && source "$state"
 echo "$(basename "$(pwd)") $*" >> "$FAKE_LOG"
 [[ -f "$(git rev-parse --git-dir)/fail-status" && "$*" == "--status --porcelain" ]] && { echo "boom"; exit 1; }
 case "$*" in
-  "--status --porcelain") printf 'mode=%s\ttaken_over=%s\tclaude_repo=%s\tagents=%s\n' "$mode" "$taken" "$claude" "$agents"; exit 0 ;;
+  "--status --porcelain") printf 'mode=%s\ttaken_over=%s\tclaude_repo=%s\tagents=%s\tunscanned=%s\n' "$mode" "$taken" "$claude" "$agents" "$unscanned"; exit 0 ;;
   "") mode=chained; taken=no ;;
-  "--repair") taken=no ;;
+  "--repair") taken=no; unscanned=no ;;
   "--uninstall") mode=none ;;
   "--claude-repo") claude=yes ;;
   "--claude-repo --uninstall") claude=no ;;
@@ -32,7 +32,7 @@ case "$*" in
   --agent-repo*) set -- $*; agents="${agents:+$agents,}$2" ;;
   "--fail") exit 1 ;;
 esac
-printf 'mode=%s\ntaken=%s\nagents=%s\nclaude=%s\n' "$mode" "$taken" "$agents" "$claude" > "$state"
+printf 'mode=%s\ntaken=%s\nagents=%s\nclaude=%s\nunscanned=%s\n' "$mode" "$taken" "$agents" "$claude" "$unscanned" > "$state"
 '''
 
 
@@ -139,6 +139,23 @@ class OwnershipAndApply(HooksTestBase):
             fh.write("taken=yes\n")
         open(self.log, "w").close()
         self.assertEqual(self.run_cmd("repair"), 0)
+        self.assertEqual(self.calls(), ["mine --repair"])
+
+    def test_unscanned_direct_setup_is_repaired_by_repair_and_apply(self):
+        path = self.clone("mine", "git@github.com:me/mine.git")
+        self.run_cmd("apply")
+        with open(os.path.join(path, ".git", "fake-hooks"), "a") as fh:
+            fh.write("unscanned=yes\n")
+        with mock.patch("sys.stdout") as out:
+            self.run_cmd("status")
+        self.assertIn("NOT SCANNED", "".join(c.args[0] for c in out.write.call_args_list))
+        open(self.log, "w").close()
+        self.assertEqual(self.run_cmd("repair"), 0)
+        self.assertEqual(self.calls(), ["mine --repair"])
+        with open(os.path.join(path, ".git", "fake-hooks"), "a") as fh:
+            fh.write("unscanned=yes\n")
+        open(self.log, "w").close()
+        self.assertEqual(self.run_cmd("apply"), 0)
         self.assertEqual(self.calls(), ["mine --repair"])
 
     def test_batch_limits_the_run(self):
