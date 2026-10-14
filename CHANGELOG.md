@@ -4,6 +4,13 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-14
+
+### Changed
+
+- Vendored script-helpers 0.50.0 -> 0.52.0: push checks (security, hygiene,
+  lint on changed files), gitleaks and foxguard installed on demand.
+
 ### Fixed
 
 - `lantern hooks`: a clone whose setup runs only the repository's own hooks
