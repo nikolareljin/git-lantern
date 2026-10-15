@@ -51,6 +51,17 @@ def test_md_file_without_id(tmp_path):
     assert items[0].description == "Record admin actions."
 
 
+def test_md_heading_inside_code_fence_is_description(tmp_path):
+    todo = tmp_path / "TODO.md"
+    todo.write_text(
+        "## Add login rate limit\nExample:\n```\n## not a heading\n```\n",
+        encoding="utf-8",
+    )
+    items = todo_issues.read_todo_file(todo)
+    assert len(items) == 1
+    assert items[0].description == "Example:\n```\n## not a heading\n```"
+
+
 def test_md_file_parses_only_inside_todo_block(tmp_path):
     todo = tmp_path / "TODO.md"
     todo.write_text(

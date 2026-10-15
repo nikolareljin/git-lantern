@@ -120,6 +120,7 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
     item_id = ""
     desc_lines: List[str] = []
     expect_id = False
+    in_fence = False
 
     def flush() -> None:
         description = "\n".join(desc_lines).strip()
@@ -128,7 +129,9 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
 
     for raw_line in block.splitlines():
         line = raw_line.strip()
-        if raw_line.startswith("## "):
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+        if not in_fence and raw_line.startswith("## "):
             flush()
             title = raw_line[3:].strip()
             item_id = ""
