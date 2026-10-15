@@ -303,3 +303,52 @@ def test_cli_end_to_end_with_fake_gh(tmp_path):
     assert log[1] == (
         "issue create --title New item --body Do it. --label todo --label backend -R o/r"
     )
+
+
+AGENTVAULT_BODY = (
+    "Description: Users need login.\n\n"
+    "Implementation Details:\n- add form\n- add route\n\n"
+    "Acceptance Criteria:\n- user logs in\n"
+)
+
+
+def test_md_and_txt_same_item_give_same_issue_body(tmp_path):
+    md = tmp_path / "TODO.md"
+    md.write_text("# TODO\n\n## Add login\nID: T-1\n" + AGENTVAULT_BODY, encoding="utf-8")
+    txt = tmp_path / "TODO.txt"
+    txt.write_text(
+        "[TODO]\nID: T-1\nTitle: Add login\n" + AGENTVAULT_BODY + "[/TODO]\n",
+        encoding="utf-8",
+    )
+
+    (md_item,) = todo_issues.read_todo_file(md)
+    (txt_item,) = todo_issues.read_todo_file(txt)
+    body = todo_issues.build_issue_body(md_item)
+    assert body == todo_issues.build_issue_body(txt_item)
+    assert body.startswith("ID: T-1\n\nUsers need login.\n\nImplementation Details:\n- add form")
+    assert "Acceptance Criteria:\n- user logs in" in body
+    seen = {(todo_issues.normalize_text(txt_item.title), todo_issues.normalize_text(body))}
+    assert todo_issues.is_duplicate(md_item, seen)
+
+
+def test_md_description_label_without_id_and_on_own_line(tmp_path):
+    md = tmp_path / "TODO.md"
+    md.write_text(
+        "## A\n**Description:**\nText A.\n\n## B\nDescription is not a label here.\n",
+        encoding="utf-8",
+    )
+    items = todo_issues.read_todo_file(md)
+    assert [i.description for i in items] == ["Text A.", "Description is not a label here."]
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs POSIX permissions")
+def test_unreadable_single_file_exits_1_without_traceback(tmp_path, capsys):
+    md = tmp_path / "TODO.md"
+    md.write_text("## A\nText.\n", encoding="utf-8")
+    md.chmod(0)
+    try:
+        rc = todo_issues.main(["--todo-file", str(md), "--dry-run"])
+    finally:
+        md.chmod(0o600)
+    assert rc == 1
+    assert "cannot read TODO file" in capsys.readouterr().err

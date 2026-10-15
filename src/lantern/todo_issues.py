@@ -109,6 +109,9 @@ MD_ID_RE = re.compile(r"^(?:\*\*ID:\*\*|ID:)\s*(.*)$")
 MD_H1_RE = re.compile(r"^ {0,3}#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 MD_H2_RE = re.compile(r"^ {0,3}##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 MD_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+# A `Description:` label (as in TODO.txt) after the heading/ID is dropped so the
+# same item gives the same issue body from .txt and .md.
+MD_DESC_RE = re.compile(r"^(?:\*\*Description:\*\*|Description:)\s*(.*)$")
 
 
 def _update_fence(line: str, fence: str) -> str:
@@ -140,6 +143,7 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
     item_id = ""
     desc_lines: List[str] = []
     expect_id = False
+    expect_desc = False
     fence = ""
 
     def flush() -> None:
@@ -160,6 +164,7 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
             item_id = ""
             desc_lines = []
             expect_id = True
+            expect_desc = False
             continue
         if not title:
             continue
@@ -168,6 +173,15 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
             match = MD_ID_RE.match(line)
             if match:
                 item_id = match.group(1).strip()
+                expect_desc = True
+                continue
+            expect_desc = True
+        if expect_desc and line:
+            expect_desc = False
+            match = MD_DESC_RE.match(line)
+            if match:
+                if match.group(1):
+                    desc_lines.append(match.group(1))
                 continue
         desc_lines.append(raw_line.rstrip())
     flush()
@@ -457,6 +471,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     except UnicodeDecodeError:
         print(f"Error: TODO file is not valid UTF-8: {args.todo_file}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Error: cannot read TODO file {args.todo_file}: {exc.strerror or exc}", file=sys.stderr)
         return 1
 
     if not items:

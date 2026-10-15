@@ -595,6 +595,8 @@ title and body, open or closed).
 - `.txt`: `[TODO]...[/TODO]` block with `ID:`, `Title:`, `Description:` lines.
 - `.md`: one issue per `## Title` heading. An optional `ID: <id>` (or
   `**ID:** <id>`) line may follow the heading; the rest is the description.
+  A leading `Description:` label is dropped, so an item gives the same issue
+  body from `.txt` and `.md` and duplicates are found across both.
   If the file has a `[TODO]...[/TODO]` block, only that block is read.
   A heading with no description is skipped with a message.
 - Directory: each `*.md` file (not recursive, dotfiles ignored) is one issue.
