@@ -4,11 +4,22 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## 2026-10-15 — v0.10.0
+
 ### Added
 
 - `lantern hooks apply` sets `script-helpers.push-tests quick` in owned clones
   of private repositories with no value yet (visibility from `gh api`; left
   unset when it cannot be read). `status` shows it; `export`/`import` carry it.
+
+### Changed
+
+- Vendored script-helpers 0.52.0 -> 0.53.1: preflight and the security gates
+  keep scratch files in one per-run directory that is removed on exit and
+  honours `TMPDIR` on macOS; a push that updates no ref passes `pre-push`;
+  `run_repo_tests.sh` exit codes no longer collide with a runner's; the
+  `pre-push` release check reads the newest heading in a changelog that changed
+  style.
 
 ### Fixed
 
@@ -20,7 +31,7 @@ All notable changes to git-lantern are documented in this file.
   sigil, frozen-string-literal comment, class comment). It failed on 0.9.0 and
   0.9.1.
 
-## [0.9.1] - 2026-10-14
+## 2026-10-14 — v0.9.1
 
 ### Changed
 
@@ -33,7 +44,7 @@ All notable changes to git-lantern are documented in this file.
   (script-helpers `unscanned=yes`) is flagged by `status` and repaired by
   `repair` and `apply`, like a takeover.
 
-## [0.9.0] - 2026-10-12
+## 2026-10-12 — v0.9.0
 
 ### Added
 
@@ -56,7 +67,7 @@ All notable changes to git-lantern are documented in this file.
   hooks that chain to existing ones (`setup-hooks.sh --status --porcelain`, `--repair`),
   which `lantern hooks` builds on.
 
-## [0.8.3] - 2026-10-06
+## 2026-10-06 — v0.8.3
 
 ### Fixed
 
