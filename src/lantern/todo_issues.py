@@ -321,7 +321,9 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
 def read_issue_dir(dir_path: Path) -> List[TodoItem]:
     items: List[TodoItem] = []
     root = dir_path.resolve()
-    for path in sorted(dir_path.iterdir()):
+    # By file name as a plain string: Path ordering ignores case on Windows,
+    # which would give a different issue order there.
+    for path in sorted(dir_path.iterdir(), key=lambda p: p.name):
         # Dotfiles (`.draft.md`, editor backups) are not issues.
         if path.name.startswith(".") or path.suffix.lower() != ".md" or not path.is_file():
             continue
