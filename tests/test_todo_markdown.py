@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
@@ -218,3 +220,86 @@ def test_dry_run_shows_labels(capsys):
     item = todo_issues.TodoItem(item_id="", title="T", description="d", labels=["two words"])
     todo_issues.create_issue(item, None, ["cli"], dry_run=True)
     assert "[labels: cli, two words]" in capsys.readouterr().out
+
+
+def test_md_heading_without_description_is_reported(tmp_path, capsys):
+    todo = tmp_path / "TODO.md"
+    todo.write_text("## Real\nBody.\n\n## Empty one\n", encoding="utf-8")
+    items = todo_issues.read_todo_file(todo)
+    assert [item.title for item in items] == ["Real"]
+    assert "[SKIPPED] Empty one: empty description" in capsys.readouterr().out
+
+
+def test_issue_dir_ignores_dotfiles(tmp_path):
+    (tmp_path / ".draft.md").write_text("# Draft\nNot ready.\n", encoding="utf-8")
+    (tmp_path / "real.md").write_text("# Real\nReady.\n", encoding="utf-8")
+    items = todo_issues.read_todo_file(tmp_path)
+    assert [item.title for item in items] == ["Real"]
+
+
+def test_front_matter_keys_case_insensitive_and_list_comment():
+    meta = todo_issues.parse_front_matter(
+        ["Title: Fix #12", "LABELS: [a, b]  # team labels"]
+    )
+    assert meta == {"title": "Fix #12", "labels": ["a", "b"]}
+
+
+def test_issue_dir_unreadable_file_is_skipped(tmp_path, monkeypatch, capsys):
+    (tmp_path / "a.md").write_text("# A\nBody.\n", encoding="utf-8")
+    (tmp_path / "b.md").write_text("# B\nBody.\n", encoding="utf-8")
+    real_read = todo_issues.read_markdown_text
+
+    def fake_read(path):
+        if path.name == "a.md":
+            raise PermissionError(13, "Permission denied")
+        return real_read(path)
+
+    monkeypatch.setattr(todo_issues, "read_markdown_text", fake_read)
+    items = todo_issues.read_todo_file(tmp_path)
+    assert [item.title for item in items] == ["B"]
+    assert "[SKIPPED] a.md: Permission denied" in capsys.readouterr().out
+
+
+FAKE_GH = """#!/bin/sh
+printf '%s\\n' "$*" >> "$GH_LOG"
+if [ "$1 $2" = "issue list" ]; then cat "$GH_LIST"; fi
+"""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake gh is a POSIX shell script")
+def test_cli_end_to_end_with_fake_gh(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(FAKE_GH, encoding="utf-8")
+    gh.chmod(0o755)
+    issues = tmp_path / "issues"
+    issues.mkdir()
+    (issues / "new.md").write_text(
+        "---\ntitle: New item\nlabels: [backend]\n---\nDo it.\n", encoding="utf-8"
+    )
+    (issues / "old.md").write_text("# Old item\nAlready filed.\n", encoding="utf-8")
+    gh_list = tmp_path / "list.json"
+    gh_list.write_text(
+        '[{"number": 1, "title": "Old item", "body": "Already  filed.\\n"}]',
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env.update(
+        PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        PYTHONPATH=SRC,
+        GH_LOG=str(tmp_path / "gh.log"),
+        GH_LIST=str(gh_list),
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "lantern", "todo", "issues", "--todo-file", str(issues),
+         "--label", "todo", "--repo", "o/r", "--limit", "5"],
+        capture_output=True, text=True, env=env, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Created: 1, Skipped duplicates: 1, Parsed: 2" in result.stdout
+    log = (tmp_path / "gh.log").read_text(encoding="utf-8").splitlines()
+    assert log[0] == "issue list --state all --limit 5 --json number,title,body -R o/r"
+    assert log[1] == (
+        "issue create --title New item --body Do it. --label todo --label backend -R o/r"
+    )

@@ -596,11 +596,14 @@ title and body, open or closed).
 - `.md`: one issue per `## Title` heading. An optional `ID: <id>` (or
   `**ID:** <id>`) line may follow the heading; the rest is the description.
   If the file has a `[TODO]...[/TODO]` block, only that block is read.
-- Directory: each `*.md` file (not recursive) is one issue. Optional front
-  matter sets `title`, `labels` and `id`; without `title` the first `# `
-  heading is used. `labels` is a list (`[a, b]` or `- a` lines) or a
-  comma-separated string. A file with no title, an unclosed front matter
-  block or invalid UTF-8 is skipped with a message; the run continues.
+  A heading with no description is skipped with a message.
+- Directory: each `*.md` file (not recursive, dotfiles ignored) is one issue.
+  Optional front matter sets `title`, `labels` and `id` (keys are
+  case-insensitive; values are literal, so `title: Fix #12` keeps `#12`);
+  without `title` the first `# ` heading is used. `labels` is a list
+  (`[a, b]` or `- a` lines) or a comma-separated string. A file with no
+  title, an unclosed front matter block, invalid UTF-8 or a read error is
+  skipped with a message; the run continues.
 - Labels from `--label` and front matter are both applied; `--dry-run` lists them.
 
 **Examples**:

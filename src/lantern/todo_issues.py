@@ -144,7 +144,9 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
 
     def flush() -> None:
         description = "\n".join(desc_lines).strip()
-        if title and description:
+        if title and not description:
+            print(f"[SKIPPED] {title}: empty description")
+        elif title:
             items.append(TodoItem(item_id=item_id, title=title, description=description))
 
     for raw_line in block.splitlines():
@@ -182,8 +184,16 @@ def _strip_quotes(value: str) -> str:
     return value
 
 
+# `[a, b]`, optionally followed by a `# comment`. Scalar values are literal,
+# so `title: Fix #12` keeps the `#12`.
+FM_FLOW_LIST_RE = re.compile(r"^\[(.*)\]\s*(?:#.*)?$")
+
+
 def parse_front_matter(lines: Sequence[str]) -> Dict[str, FrontMatterValue]:
-    """Parse a minimal YAML subset: `key: value`, `key: [a, b]`, `- item` lists."""
+    """Parse a minimal YAML subset: `key: value`, `key: [a, b]`, `- item` lists.
+
+    Keys are case-insensitive; a repeated key keeps its last value.
+    """
     data: Dict[str, FrontMatterValue] = {}
     current_list_key = ""
     for raw_line in lines:
@@ -203,11 +213,12 @@ def parse_front_matter(lines: Sequence[str]) -> Dict[str, FrontMatterValue]:
         key, sep, value = line.partition(":")
         if not sep:
             continue
-        key = key.strip()
+        key = key.strip().lower()
         value = value.strip()
         current_list_key = ""
-        if value.startswith("[") and value.endswith("]"):
-            inner = value[1:-1]
+        list_match = FM_FLOW_LIST_RE.match(value)
+        if list_match:
+            inner = list_match.group(1)
             data[key] = [_strip_quotes(part) for part in inner.split(",") if part.strip()]
         elif value:
             data[key] = _strip_quotes(value)
@@ -249,6 +260,9 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
     except UnicodeDecodeError:
         print(f"[SKIPPED] {path.name}: not valid UTF-8")
         return None
+    except OSError as exc:
+        print(f"[SKIPPED] {path.name}: {exc.strerror or exc}")
+        return None
     except FrontMatterError as exc:
         print(f"[SKIPPED] {path.name}: {exc}")
         return None
@@ -285,7 +299,8 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
 def read_issue_dir(dir_path: Path) -> List[TodoItem]:
     items: List[TodoItem] = []
     for path in sorted(dir_path.iterdir()):
-        if path.suffix.lower() != ".md" or not path.is_file():
+        # Dotfiles (`.draft.md`, editor backups) are not issues.
+        if path.name.startswith(".") or path.suffix.lower() != ".md" or not path.is_file():
             continue
         item = parse_issue_file(path)
         if item is not None:

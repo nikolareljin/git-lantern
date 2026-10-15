@@ -1905,7 +1905,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("settings", "Session settings"),
             ("repos", "List local repositories"),
             ("status", "Show repository status"),
-            ("todo_issues", "Create GitHub issues from TODO.txt"),
+            ("todo_issues", "Create GitHub issues from a TODO file or directory"),
             ("lazygit", "Open repository in lazygit"),
             ("fleet", "Unified fleet plan/apply (clone, pull, push)"),
             ("hooks", "Security hooks on your repositories (status, apply, repair)"),
@@ -6085,7 +6085,7 @@ def build_parser() -> argparse.ArgumentParser:
     todo = sub.add_parser("todo", help="TODO file workflows")
     todo_sub = todo.add_subparsers(dest="todo_command", required=True)
 
-    todo_issues = todo_sub.add_parser("issues", help="create GitHub issues from TODO.txt")
+    todo_issues = todo_sub.add_parser("issues", help="create GitHub issues from a TODO file or directory")
     todo_issues.add_argument(
         "--todo-file",
         default="TODO.txt",
