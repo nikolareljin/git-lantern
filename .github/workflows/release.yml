@@ -142,12 +142,16 @@ jobs:
           fi
           cp "$RUNNER_TEMP/git-lantern.rb" homebrew-tap/Formula/git-lantern.rb
           git -C homebrew-tap add Formula/git-lantern.rb
-          git -C homebrew-tap diff --cached --quiet && exit 0
-          git -C homebrew-tap config user.name "github-actions[bot]"
-          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C homebrew-tap commit -m "feat: add Git Lantern ${RELEASE_TAG} formula"
-          git -C homebrew-tap push --set-upstream origin "$TAP_BRANCH"
-          if gh pr list --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --state open --json url --jq 'length > 0' | grep -qx true; then
+          # A rerun finds the formula already on the branch: still make sure the PR exists.
+          if ! git -C homebrew-tap diff --cached --quiet; then
+            git -C homebrew-tap config user.name "github-actions[bot]"
+            git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C homebrew-tap commit -m "feat: add Git Lantern ${RELEASE_TAG} formula"
+            git -C homebrew-tap push --set-upstream origin "$TAP_BRANCH"
+          fi
+          if git -C homebrew-tap diff --quiet origin/main HEAD -- Formula/git-lantern.rb; then
+            echo "Homebrew tap main already has the ${RELEASE_TAG} formula."
+          elif gh pr list --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --state open --json url --jq 'length > 0' | grep -qx true; then
             echo "Homebrew tap pull request already exists for ${TAP_BRANCH}."
           else
             gh pr create --repo "$TAP_REPOSITORY" --head "$TAP_BRANCH" --base main \
