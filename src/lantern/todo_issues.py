@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create GitHub issues from TODO.txt entries."""
+"""Create GitHub issues from TODO.txt, Markdown TODO files or issue directories."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 
 TODO_START = "[TODO]"
@@ -23,6 +23,7 @@ class TodoItem:
     item_id: str
     title: str
     description: str
+    labels: List[str] = field(default_factory=list)
 
 
 def normalize_text(value: str) -> str:
@@ -104,10 +105,159 @@ def parse_todo_items(text: str) -> List[TodoItem]:
     return items
 
 
+MD_ID_RE = re.compile(r"^(?:\*\*ID:\*\*|ID:)\s*(.*)$")
+
+
+def parse_markdown_items(text: str) -> List[TodoItem]:
+    """Parse one item per level-2 heading (`## Title`).
+
+    An optional `ID: x` or `**ID:** x` line may follow the heading. Everything
+    else until the next `## ` heading is the description.
+    """
+    block = extract_todo_block(text)
+    items: List[TodoItem] = []
+    title = ""
+    item_id = ""
+    desc_lines: List[str] = []
+    expect_id = False
+
+    def flush() -> None:
+        description = "\n".join(desc_lines).strip()
+        if title and description:
+            items.append(TodoItem(item_id=item_id, title=title, description=description))
+
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if raw_line.startswith("## "):
+            flush()
+            title = raw_line[3:].strip()
+            item_id = ""
+            desc_lines = []
+            expect_id = True
+            continue
+        if not title:
+            continue
+        if expect_id and line:
+            expect_id = False
+            match = MD_ID_RE.match(line)
+            if match:
+                item_id = match.group(1).strip()
+                continue
+        desc_lines.append(raw_line.rstrip())
+    flush()
+    return items
+
+
+FrontMatterValue = Union[str, List[str]]
+
+
+def _strip_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
+def parse_front_matter(lines: Sequence[str]) -> Dict[str, FrontMatterValue]:
+    """Parse a minimal YAML subset: `key: value`, `key: [a, b]`, `- item` lists."""
+    data: Dict[str, FrontMatterValue] = {}
+    current_list_key = ""
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("- ") or line == "-":
+            if current_list_key:
+                value = _strip_quotes(line[1:])
+                existing = data.get(current_list_key)
+                if not isinstance(existing, list):
+                    existing = []
+                    data[current_list_key] = existing
+                if value:
+                    existing.append(value)
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        current_list_key = ""
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1]
+            data[key] = [_strip_quotes(part) for part in inner.split(",") if part.strip()]
+        elif value:
+            data[key] = _strip_quotes(value)
+        else:
+            data[key] = []
+            current_list_key = key
+    return data
+
+
+def split_front_matter(text: str) -> Tuple[Dict[str, FrontMatterValue], str]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return parse_front_matter(lines[1:index]), "\n".join(lines[index + 1 :])
+    return {}, text
+
+
+def _as_text(value: Optional[FrontMatterValue]) -> str:
+    if isinstance(value, list):
+        return ", ".join(value)
+    return (value or "").strip()
+
+
+def parse_issue_file(path: Path) -> Optional[TodoItem]:
+    """Parse one Markdown issue file; return None (with a message) when unusable."""
+    meta, body = split_front_matter(path.read_text(encoding="utf-8"))
+    title = _as_text(meta.get("title"))
+    body_lines = body.splitlines()
+    if not title:
+        for index, line in enumerate(body_lines):
+            if line.startswith("# "):
+                title = line[2:].strip()
+                del body_lines[index]
+                break
+    if not title:
+        print(f"[SKIPPED] {path.name}: no title (front matter 'title' or '# ' heading)")
+        return None
+    description = "\n".join(body_lines).strip()
+    if not description:
+        print(f"[SKIPPED] {path.name}: empty description")
+        return None
+    raw_labels = meta.get("labels", [])
+    if isinstance(raw_labels, str):
+        raw_labels = [raw_labels] if raw_labels else []
+    return TodoItem(
+        item_id=_as_text(meta.get("id")),
+        title=title,
+        description=description,
+        labels=[label for label in raw_labels if label],
+    )
+
+
+def read_issue_dir(dir_path: Path) -> List[TodoItem]:
+    items: List[TodoItem] = []
+    for path in sorted(dir_path.glob("*.md")):
+        if not path.is_file():
+            continue
+        item = parse_issue_file(path)
+        if item is not None:
+            items.append(item)
+    return items
+
+
 def read_todo_file(todo_path: Path) -> List[TodoItem]:
     if not todo_path.exists():
         raise FileNotFoundError(f"TODO file not found: {todo_path}")
-    return parse_todo_items(todo_path.read_text(encoding="utf-8"))
+    if todo_path.is_dir():
+        return read_issue_dir(todo_path)
+    text = todo_path.read_text(encoding="utf-8")
+    if todo_path.suffix.lower() == ".md":
+        return parse_markdown_items(text)
+    return parse_todo_items(text)
 
 
 def run_gh_json(command: Sequence[str]) -> object:
@@ -180,7 +330,11 @@ def create_issue(
         return
 
     cmd = ["gh", "issue", "create", "--title", item.title, "--body", body]
-    for label in labels:
+    merged_labels: List[str] = []
+    for label in list(labels) + item.labels:
+        if label not in merged_labels:
+            merged_labels.append(label)
+    for label in merged_labels:
         cmd.extend(["--label", label])
     if repo:
         cmd.extend(["-R", repo])
@@ -204,7 +358,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--todo-file",
         default="TODO.txt",
-        help="Path to TODO file (default: TODO.txt).",
+        help=(
+            "Path to TODO file (default: TODO.txt). A .md file gives one issue per "
+            "'## Title' heading; a directory gives one issue per *.md file."
+        ),
     )
     parser.add_argument(
         "--repo",

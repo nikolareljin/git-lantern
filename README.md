@@ -38,7 +38,7 @@ Commands (jump to detailed guides):
 - `lantern duplicates` -> `docs/use-cases.md#lantern-duplicates`
 - `lantern sync` -> `docs/use-cases.md#lantern-sync`
 - `lantern report` -> `docs/use-cases.md#lantern-report`
-- `lantern todo issues` -> create GitHub issues from `TODO.txt` (duplicate-safe)
+- `lantern todo issues` -> create GitHub issues from `TODO.txt`, a `.md` TODO file or a directory of `.md` issues (duplicate-safe)
 - `lantern forge list` -> `docs/use-cases.md#list-repos-from-a-server`
 - `lantern forge clone` -> `docs/use-cases.md#clone-missing-repos-to-a-workspace`
 - `lantern forge gists ...` -> `docs/use-cases.md#list-gists-github`

@@ -4,6 +4,13 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `lantern todo issues --todo-file` reads Markdown: a `.md` file gives one
+  issue per `## Title` heading (optional `ID:` line, `[TODO]` block honoured),
+  and a directory gives one issue per `*.md` file with optional front matter
+  (`title`, `labels`, `id`). Front matter labels are added to the issue.
+
 ### Fixed
 
 - Release `homebrew` job: a rerun after the tap branch was pushed exited 0

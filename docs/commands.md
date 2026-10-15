@@ -586,6 +586,43 @@ lantern report --input data/repos.json --format md --output data/repos.md
 lantern report --input data/repos.json --format json
 ```
 
+### `lantern todo issues`
+
+**Purpose**: Create GitHub issues from a TODO list, skipping duplicates (same
+title and body, open or closed).
+
+**Input forms** (`--todo-file`, default `TODO.txt`):
+- `.txt`: `[TODO]...[/TODO]` block with `ID:`, `Title:`, `Description:` lines.
+- `.md`: one issue per `## Title` heading. An optional `ID: <id>` (or
+  `**ID:** <id>`) line may follow the heading; the rest is the description.
+  If the file has a `[TODO]...[/TODO]` block, only that block is read.
+- Directory: each `*.md` file (not recursive) is one issue. Optional front
+  matter sets `title`, `labels` and `id`; without `title` the first `# `
+  heading is used, and a file with neither is skipped with a message.
+
+**Examples**:
+```bash
+lantern todo issues --todo-file TODO.txt --dry-run
+lantern todo issues --todo-file TODO.md --label backlog
+lantern todo issues --todo-file issues/
+```
+
+`TODO.md`:
+```markdown
+## Add login rate limit
+ID: 001
+Return 429 after five failed logins per IP.
+```
+
+`issues/rate-limit.md`:
+```markdown
+---
+title: Add login rate limit
+labels: [security, backend]
+---
+Return 429 after five failed logins per IP.
+```
+
 ## Git server commands (`lantern forge ...`)
 
 The `lantern forge` command group can target GitHub, GitLab, or Bitbucket using `--server` and the config file.

@@ -1005,7 +1005,7 @@ def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: 
     default_todo = os.path.join(repo_path, "TODO.txt")
     todo_file = _dialog_inputbox(
         "TODO File",
-        "Path to TODO file:",
+        "Path to TODO file (.txt or .md) or a directory of .md issue files:",
         default_todo,
         height,
         width,
@@ -1013,7 +1013,7 @@ def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: 
     if not todo_file:
         return
     todo_file = os.path.abspath(todo_file)
-    if not os.path.isfile(todo_file):
+    if not os.path.isfile(todo_file) and not os.path.isdir(todo_file):
         _dialog_msgbox("Error", f"TODO file not found:\n{todo_file}", height, width)
         return
 
@@ -6086,7 +6086,14 @@ def build_parser() -> argparse.ArgumentParser:
     todo_sub = todo.add_subparsers(dest="todo_command", required=True)
 
     todo_issues = todo_sub.add_parser("issues", help="create GitHub issues from TODO.txt")
-    todo_issues.add_argument("--todo-file", default="TODO.txt", help="Path to TODO file (default: TODO.txt).")
+    todo_issues.add_argument(
+        "--todo-file",
+        default="TODO.txt",
+        help=(
+            "Path to TODO file (default: TODO.txt). A .md file gives one issue per "
+            "'## Title' heading; a directory gives one issue per *.md file."
+        ),
+    )
     todo_issues.add_argument("--repo", default="", help="Optional OWNER/REPO override.")
     todo_issues.add_argument("--limit", type=int, default=1000, help="Existing-issue scan limit for duplicate checks.")
     todo_issues.add_argument("--label", action="append", default=[], help="Issue label to apply (repeatable).")
