@@ -4,6 +4,19 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `lantern hooks apply` sets `script-helpers.push-tests quick` in owned clones
+  of private repositories with no value yet (visibility from `gh api`; left
+  unset when it cannot be read). `status` shows it; `export`/`import` carry it.
+
+### Fixed
+
+- The pre-commit hook ran the tests with git's `GIT_DIR`/`GIT_INDEX_FILE`
+  still exported, so the tests' own git calls changed the repository being
+  committed to (set `core.bare`, moved the branch to a test commit). The hook
+  and `tests/conftest.py` now clear them.
+
 ### Fixed
 
 - Release `homebrew` job: the generated formula now passes `brew style` (Sorbet

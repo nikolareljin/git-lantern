@@ -5,6 +5,7 @@ every call, so the tests see exactly what lantern asks script-helpers to do.
 One test runs the real script-helpers (0.50.0+) when it is available.
 """
 import argparse
+import io
 import json
 import os
 import subprocess
@@ -62,6 +63,17 @@ class HooksTestBase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.root = os.path.join(base, "tree")
         os.makedirs(self.root)
+        # Visibility per "owner/repo"; anything not listed is public. Every
+        # lookup is recorded, so tests see when lantern asks GitHub.
+        self.visibility = {}
+        self.lookups = []
+
+        def visibility(slug):
+            self.lookups.append("/".join(slug))
+            return self.visibility.get("/".join(slug), "public")
+        vis = mock.patch.object(hooks, "repo_visibility", visibility)
+        vis.start()
+        self.addCleanup(vis.stop)
 
     def clone(self, name, origin, root=None):
         path = os.path.join(root or self.root, name)
@@ -263,6 +275,154 @@ class ExportImport(HooksTestBase):
         with open(bad, "w") as fh:
             json.dump({"kind": "something-else"}, fh)
         self.assertEqual(self.run_cmd("import", bad), 2)
+
+
+def push_tests(path):
+    out = subprocess.run(["git", "-C", path, "config", "--local", "--get", "script-helpers.push-tests"],
+                         stdout=subprocess.PIPE, text=True)
+    return out.stdout.strip()
+
+
+class PushTests(HooksTestBase):
+    """apply sets script-helpers.push-tests quick in owned private clones with no value."""
+
+    def setUp(self):
+        super().setUp()
+        self.private = self.clone("private", "git@github.com:me/private.git")
+        self.public = self.clone("public", "git@github.com:me/public.git")
+        self.theirs = self.clone("theirs", "git@github.com:acme/theirs.git")
+        self.visibility = {"me/private": "private", "acme/theirs": "private"}
+
+    def test_apply_sets_quick_only_in_owned_private_clones(self):
+        self.assertEqual(self.run_cmd("apply"), 0)
+        self.assertEqual(push_tests(self.private), "quick")
+        self.assertEqual(push_tests(self.public), "")
+        self.assertEqual(push_tests(self.theirs), "")
+        self.assertNotIn("acme/theirs", self.lookups)       # another owner's clone is never looked up
+
+    def test_dry_run_lists_only_the_private_clone_and_changes_nothing(self):
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(self.run_cmd("apply", "--dry-run"), 0)
+        lines = [line for line in out.getvalue().splitlines() if "push-tests" in line]
+        self.assertEqual(len(lines), 1, out.getvalue())
+        self.assertTrue(lines[0].startswith("private ") and "would run: git config script-helpers.push-tests quick" in lines[0])
+        self.assertEqual(push_tests(self.private), "")
+
+    def test_second_run_changes_nothing_and_asks_github_nothing(self):
+        self.run_cmd("apply")
+        self.visibility = {}                                # a changed answer must not matter now
+        self.lookups.clear()
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(self.run_cmd("apply", "--only", "private"), 0)
+        self.assertIn("up to date", out.getvalue())
+        self.assertEqual(self.lookups, [])
+        self.assertEqual(push_tests(self.private), "quick")
+
+    def test_an_existing_value_is_kept(self):
+        git("config", "script-helpers.push-tests", "off", cwd=self.private)
+        self.run_cmd("apply")
+        self.assertEqual(push_tests(self.private), "off")
+        self.assertNotIn("me/private", self.lookups)
+
+    def test_unknown_visibility_leaves_it_unset_and_says_so(self):
+        self.visibility = {"me/private": None}
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(self.run_cmd("apply"), 0)
+        self.assertEqual(push_tests(self.private), "")
+        self.assertIn("visibility unknown", out.getvalue())
+
+    def test_a_failed_hook_setup_does_not_set_it(self):
+        with open(os.path.join(self.home, "scripts", "setup-hooks.sh"), "w", newline="\n") as fh:
+            fh.write(FAKE_SETUP.replace('"") mode=chained; taken=no ;;', '"") exit 1 ;;'))
+        self.assertEqual(self.run_cmd("apply", "--only", "private"), 1)
+        self.assertEqual(push_tests(self.private), "")
+
+    def test_a_failed_config_write_is_exit_1(self):
+        with mock.patch.object(hooks, "set_push_tests", return_value=False):
+            self.assertEqual(self.run_cmd("apply", "--only", "private"), 1)
+
+    def test_batch_counts_a_clone_that_only_needs_push_tests(self):
+        self.run_cmd("apply", "--only", "private")
+        git("config", "--unset", "script-helpers.push-tests", cwd=self.private)   # hooks in place, value gone
+        other = self.clone("private2", "git@github.com:me/private2.git")
+        self.visibility["me/private2"] = "private"
+        open(self.log, "w").close()
+        self.run_cmd("apply", "--batch", "1")
+        self.assertEqual(push_tests(self.private), "quick")     # first in the walk, and it counts as the one
+        self.assertEqual((push_tests(other), self.calls()), ("", []))
+
+    def test_status_shows_the_value(self):
+        git("config", "script-helpers.push-tests", "quick", cwd=self.private)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.run_cmd("status")
+        rows = {line.split()[0]: line for line in out.getvalue().splitlines()[1:]}
+        self.assertIn("push-tests: quick", rows["private"])
+        self.assertIn("push-tests: -", rows["public"])
+
+    def test_export_and_import_carry_it_without_overriding(self):
+        self.run_cmd("apply")
+        out = os.path.join(self.tmp.name, "hooks.json")
+        self.run_cmd("export", out)
+        entries = {r["remote"]: r for r in json.load(open(out))["repos"]}
+        self.assertEqual(entries["github.com/me/private"].get("push_tests"), "quick")
+        self.assertNotIn("push_tests", entries["github.com/me/public"])
+        other = os.path.join(self.tmp.name, "other")
+        os.makedirs(other)
+        fresh = self.clone("p", "https://github.com/me/private", root=other)
+        kept = self.clone("p2", "https://github.com/me/private.git", root=other)
+        git("config", "script-helpers.push-tests", "off", cwd=kept)
+        self.visibility = {}
+        self.assertEqual(self.run_cmd("import", out, "--root", other), 0)
+        self.assertEqual(push_tests(fresh), "quick")
+        self.assertEqual(push_tests(kept), "off")
+
+    def test_import_refuses_a_bad_value(self):
+        bad = os.path.join(self.tmp.name, "bad.json")
+        for value in ("quick; rm -rf", 1, "--global"):
+            with open(bad, "w") as fh:
+                json.dump({"kind": "lantern-hooks", "version": 1, "repos": [
+                    {"remote": "github.com/me/private", "git_hooks": True, "agents": [], "push_tests": value}]}, fh)
+            with mock.patch("sys.stderr"):
+                self.assertEqual(self.run_cmd("import", bad), 2, value)
+        self.assertEqual(push_tests(self.private), "")
+
+
+class RepoVisibility(unittest.TestCase):
+    def run_with(self, rc=0, out="", exc=None):
+        def fake(*a, **k):
+            if exc:
+                raise exc
+            return subprocess.CompletedProcess(a[0], rc, stdout=out)
+        with mock.patch.object(hooks.subprocess, "run", fake):
+            return hooks.repo_visibility(("me", "repo"))
+
+    def test_answers(self):
+        self.assertEqual(self.run_with(out="true\n"), "private")
+        self.assertEqual(self.run_with(out="false\n"), "public")
+        self.assertIsNone(self.run_with(rc=1, out="true"))
+        self.assertIsNone(self.run_with(out="{\"message\": \"Not Found\"}"))
+        self.assertIsNone(self.run_with(exc=FileNotFoundError("gh")))
+        self.assertIsNone(self.run_with(exc=subprocess.TimeoutExpired("gh", 30)))
+
+    def test_windows_runs_gh_only_from_an_absolute_path_entry(self):
+        seen = []
+
+        def fake(cmd, **k):
+            seen.append(cmd[0])
+            return subprocess.CompletedProcess(cmd, 0, stdout="true")
+        with tempfile.TemporaryDirectory() as d:
+            planted = os.path.join(d, "clone")
+            real = os.path.join(d, "bin")
+            for folder in (planted, real):
+                os.makedirs(folder)
+                open(os.path.join(folder, "gh.exe"), "w").close()
+            with mock.patch.object(hooks.os, "name", "nt"), mock.patch.object(hooks.subprocess, "run", fake), \
+                    mock.patch.dict(os.environ, {"PATH": os.pathsep.join([os.path.relpath(planted), real])}):
+                hooks.repo_visibility(("me", "repo"))
+            with mock.patch.object(hooks.os, "name", "nt"), mock.patch.object(hooks.subprocess, "run", fake), \
+                    mock.patch.dict(os.environ, {"PATH": os.path.relpath(planted)}):
+                hooks.repo_visibility(("me", "repo"))
+        self.assertEqual(seen, [os.path.join(real, "gh.exe"), "gh.exe-not-on-PATH"])
 
 
 class FleetApplyRepairs(HooksTestBase):

@@ -359,6 +359,13 @@ lantern hooks import hooks.json [--dry-run]                # another machine
 
 - A clone whose `origin` is not under an owner (an employer's, someone else's)
   is listed as "not owned, left alone" and never changed.
+- `apply` also sets `git config script-helpers.push-tests quick` (quick tests
+  on push, script-helpers 0.52.0 or newer) in owned clones of private
+  repositories that have no value yet. A value already there (`quick`, `off`)
+  is kept. Visibility comes from `gh api repos/<owner>/<repo>`; when `gh` is
+  missing or signed out, the clone is reported as "visibility unknown" and
+  left unset. `status` shows the value, and `export`/`import` carry it
+  (`push_tests`), never over a value the importing clone already has.
 - Hooks a clone already runs keep running: script-helpers chains them
   (`setup-hooks.sh`), and `remove` restores the previous `core.hooksPath`.
 - `setup-hooks.sh` comes from `script-helpers.home` (or `SCRIPT_HELPERS_HOME`),

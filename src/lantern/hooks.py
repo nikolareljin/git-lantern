@@ -8,6 +8,11 @@ else's) is listed and never changed.
 The work is done by script-helpers' setup-hooks.sh (0.50.0 or newer), found at
 `git config --global script-helpers.home`, else in lantern's own vendored
 copy. lantern only decides which clones and which options.
+
+apply also sets `script-helpers.push-tests quick` (quick tests on push,
+script-helpers 0.52.0+) in owned clones of private repositories with no value
+yet. Visibility comes from `gh api`; when it cannot be read the value is left
+unset, never guessed.
 """
 import json
 import os
@@ -24,11 +29,16 @@ class HooksError(Exception):
     """A configuration problem: no owners, no usable setup-hooks.sh (exit 2)."""
 
 
-def _windows_git() -> Optional[str]:
-    """git.exe from an absolute PATH entry. Windows looks for a bare "git" in
+def _windows_exe(name: str) -> Optional[str]:
+    """NAME.exe from an absolute PATH entry. Windows looks for a bare name in
     the current directory first, so an untrusted clone could plant one."""
-    return next((os.path.join(d, "git.exe") for d in os.environ.get("PATH", "").split(os.pathsep)
-                 if os.path.isabs(d) and os.path.isfile(os.path.join(d, "git.exe"))), None)
+    exe = name + ".exe"
+    return next((os.path.join(d, exe) for d in os.environ.get("PATH", "").split(os.pathsep)
+                 if os.path.isabs(d) and os.path.isfile(os.path.join(d, exe))), None)
+
+
+def _windows_git() -> Optional[str]:
+    return _windows_exe("git")
 
 
 def _git(args: List[str], cwd: Optional[str] = None) -> str:
@@ -63,6 +73,48 @@ def origin_url(path: str) -> str:
 def is_owned(path: str, owners: List[str]) -> bool:
     slug = github_slug(origin_url(path))
     return bool(slug) and slug[0] in owners
+
+
+PUSH_TESTS_KEY = "script-helpers.push-tests"
+PUSH_TESTS_DEFAULT = "quick"
+
+
+def push_tests_value(path: str) -> str:
+    """The clone's script-helpers.push-tests, as git resolves it ("" when unset)."""
+    return _git(["-C", path, "config", "--get", PUSH_TESTS_KEY])
+
+
+def set_push_tests(path: str, value: str) -> bool:
+    _git(["-C", path, "config", "--local", PUSH_TESTS_KEY, value])
+    return push_tests_value(path) == value
+
+
+def repo_visibility(slug: Tuple[str, str]) -> Optional[str]:
+    """"private" or "public" from `gh api repos/OWNER/REPO`; None when gh is
+    missing, not signed in, or cannot see the repository."""
+    exe = (_windows_exe("gh") or "gh.exe-not-on-PATH") if os.name == "nt" else "gh"
+    try:
+        result = subprocess.run([exe, "api", "repos/{}/{}".format(*slug), "--jq", ".private"],
+                                check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+                                timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = result.stdout.strip()
+    if result.returncode != 0 or out not in ("true", "false"):
+        return None
+    return "private" if out == "true" else "public"
+
+
+def plan_push_tests(path: str) -> Tuple[Optional[str], str]:
+    """(value to set, or None; a note to print, or "") for one owned clone.
+    A clone with a value, or of a public repository, needs neither."""
+    if push_tests_value(path):
+        return None, ""
+    visibility = repo_visibility(github_slug(origin_url(path)))
+    if visibility is None:
+        return None, "push-tests left unset: visibility unknown (gh api failed; is gh signed in?)"
+    return (PUSH_TESTS_DEFAULT, "") if visibility == "private" else (None, "")
 
 
 def _version_tuple(text: str) -> Tuple[int, ...]:
@@ -237,15 +289,20 @@ def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str
         if state is None:
             raise HooksError("status failed in {}; nothing exported".format(path))
         agents = present_agents(state)
-        if state.get("mode", "none") == "none" and not agents:
+        push = push_tests_value(path)
+        if state.get("mode", "none") == "none" and not agents and not push:
             continue
         remote = normalize_remote(origin_url(path))
         if remote in by_remote:          # another clone of the same repository: one entry, the union
             e = by_remote[remote]
             e["git_hooks"] = e["git_hooks"] or state.get("mode", "none") != "none"
             e["agents"] += [a for a in agents if a not in e["agents"]]
+            if push and "push_tests" not in e:
+                e["push_tests"] = push
             continue
         by_remote[remote] = {"remote": remote, "git_hooks": state.get("mode", "none") != "none", "agents": agents}
+        if push:
+            by_remote[remote]["push_tests"] = push
         entries.append(by_remote[remote])
     return {"version": EXPORT_VERSION, "kind": "lantern-hooks", "owners": owners, "repos": entries}
 
@@ -271,6 +328,9 @@ def load_export(path: str) -> Dict[str, object]:
         if not ok:
             raise HooksError("{}: repos[{}] needs remote (text), git_hooks (true/false) and agents "
                              "(a list of claude,{})".format(path, i, ",".join(AGENTS)))
+        push = entry.get("push_tests")
+        if push is not None and not (isinstance(push, str) and re.fullmatch(r"[a-z]+", push)):
+            raise HooksError("{}: repos[{}].push_tests must be a word such as quick or off".format(path, i))
         entry["remote"] = normalize_remote(entry["remote"])
     return data
 
@@ -365,8 +425,9 @@ def cmd_status(repos: List[str], args) -> int:
             continue
         flag = ("  TAKEN OVER (lantern hooks repair)" if st.get("taken_over") == "yes" else
                 "  OWN HOOKS ONLY, NOT SCANNED (lantern hooks repair)" if st.get("unscanned") == "yes" else "")
-        print("{:<40} git hooks: {:<8} agents: {}{}".format(
-            _label(path, args), st.get("mode", "?"), ",".join(present_agents(st)) or "-", flag))
+        print("{:<40} git hooks: {:<8} agents: {:<14} push-tests: {}{}".format(
+            _label(path, args), st.get("mode", "?"), ",".join(present_agents(st)) or "-",
+            push_tests_value(path) or "-", flag))
     return 1 if failed else 0
 
 
@@ -387,23 +448,34 @@ def cmd_apply(repos: List[str], args) -> int:
             failed += 1
             continue
         steps = plan_apply(state, agents)
-        if not steps:
+        push, note = plan_push_tests(path)
+        if note:
+            print("{:<40} {}".format(name, note))
+        if not steps and push is None:
             print("{:<40} up to date".format(name))
             continue
+        todo = [describe(s) for s in steps] + (["git config {} {}".format(PUSH_TESTS_KEY, push)] if push else [])
         if batch and done >= batch:
-            print("{:<40} next batch: {}".format(name, "; ".join(describe(s) for s in steps)))
+            print("{:<40} next batch: {}".format(name, "; ".join(todo)))
             continue
         done += 1
+        if dry:
+            for item in todo:
+                print("{:<40} would run: {}".format(name, item))
+            continue
+        ok = True
         for step in steps:
-            if dry:
-                print("{:<40} would run: {}".format(name, describe(step)))
-                continue
             rc, out = run_setup(script, path, step)
             print("{:<40} {}: {}".format(name, describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
             if rc != 0:
                 failed += 1
+                ok = False
                 print("    " + out.strip().replace("\n", "\n    "))
                 break
+        if ok and push:
+            good = set_push_tests(path, push)
+            print("{:<40} git config {} {}: {}".format(name, PUSH_TESTS_KEY, push, "ok" if good else "FAILED"))
+            failed += 0 if good else 1
     return 1 if failed else 0
 
 
@@ -503,6 +575,7 @@ def cmd_import(repos: List[str], args) -> int:
                 continue
             steps = plan_apply(st, agents) if entry.get("git_hooks") else agent_commands(
                 [a for a in agents if a not in present_agents(st)])
+            ok = True
             for step in steps:
                 if getattr(args, "dry_run", False):
                     print("{:<40} would run: {}".format(_label(path, args), describe(step)))
@@ -511,8 +584,19 @@ def cmd_import(repos: List[str], args) -> int:
                 print("{:<40} {}: {}".format(_label(path, args), describe(step), "ok" if rc == 0 else "FAILED (exit {})".format(rc)))
                 if rc != 0:
                     failed += 1
+                    ok = False
                     print("    " + out.strip().replace("\n", "\n    "))
                     break
+            # The exported value, only where this clone has none of its own.
+            push = entry.get("push_tests")
+            if ok and push and not push_tests_value(path):
+                if getattr(args, "dry_run", False):
+                    print("{:<40} would run: git config {} {}".format(_label(path, args), PUSH_TESTS_KEY, push))
+                else:
+                    good = set_push_tests(path, push)
+                    print("{:<40} git config {} {}: {}".format(_label(path, args), PUSH_TESTS_KEY, push,
+                                                              "ok" if good else "FAILED"))
+                    failed += 0 if good else 1
     for remote in unmatched:
         print("not cloned here (or not under an owner): {}".format(remote))
     return 1 if failed else 0
