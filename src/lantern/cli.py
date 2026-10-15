@@ -1012,6 +1012,11 @@ def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: 
     )
     if not todo_file:
         return
+    # A relative path means relative to the selected repository, not to
+    # wherever lantern was started.
+    todo_file = os.path.expanduser(todo_file)
+    if not os.path.isabs(todo_file):
+        todo_file = os.path.join(repo_path, todo_file)
     todo_file = os.path.abspath(todo_file)
     if not os.path.isfile(todo_file) and not os.path.isdir(todo_file):
         _dialog_msgbox("Error", f"TODO file not found:\n{todo_file}", height, width)
