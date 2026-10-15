@@ -2662,7 +2662,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             hooks_action = _dialog_menu("Hooks", "script-helpers hooks on the clones under the workspace root:", [
                 ("status", "What is set up in each clone"),
-                ("apply", "Set up git hooks where missing (shows the plan first)"),
+                ("apply", "Set up git hooks where missing, push-tests in private clones (shows the plan first)"),
                 ("repair", "Re-chain clones whose core.hooksPath another tool replaced"),
                 ("back", "Back to main menu"),
             ], height, width)
@@ -5892,7 +5892,7 @@ def build_parser() -> argparse.ArgumentParser:
     hooks_p = sub.add_parser("hooks", help="script-helpers per-repository hooks across your repositories")
     hooks_sub = hooks_p.add_subparsers(dest="hooks_command", required=True)
     for name, text in (("status", "what is set up in each clone"),
-                       ("apply", "set up the hooks in owned clones that lack them"),
+                       ("apply", "set up the hooks in owned clones that lack them, and push-tests quick in private ones"),
                        ("repair", "re-chain owned clones whose core.hooksPath another tool replaced"),
                        ("remove", "undo the setup (restores what was there before)"),
                        ("export", "write the setup of owned clones to a file, for another machine"),
