@@ -4,6 +4,12 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release `homebrew` job: a rerun after the tap branch was pushed exited 0
+  without opening the tap pull request ("nothing to commit" ended the step). It
+  now opens the PR whenever the branch's formula differs from the tap's `main`.
+
 ## 2026-10-15 — v0.10.0
 
 ### Added
