@@ -16,9 +16,6 @@ All notable changes to git-lantern are documented in this file.
   still exported, so the tests' own git calls changed the repository being
   committed to (set `core.bare`, moved the branch to a test commit). The hook
   and `tests/conftest.py` now clear them.
-
-### Fixed
-
 - Release `homebrew` job: the generated formula now passes `brew style` (Sorbet
   sigil, frozen-string-literal comment, class comment). It failed on 0.9.0 and
   0.9.1.
