@@ -5,8 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # git exports these to hooks; left set, the tests' own git calls act on this
 # repository instead of their temp directories (tests/conftest.py clears them too).
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
-  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_PREFIX GIT_QUARANTINE_PATH
+# shellcheck disable=SC2046  # one variable name per word
+unset $(git rev-parse --local-env-vars 2>/dev/null || true) \
+  GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 
 if [[ "${SKIP_LANTERN_PRECOMMIT:-}" == "1" ]]; then
   echo "Skipping git-lantern pre-commit checks (SKIP_LANTERN_PRECOMMIT=1)."

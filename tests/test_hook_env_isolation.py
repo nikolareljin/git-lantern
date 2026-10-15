@@ -27,8 +27,10 @@ class HookEnvironment(unittest.TestCase):
             _git("-C", decoy, "-c", "user.name=t", "-c", "user.email=t@example.com",
                  "commit", "-q", "--allow-empty", "-m", "decoy")
             before = (_git("-C", decoy, "rev-parse", "HEAD"), open(os.path.join(decoy, ".git", "config")).read())
+            # What `git -c core.bare=true commit` exports to its hook, on top of the repository.
             env = dict(os.environ, GIT_DIR=os.path.join(decoy, ".git"),
                        GIT_INDEX_FILE=os.path.join(decoy, ".git", "index"),
+                       GIT_CONFIG_PARAMETERS="'core.bare'='true'",
                        PYTHONPATH=os.path.join(os.path.dirname(HERE), "src"))
             run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", INNER],
                                  cwd=os.path.dirname(HERE), env=env, stdout=subprocess.PIPE,
@@ -36,6 +38,16 @@ class HookEnvironment(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stdout)
             after = (_git("-C", decoy, "rev-parse", "HEAD"), open(os.path.join(decoy, ".git", "config")).read())
             self.assertEqual(after, before)
+
+    def test_every_variable_git_lists_is_cleared(self):
+        names = _git("rev-parse", "--local-env-vars").split()
+        self.assertIn("GIT_CONFIG_PARAMETERS", names)
+        env = dict(os.environ, **{n: "leaked" for n in names})
+        probe = ("import os, sys; sys.path.insert(0, sys.argv[1]); import conftest; "
+                 "print(' '.join(n for n in sys.argv[2:] if n in os.environ))")
+        run = subprocess.run([sys.executable, "-c", probe, HERE, *names], env=env, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True)
+        self.assertEqual((run.returncode, run.stdout.strip()), (0, ""), run.stdout)
 
 
 if __name__ == "__main__":
