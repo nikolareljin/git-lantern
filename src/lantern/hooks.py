@@ -90,14 +90,14 @@ def set_push_tests(path: str, value: str) -> bool:
     return push_tests_value(path, local=True) == value
 
 
-_GITHUB_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_GITHUB_NAME = re.compile(r"[A-Za-z0-9_.-]+")
 
 
 def repo_visibility(slug: Tuple[str, str]) -> Optional[str]:
     """"private" or "public" from `gh api repos/OWNER/REPO`; None when gh is
     missing, not signed in, or cannot see the repository, and for a name
     GitHub would not allow (it goes into the API path)."""
-    if not all(_GITHUB_NAME.match(part or "") and part not in (".", "..") for part in slug):
+    if not all(_GITHUB_NAME.fullmatch(part or "") and part not in (".", "..") for part in slug):
         return None
     exe = (_windows_exe("gh") or "gh.exe-not-on-PATH") if os.name == "nt" else "gh"
     try:

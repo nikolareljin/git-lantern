@@ -435,7 +435,7 @@ class RepoVisibility(unittest.TestCase):
         self.assertEqual(seen[0][1:5], ["api", "--hostname", "github.com", "repos/me/repo"])
 
     def test_a_name_github_would_not_allow_is_never_sent(self):
-        for slug in (("me", ".."), ("me", "."), ("me", "x?per_page=1"), ("me", "a b"), ("me", "x#y"), ("", "x")):
+        for slug in (("me", ".."), ("me", "."), ("me", "x?per_page=1"), ("me", "a b"), ("me", "x#y"), ("me", "x\n"), ("", "x")):
             with mock.patch.object(hooks.subprocess, "run", side_effect=AssertionError("ran")):
                 self.assertIsNone(hooks.repo_visibility(slug), slug)
 
