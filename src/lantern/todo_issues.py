@@ -16,6 +16,14 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 TODO_START = "[TODO]"
 TODO_END = "[/TODO]"
 GH_NOT_FOUND_ERROR = "gh CLI not found. Install GitHub CLI and ensure 'gh' is in PATH."
+# GitHub rejects issue bodies longer than this.
+MAX_BODY_CHARS = 65536
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def safe(text: str) -> str:
+    """Escape control characters so file content cannot drive the terminal."""
+    return CONTROL_CHARS_RE.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
 
 
 @dataclass
@@ -149,7 +157,7 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
     def flush() -> None:
         description = "\n".join(desc_lines).strip()
         if title and not description:
-            print(f"[SKIPPED] {title}: empty description")
+            print(f"[SKIPPED] {safe(title)}: empty description")
         elif title:
             items.append(TodoItem(item_id=item_id, title=title, description=description))
 
@@ -272,13 +280,13 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
     try:
         meta, body = split_front_matter(read_markdown_text(path))
     except UnicodeDecodeError:
-        print(f"[SKIPPED] {path.name}: not valid UTF-8")
+        print(f"[SKIPPED] {safe(path.name)}: not valid UTF-8")
         return None
     except OSError as exc:
-        print(f"[SKIPPED] {path.name}: {exc.strerror or exc}")
+        print(f"[SKIPPED] {safe(path.name)}: {exc.strerror or exc}")
         return None
     except FrontMatterError as exc:
-        print(f"[SKIPPED] {path.name}: {exc}")
+        print(f"[SKIPPED] {safe(path.name)}: {exc}")
         return None
     title = _as_text(meta.get("title"))
     body_lines = body.splitlines()
@@ -293,11 +301,11 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
                 del body_lines[index]
                 break
     if not title:
-        print(f"[SKIPPED] {path.name}: no title (front matter 'title' or '# ' heading)")
+        print(f"[SKIPPED] {safe(path.name)}: no title (front matter 'title' or '# ' heading)")
         return None
     description = "\n".join(body_lines).strip()
     if not description:
-        print(f"[SKIPPED] {path.name}: empty description")
+        print(f"[SKIPPED] {safe(path.name)}: empty description")
         return None
     raw_labels = meta.get("labels", [])
     if isinstance(raw_labels, str):
@@ -312,9 +320,14 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
 
 def read_issue_dir(dir_path: Path) -> List[TodoItem]:
     items: List[TodoItem] = []
+    root = dir_path.resolve()
     for path in sorted(dir_path.iterdir()):
         # Dotfiles (`.draft.md`, editor backups) are not issues.
         if path.name.startswith(".") or path.suffix.lower() != ".md" or not path.is_file():
+            continue
+        # A cloned repo could link issues/x.md to ~/.ssh/id_rsa.
+        if path.is_symlink() and root not in path.resolve().parents:
+            print(f"[SKIPPED] {safe(path.name)}: symlink points outside {safe(str(dir_path))}")
             continue
         item = parse_issue_file(path)
         if item is not None:
@@ -403,7 +416,7 @@ def create_issue(
             merged_labels.append(label)
     if dry_run:
         suffix = f" [labels: {', '.join(merged_labels)}]" if merged_labels else ""
-        print(f"[DRY-RUN] Would create issue: {item.title}{suffix}")
+        print(f"[DRY-RUN] Would create issue: {safe(item.title)}{safe(suffix)}")
         return
 
     cmd = ["gh", "issue", "create", "--title", item.title, "--body", body]
@@ -417,7 +430,7 @@ def create_issue(
     except FileNotFoundError as exc:
         raise RuntimeError(GH_NOT_FOUND_ERROR) from exc
     created = result.stdout.strip() or item.title
-    print(f"[CREATED] {created}")
+    print(f"[CREATED] {safe(created)}")
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -502,8 +515,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     skipped = 0
     for item in items:
         if is_duplicate(item, seen_fingerprints):
-            print(f"[SKIPPED] Duplicate title/body fingerprint: {item.title}")
+            print(f"[SKIPPED] Duplicate title/body fingerprint: {safe(item.title)}")
             skipped += 1
+            continue
+        body_chars = len(build_issue_body(item))
+        if body_chars > MAX_BODY_CHARS:
+            print(
+                f"[SKIPPED] {safe(item.title)}: body is {body_chars} characters,"
+                f" GitHub allows {MAX_BODY_CHARS}"
+            )
             continue
 
         try:
@@ -513,7 +533,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 1
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or "").strip()
-            print(f"[ERROR] Failed to create issue: {item.title}", file=sys.stderr)
+            print(f"[ERROR] Failed to create issue: {safe(item.title)}", file=sys.stderr)
             if stderr:
                 print(stderr, file=sys.stderr)
             continue

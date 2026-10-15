@@ -607,6 +607,12 @@ title and body, open or closed).
   title, an unclosed front matter block, invalid UTF-8 or a read error is
   skipped with a message; the run continues.
 - Labels from `--label` and front matter are both applied; `--dry-run` lists them.
+- In a directory, a `*.md` symlink whose target is outside that directory is
+  skipped, so a cloned repo cannot publish a file such as `~/.ssh/id_rsa`.
+  A symlinked `--todo-file` path itself is followed.
+- An item whose issue body exceeds 65536 characters (GitHub's limit) is skipped
+  with a message.
+- Control characters in titles and file names are printed escaped (`\x1b`).
 
 **Examples**:
 ```bash

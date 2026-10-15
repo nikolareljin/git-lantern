@@ -12,6 +12,9 @@ All notable changes to git-lantern are documented in this file.
   (`title`, `labels`, `id`). Front matter labels are added to the issue.
   A leading `Description:` label in a `.md` item is dropped, so the same item
   in `.txt` and `.md` gives the same issue body.
+  In a directory, `*.md` symlinks pointing outside it are skipped.
+- `lantern todo issues` skips an item whose body exceeds GitHub's 65536
+  character limit, and escapes control characters in printed titles.
 
 ### Fixed
 

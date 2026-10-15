@@ -352,3 +352,51 @@ def test_unreadable_single_file_exits_1_without_traceback(tmp_path, capsys):
         md.chmod(0o600)
     assert rc == 1
     assert "cannot read TODO file" in capsys.readouterr().err
+
+
+def test_issue_dir_refuses_symlink_leaving_directory(tmp_path, capsys):
+    secret = tmp_path / "secret.md"
+    secret.write_text("# Key\n\nPRIVATE KEY\n", encoding="utf-8")
+    issues = tmp_path / "issues"
+    issues.mkdir()
+    (issues / "a.md").write_text("# Kept\n\nBody.\n", encoding="utf-8")
+    (issues / "b.md").write_text("# Linked inside\n\nBody b.\n", encoding="utf-8")
+    (issues / "c.md").symlink_to(issues / "b.md")
+    (issues / "leak.md").symlink_to(secret)
+
+    items = todo_issues.read_todo_file(issues)
+
+    assert [i.title for i in items] == ["Kept", "Linked inside", "Linked inside"]
+    assert "PRIVATE KEY" not in "".join(i.description for i in items)
+    assert "[SKIPPED] leak.md: symlink points outside" in capsys.readouterr().out
+
+
+def test_oversized_body_is_skipped_without_calling_gh(tmp_path, monkeypatch, capsys):
+    issues = tmp_path / "issues"
+    issues.mkdir()
+    (issues / "big.md").write_text("# Big\n\n" + "x" * 200_000 + "\n", encoding="utf-8")
+    (issues / "ok.md").write_text("# Ok\n\nSmall.\n", encoding="utf-8")
+    calls = []
+
+    def _fake_run(cmd, **_kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="https://x/1\n", stderr="")
+
+    monkeypatch.setattr(todo_issues, "fetch_existing_issues", lambda *_a, **_k: set())
+    monkeypatch.setattr(todo_issues.subprocess, "run", _fake_run)
+
+    assert todo_issues.main(["--todo-file", str(issues)]) == 0
+    assert [c[c.index("--title") + 1] for c in calls] == ["Ok"]
+    out = capsys.readouterr().out
+    assert "[SKIPPED] Big: body is 200000 characters" in out
+    assert "Created: 1" in out
+
+
+def test_control_characters_in_printed_titles_are_escaped(tmp_path, capsys):
+    todo = tmp_path / "TODO.md"
+    todo.write_text("## Evil \x1b]0;pwn\x07title\n\nBody.\n", encoding="utf-8")
+    items = todo_issues.read_todo_file(todo)
+    todo_issues.create_issue(items[0], None, ["l\x1b[2J"], dry_run=True)
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out
+    assert "Evil \\x1b]0;pwn\\x07title" in out
