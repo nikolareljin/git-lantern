@@ -341,6 +341,18 @@ class PushTests(HooksTestBase):
         with mock.patch.object(hooks, "set_push_tests", return_value=False):
             self.assertEqual(self.run_cmd("apply", "--only", "private"), 1)
 
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "needs POSIX permissions that bind the user")
+    def test_a_real_failed_config_write_is_caught(self):
+        gitdir = os.path.join(self.private, ".git")
+        self.run_cmd("apply", "--only", "private")
+        git("config", "--unset", "script-helpers.push-tests", cwd=self.private)   # hooks set; only the value left
+        os.chmod(gitdir, 0o555)                                      # no config.lock can be made
+        self.addCleanup(os.chmod, gitdir, 0o755)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(self.run_cmd("apply", "--only", "private"), 1)
+        self.assertIn("push-tests quick: FAILED", out.getvalue())
+
     def test_batch_counts_a_clone_that_only_needs_push_tests(self):
         self.run_cmd("apply", "--only", "private")
         git("config", "--unset", "script-helpers.push-tests", cwd=self.private)   # hooks in place, value gone
@@ -376,6 +388,14 @@ class PushTests(HooksTestBase):
         self.assertEqual(push_tests(fresh), "quick")
         self.assertEqual(push_tests(kept), "off")
 
+    def test_a_global_value_is_respected_but_not_exported_as_the_repositorys(self):
+        git("config", "--global", "script-helpers.push-tests", "off")
+        self.assertEqual(self.run_cmd("apply"), 0)
+        self.assertEqual(push_tests(self.private), "")              # the global "off" is a value: kept
+        out = os.path.join(self.tmp.name, "hooks.json")
+        self.run_cmd("export", out)
+        self.assertFalse([r for r in json.load(open(out))["repos"] if "push_tests" in r])
+
     def test_import_refuses_a_bad_value(self):
         bad = os.path.join(self.tmp.name, "bad.json")
         for value in ("quick; rm -rf", 1, "--global"):
@@ -403,6 +423,21 @@ class RepoVisibility(unittest.TestCase):
         self.assertIsNone(self.run_with(out="{\"message\": \"Not Found\"}"))
         self.assertIsNone(self.run_with(exc=FileNotFoundError("gh")))
         self.assertIsNone(self.run_with(exc=subprocess.TimeoutExpired("gh", 30)))
+
+    def test_asks_github_com_whatever_gh_host_says(self):
+        seen = []
+
+        def fake(cmd, **k):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="true")
+        with mock.patch.object(hooks.subprocess, "run", fake), mock.patch.dict(os.environ, {"GH_HOST": "ghe.example"}):
+            hooks.repo_visibility(("me", "repo"))
+        self.assertEqual(seen[0][1:5], ["api", "--hostname", "github.com", "repos/me/repo"])
+
+    def test_a_name_github_would_not_allow_is_never_sent(self):
+        for slug in (("me", ".."), ("me", "."), ("me", "x?per_page=1"), ("me", "a b"), ("me", "x#y"), ("", "x")):
+            with mock.patch.object(hooks.subprocess, "run", side_effect=AssertionError("ran")):
+                self.assertIsNone(hooks.repo_visibility(slug), slug)
 
     def test_windows_runs_gh_only_from_an_absolute_path_entry(self):
         seen = []

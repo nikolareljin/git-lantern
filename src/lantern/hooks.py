@@ -79,22 +79,30 @@ PUSH_TESTS_KEY = "script-helpers.push-tests"
 PUSH_TESTS_DEFAULT = "quick"
 
 
-def push_tests_value(path: str) -> str:
-    """The clone's script-helpers.push-tests, as git resolves it ("" when unset)."""
-    return _git(["-C", path, "config", "--get", PUSH_TESTS_KEY])
+def push_tests_value(path: str, local: bool = False) -> str:
+    """The clone's script-helpers.push-tests ("" when unset): as git resolves
+    it (a global value counts), or with local=True only the clone's own."""
+    return _git(["-C", path, "config", *(["--local"] if local else []), "--get", PUSH_TESTS_KEY])
 
 
 def set_push_tests(path: str, value: str) -> bool:
     _git(["-C", path, "config", "--local", PUSH_TESTS_KEY, value])
-    return push_tests_value(path) == value
+    return push_tests_value(path, local=True) == value
+
+
+_GITHUB_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def repo_visibility(slug: Tuple[str, str]) -> Optional[str]:
     """"private" or "public" from `gh api repos/OWNER/REPO`; None when gh is
-    missing, not signed in, or cannot see the repository."""
+    missing, not signed in, or cannot see the repository, and for a name
+    GitHub would not allow (it goes into the API path)."""
+    if not all(_GITHUB_NAME.match(part or "") and part not in (".", "..") for part in slug):
+        return None
     exe = (_windows_exe("gh") or "gh.exe-not-on-PATH") if os.name == "nt" else "gh"
     try:
-        result = subprocess.run([exe, "api", "repos/{}/{}".format(*slug), "--jq", ".private"],
+        result = subprocess.run([exe, "api", "--hostname", "github.com", "repos/{}/{}".format(*slug),
+                                 "--jq", ".private"],
                                 check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                                 timeout=30)
@@ -113,7 +121,7 @@ def plan_push_tests(path: str) -> Tuple[Optional[str], str]:
         return None, ""
     visibility = repo_visibility(github_slug(origin_url(path)))
     if visibility is None:
-        return None, "push-tests left unset: visibility unknown (gh api failed; is gh signed in?)"
+        return None, "push-tests left unset: visibility unknown (gh missing or signed out, no access, or a name GitHub rejects)"
     return (PUSH_TESTS_DEFAULT, "") if visibility == "private" else (None, "")
 
 
@@ -289,7 +297,7 @@ def export_entries(script: str, repos: List[str], owners: List[str]) -> Dict[str
         if state is None:
             raise HooksError("status failed in {}; nothing exported".format(path))
         agents = present_agents(state)
-        push = push_tests_value(path)
+        push = push_tests_value(path, local=True)      # a global value is this machine's, not the repository's
         if state.get("mode", "none") == "none" and not agents and not push:
             continue
         remote = normalize_remote(origin_url(path))
