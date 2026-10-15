@@ -724,7 +724,7 @@ lantern pr sweep [OPTIONS] [REPO...]
 - For each remaining repo, finds open PRs and counts unresolved review threads via
   the GitHub GraphQL API; only PRs with at least one unresolved thread are listed.
 - Discovery and listing only — it does **not** dispatch fixes itself. Use the output
-  to drive a per-PR fix workflow (e.g. `implement_pr.txt`).
+  to drive a per-PR fix workflow.
 - GitHub servers only; selecting a non-GitHub provider fails fast.
 
 **Requirements**:

@@ -151,7 +151,7 @@ All notable changes to git-lantern are documented in this file.
   - Supports `--dry-run` for a non-interactive preview and `--json` for machine-readable
     output suited to Claude Code subagent dispatch.
   - Scope: discovery and listing only. The command does not dispatch fix subagents
-    itself; it emits the eligible PRs for a downstream workflow (e.g. `implement_pr.txt`).
+    itself; it emits the eligible PRs for a downstream workflow.
   - Restricted to GitHub servers; selecting a non-GitHub provider fails fast.
   - Added `src/lantern/pr_sweep.py` (discovery logic) and `src/lantern/portfolio_client.py`
     (portfolio API HTTP client).

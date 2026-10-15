@@ -5185,7 +5185,7 @@ def cmd_pr_sweep(args: argparse.Namespace) -> int:
 
     print(
         "\nThis command lists eligible PRs only; it does not dispatch fixes itself.\n"
-        "To act on them, run a fix workflow (e.g. implement_pr.txt) per PR below:"
+        "To act on them, run a fix workflow per PR below:"
     )
     for j in selected:
         print(f"  {j['repo']}  PR #{j['pr']}  {j['url']}")
