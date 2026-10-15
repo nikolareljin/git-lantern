@@ -4,6 +4,12 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release `homebrew` job: the generated formula now passes `brew style` (Sorbet
+  sigil, frozen-string-literal comment, class comment). It failed on 0.9.0 and
+  0.9.1.
+
 ## [0.9.1] - 2026-10-14
 
 ### Changed
