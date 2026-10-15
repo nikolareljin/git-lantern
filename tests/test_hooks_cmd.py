@@ -396,6 +396,16 @@ class PushTests(HooksTestBase):
         self.run_cmd("export", out)
         self.assertFalse([r for r in json.load(open(out))["repos"] if "push_tests" in r])
 
+    def test_import_dry_run_lists_the_value_and_writes_nothing(self):
+        exp = os.path.join(self.tmp.name, "x.json")
+        with open(exp, "w") as fh:
+            json.dump({"kind": "lantern-hooks", "version": 1, "repos": [
+                {"remote": "github.com/me/private", "git_hooks": False, "agents": [], "push_tests": "quick"}]}, fh)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(self.run_cmd("import", exp, "--dry-run"), 0)
+        self.assertIn("would run: git config script-helpers.push-tests quick", out.getvalue())
+        self.assertEqual(push_tests(self.private), "")
+
     def test_import_refuses_a_bad_value(self):
         bad = os.path.join(self.tmp.name, "bad.json")
         for value in ("quick; rm -rf", 1, "--global"):

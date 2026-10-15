@@ -2662,7 +2662,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             hooks_action = _dialog_menu("Hooks", "script-helpers hooks on the clones under the workspace root:", [
                 ("status", "What is set up in each clone"),
-                ("apply", "Set up git hooks where missing (shows the plan first)"),
+                ("apply", "Set up git hooks where missing, push-tests in private clones (shows the plan first)"),
                 ("repair", "Re-chain clones whose core.hooksPath another tool replaced"),
                 ("back", "Back to main menu"),
             ], height, width)
