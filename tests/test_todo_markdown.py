@@ -177,3 +177,44 @@ def test_front_matter_parser():
         ["title: 'A: b'", "labels:", "- x", "- 'y'", "id: \"5\"", "empty: []"]
     )
     assert meta == {"title": "A: b", "labels": ["x", "y"], "id": "5", "empty": []}
+
+
+def test_md_bom_crlf_and_mixed_fences(tmp_path):
+    todo = tmp_path / "TODO.md"
+    todo.write_bytes(
+        b"\xef\xbb\xbf## First\r\nbody1\r\n~~~\r\n```\r\n## not a heading\r\n~~~\r\n"
+        b"### sub\r\n## Fix `foo` ##\r\n\r\nID: 7\r\nbody2\r\n"
+    )
+    items = todo_issues.read_todo_file(todo)
+    assert [(i.item_id, i.title) for i in items] == [("", "First"), ("7", "Fix `foo`")]
+    assert "## not a heading" in items[0].description
+    assert "### sub" in items[0].description
+
+
+def test_issue_dir_bad_files_are_skipped(tmp_path, capsys):
+    (tmp_path / "bad.md").write_bytes(b"# T\nhi \xff\n")
+    (tmp_path / "open.md").write_text("---\ntitle: x\nbody\n", encoding="utf-8")
+    (tmp_path / "UP.MD").write_text("# Upper\nbody\n", encoding="utf-8")
+    (tmp_path / "bom.md").write_bytes(
+        b"\xef\xbb\xbf---\r\ntitle: \"a: b\"\r\nlabels: x, y z\r\n---\r\nbody\r\n"
+    )
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "s.md").write_text("# Sub\nbody\n", encoding="utf-8")
+    items = todo_issues.read_todo_file(tmp_path)
+    assert [(i.title, i.labels) for i in items] == [("Upper", []), ("a: b", ["x", "y z"])]
+    out = capsys.readouterr().out
+    assert "bad.md: not valid UTF-8" in out
+    assert "open.md: front matter" in out
+
+
+def test_non_utf8_md_file_reports_error(tmp_path, capsys):
+    todo = tmp_path / "TODO.md"
+    todo.write_bytes(b"## T\n\xff\n")
+    assert todo_issues.main(["--todo-file", str(todo)]) == 1
+    assert "not valid UTF-8" in capsys.readouterr().err
+
+
+def test_dry_run_shows_labels(capsys):
+    item = todo_issues.TodoItem(item_id="", title="T", description="d", labels=["two words"])
+    todo_issues.create_issue(item, None, ["cli"], dry_run=True)
+    assert "[labels: cli, two words]" in capsys.readouterr().out

@@ -598,7 +598,10 @@ title and body, open or closed).
   If the file has a `[TODO]...[/TODO]` block, only that block is read.
 - Directory: each `*.md` file (not recursive) is one issue. Optional front
   matter sets `title`, `labels` and `id`; without `title` the first `# `
-  heading is used, and a file with neither is skipped with a message.
+  heading is used. `labels` is a list (`[a, b]` or `- a` lines) or a
+  comma-separated string. A file with no title, an unclosed front matter
+  block or invalid UTF-8 is skipped with a message; the run continues.
+- Labels from `--label` and front matter are both applied; `--dry-run` lists them.
 
 **Examples**:
 ```bash

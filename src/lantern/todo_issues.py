@@ -106,6 +106,26 @@ def parse_todo_items(text: str) -> List[TodoItem]:
 
 
 MD_ID_RE = re.compile(r"^(?:\*\*ID:\*\*|ID:)\s*(.*)$")
+MD_H1_RE = re.compile(r"^ {0,3}#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
+MD_H2_RE = re.compile(r"^ {0,3}##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
+MD_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def _update_fence(line: str, fence: str) -> str:
+    """Return the open fence marker after `line` ("" when outside a fence).
+
+    A fence closes only on the same character with at least the same length,
+    so a ``` line inside a ~~~ block does not end it.
+    """
+    match = MD_FENCE_RE.match(line)
+    if not match:
+        return fence
+    marker = match.group(1)
+    if not fence:
+        return marker
+    if marker[0] == fence[0] and len(marker) >= len(fence) and not line.strip()[len(marker):].strip():
+        return ""
+    return fence
 
 
 def parse_markdown_items(text: str) -> List[TodoItem]:
@@ -120,7 +140,7 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
     item_id = ""
     desc_lines: List[str] = []
     expect_id = False
-    in_fence = False
+    fence = ""
 
     def flush() -> None:
         description = "\n".join(desc_lines).strip()
@@ -129,11 +149,12 @@ def parse_markdown_items(text: str) -> List[TodoItem]:
 
     for raw_line in block.splitlines():
         line = raw_line.strip()
-        if line.startswith("```") or line.startswith("~~~"):
-            in_fence = not in_fence
-        if not in_fence and raw_line.startswith("## "):
+        was_in_fence = bool(fence)
+        fence = _update_fence(raw_line, fence)
+        heading = None if was_in_fence else MD_H2_RE.match(raw_line)
+        if heading:
             flush()
-            title = raw_line[3:].strip()
+            title = heading.group(1).strip()
             item_id = ""
             desc_lines = []
             expect_id = True
@@ -196,6 +217,10 @@ def parse_front_matter(lines: Sequence[str]) -> Dict[str, FrontMatterValue]:
     return data
 
 
+class FrontMatterError(ValueError):
+    """Front matter opened with `---` but never closed."""
+
+
 def split_front_matter(text: str) -> Tuple[Dict[str, FrontMatterValue], str]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
@@ -203,7 +228,12 @@ def split_front_matter(text: str) -> Tuple[Dict[str, FrontMatterValue], str]:
     for index in range(1, len(lines)):
         if lines[index].strip() == "---":
             return parse_front_matter(lines[1:index]), "\n".join(lines[index + 1 :])
-    return {}, text
+    raise FrontMatterError("front matter opened with '---' is never closed")
+
+
+def read_markdown_text(path: Path) -> str:
+    """Read a Markdown file as UTF-8, dropping a leading byte order mark."""
+    return path.read_text(encoding="utf-8-sig")
 
 
 def _as_text(value: Optional[FrontMatterValue]) -> str:
@@ -214,16 +244,24 @@ def _as_text(value: Optional[FrontMatterValue]) -> str:
 
 def parse_issue_file(path: Path) -> Optional[TodoItem]:
     """Parse one Markdown issue file; return None (with a message) when unusable."""
-    meta, body = split_front_matter(path.read_text(encoding="utf-8"))
+    try:
+        meta, body = split_front_matter(read_markdown_text(path))
+    except UnicodeDecodeError:
+        print(f"[SKIPPED] {path.name}: not valid UTF-8")
+        return None
+    except FrontMatterError as exc:
+        print(f"[SKIPPED] {path.name}: {exc}")
+        return None
     title = _as_text(meta.get("title"))
     body_lines = body.splitlines()
     if not title:
-        in_fence = False
+        fence = ""
         for index, line in enumerate(body_lines):
-            if line.strip().startswith(("```", "~~~")):
-                in_fence = not in_fence
-            if not in_fence and line.startswith("# "):
-                title = line[2:].strip()
+            was_in_fence = bool(fence)
+            fence = _update_fence(line, fence)
+            heading = None if was_in_fence else MD_H1_RE.match(line)
+            if heading:
+                title = heading.group(1).strip()
                 del body_lines[index]
                 break
     if not title:
@@ -235,19 +273,19 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
         return None
     raw_labels = meta.get("labels", [])
     if isinstance(raw_labels, str):
-        raw_labels = [raw_labels] if raw_labels else []
+        raw_labels = raw_labels.split(",")
     return TodoItem(
         item_id=_as_text(meta.get("id")),
         title=title,
         description=description,
-        labels=[label for label in raw_labels if label],
+        labels=[label.strip() for label in raw_labels if label.strip()],
     )
 
 
 def read_issue_dir(dir_path: Path) -> List[TodoItem]:
     items: List[TodoItem] = []
-    for path in sorted(dir_path.glob("*.md")):
-        if not path.is_file():
+    for path in sorted(dir_path.iterdir()):
+        if path.suffix.lower() != ".md" or not path.is_file():
             continue
         item = parse_issue_file(path)
         if item is not None:
@@ -260,10 +298,9 @@ def read_todo_file(todo_path: Path) -> List[TodoItem]:
         raise FileNotFoundError(f"TODO file not found: {todo_path}")
     if todo_path.is_dir():
         return read_issue_dir(todo_path)
-    text = todo_path.read_text(encoding="utf-8")
     if todo_path.suffix.lower() == ".md":
-        return parse_markdown_items(text)
-    return parse_todo_items(text)
+        return parse_markdown_items(read_markdown_text(todo_path))
+    return parse_todo_items(todo_path.read_text(encoding="utf-8"))
 
 
 def run_gh_json(command: Sequence[str]) -> object:
@@ -331,15 +368,16 @@ def create_issue(
     dry_run: bool,
 ) -> None:
     body = build_issue_body(item)
-    if dry_run:
-        print(f"[DRY-RUN] Would create issue: {item.title}")
-        return
-
-    cmd = ["gh", "issue", "create", "--title", item.title, "--body", body]
     merged_labels: List[str] = []
     for label in list(labels) + item.labels:
         if label not in merged_labels:
             merged_labels.append(label)
+    if dry_run:
+        suffix = f" [labels: {', '.join(merged_labels)}]" if merged_labels else ""
+        print(f"[DRY-RUN] Would create issue: {item.title}{suffix}")
+        return
+
+    cmd = ["gh", "issue", "create", "--title", item.title, "--body", body]
     for label in merged_labels:
         cmd.extend(["--label", label])
     if repo:
@@ -401,6 +439,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         items = read_todo_file(Path(args.todo_file))
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except UnicodeDecodeError:
+        print(f"Error: TODO file is not valid UTF-8: {args.todo_file}", file=sys.stderr)
         return 1
 
     if not items:
