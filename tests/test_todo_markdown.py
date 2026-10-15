@@ -123,6 +123,16 @@ def test_issue_directory(tmp_path, capsys):
     assert "no title" in out
 
 
+def test_issue_file_skips_shell_comment_in_fence(tmp_path, capsys):
+    issues = tmp_path / "issues"
+    issues.mkdir()
+    (issues / "x.md").write_text(
+        "Run:\n```\n# install deps\nmake\n```\n", encoding="utf-8"
+    )
+    assert todo_issues.read_todo_file(issues) == []
+    assert "x.md: no title" in capsys.readouterr().out
+
+
 def test_main_passes_item_labels_to_gh(tmp_path, monkeypatch, capsys):
     issues = tmp_path / "issues"
     issues.mkdir()

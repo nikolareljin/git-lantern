@@ -218,8 +218,11 @@ def parse_issue_file(path: Path) -> Optional[TodoItem]:
     title = _as_text(meta.get("title"))
     body_lines = body.splitlines()
     if not title:
+        in_fence = False
         for index, line in enumerate(body_lines):
-            if line.startswith("# "):
+            if line.strip().startswith(("```", "~~~")):
+                in_fence = not in_fence
+            if not in_fence and line.startswith("# "):
                 title = line[2:].strip()
                 del body_lines[index]
                 break
