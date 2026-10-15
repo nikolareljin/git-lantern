@@ -611,7 +611,7 @@ title and body, open or closed).
   skipped, so a cloned repo cannot publish a file such as `~/.ssh/id_rsa`.
   A symlinked `--todo-file` path itself is followed.
 - An item whose issue body exceeds 65536 characters (GitHub's limit) is skipped
-  with a message.
+  with a message and counted as `Skipped too long` in the final `Done.` line.
 - Control characters in titles and file names are printed escaped (`\x1b`).
 
 **Examples**:

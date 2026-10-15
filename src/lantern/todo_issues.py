@@ -513,17 +513,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     created = 0
     skipped = 0
+    too_long = 0
     for item in items:
         if is_duplicate(item, seen_fingerprints):
             print(f"[SKIPPED] Duplicate title/body fingerprint: {safe(item.title)}")
             skipped += 1
             continue
-        body_chars = len(build_issue_body(item))
+        body = build_issue_body(item)
+        body_chars = len(body)
         if body_chars > MAX_BODY_CHARS:
             print(
                 f"[SKIPPED] {safe(item.title)}: body is {body_chars} characters,"
                 f" GitHub allows {MAX_BODY_CHARS}"
             )
+            too_long += 1
             continue
 
         try:
@@ -538,11 +541,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(stderr, file=sys.stderr)
             continue
 
-        normalized_body = normalize_text(build_issue_body(item))
-        seen_fingerprints.add((normalize_text(item.title), normalized_body))
+        seen_fingerprints.add((normalize_text(item.title), normalize_text(body)))
         created += 1
 
-    print(f"Done. Created: {created}, Skipped duplicates: {skipped}, Parsed: {len(items)}")
+    summary = f"Done. Created: {created}, Skipped duplicates: {skipped}, Parsed: {len(items)}"
+    if too_long:
+        summary += f", Skipped too long: {too_long}"
+    print(summary)
     return 0
 
 

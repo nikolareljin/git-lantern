@@ -400,3 +400,15 @@ def test_control_characters_in_printed_titles_are_escaped(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "\x1b" not in out and "\x07" not in out
     assert "Evil \\x1b]0;pwn\\x07title" in out
+
+
+def test_done_line_counts_oversize_skips(tmp_path, monkeypatch, capsys):
+    todo = tmp_path / "TODO.md"
+    todo.write_text(
+        "## Big\n" + "x" * (todo_issues.MAX_BODY_CHARS + 1) + "\n## Small\nok\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(todo_issues, "fetch_existing_issues", lambda repo, limit: set())
+    assert todo_issues.main(["--todo-file", str(todo), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "Done. Created: 1, Skipped duplicates: 0, Parsed: 2, Skipped too long: 1" in out
