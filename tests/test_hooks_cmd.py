@@ -410,18 +410,21 @@ class RepoVisibility(unittest.TestCase):
         def fake(cmd, **k):
             seen.append(cmd[0])
             return subprocess.CompletedProcess(cmd, 0, stdout="true")
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
         with tempfile.TemporaryDirectory() as d:
-            planted = os.path.join(d, "clone")
             real = os.path.join(d, "bin")
-            for folder in (planted, real):
+            for folder in (os.path.join(d, "clone"), real):
                 os.makedirs(folder)
                 open(os.path.join(folder, "gh.exe"), "w").close()
+            os.chdir(d)                 # "clone" is a relative PATH entry that holds a gh.exe
             with mock.patch.object(hooks.os, "name", "nt"), mock.patch.object(hooks.subprocess, "run", fake), \
-                    mock.patch.dict(os.environ, {"PATH": os.pathsep.join([os.path.relpath(planted), real])}):
+                    mock.patch.dict(os.environ, {"PATH": os.pathsep.join(["clone", real])}):
                 hooks.repo_visibility(("me", "repo"))
             with mock.patch.object(hooks.os, "name", "nt"), mock.patch.object(hooks.subprocess, "run", fake), \
-                    mock.patch.dict(os.environ, {"PATH": os.path.relpath(planted)}):
+                    mock.patch.dict(os.environ, {"PATH": "clone"}):
                 hooks.repo_visibility(("me", "repo"))
+            os.chdir(cwd)               # before the directory is removed (Windows refuses otherwise)
         self.assertEqual(seen, [os.path.join(real, "gh.exe"), "gh.exe-not-on-PATH"])
 
 
