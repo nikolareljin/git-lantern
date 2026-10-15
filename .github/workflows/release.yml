@@ -75,7 +75,11 @@ jobs:
           import sys
 
           path, version, archive_sha = sys.argv[1:]
-          formula = f'''class GitLantern < Formula
+          formula = f'''# typed: strict
+          # frozen_string_literal: true
+
+          # git-lantern: local and GitHub repository visibility and status toolkit.
+          class GitLantern < Formula
             include Language::Python::Virtualenv
 
             desc "Local and GitHub repository visibility and status toolkit"
