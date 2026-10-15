@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -42,3 +43,23 @@ def test_version_flag_prints_application_version(monkeypatch, capsys):
 
     assert result.value.code == 0
     assert capsys.readouterr().out == "3.5.7\n"
+
+
+def _release_headings():
+    root = Path(__file__).resolve().parent.parent
+    lines = (root / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+    return [line for line in lines if line.startswith("## ") and re.search(r"\d+\.\d+\.\d+", line)]
+
+
+def test_changelog_release_headings_use_the_dated_format():
+    # The release workflow takes its notes from "## YYYY-MM-DD <em-dash> vX.Y.Z"
+    # only; 0.9.0 and 0.9.1 used "## [X.Y.Z] - date" and shipped generated notes.
+    dated = re.compile(r"^## \d{4}-\d{2}-\d{2} — v\d+\.\d+\.\d+$")
+    assert [h for h in _release_headings() if not dated.match(h)] == []
+
+
+def test_newest_changelog_release_is_the_version_file():
+    root = Path(__file__).resolve().parent.parent
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+
+    assert _release_headings()[0].endswith(f" v{version}")
