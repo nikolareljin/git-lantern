@@ -48,8 +48,9 @@ SERVER_PRESETS = {
 }
 
 
-# Keys lantern reads from the environment. A .env file (often from the
-# current directory, so possibly an untrusted clone) may set only these.
+# Keys a .env file may set. It is often read from the current directory, so
+# possibly an untrusted clone. GIT_LANTERN_CONFIG and LANTERN_PORTFOLIO_API_URL
+# are left out: they redirect where tokens and PR data are sent.
 DOTENV_KEYS = frozenset(
     {
         "GITHUB_USER",
@@ -59,8 +60,6 @@ DOTENV_KEYS = frozenset(
         "BITBUCKET_USER",
         "BITBUCKET_TOKEN",
         "LANTERN_SERVER",
-        "GIT_LANTERN_CONFIG",
-        "LANTERN_PORTFOLIO_API_URL",
     }
 )
 

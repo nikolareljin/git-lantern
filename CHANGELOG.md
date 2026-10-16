@@ -8,9 +8,8 @@ All notable changes to git-lantern are documented in this file.
 
 - `.env` loading takes only the keys lantern reads (`GITHUB_USER`,
   `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`,
-  `BITBUCKET_TOKEN`, `LANTERN_SERVER`, `GIT_LANTERN_CONFIG`,
-  `LANTERN_PORTFOLIO_API_URL`); other keys such as `PATH` or
-  `GIT_SSH_COMMAND` are ignored.
+  `BITBUCKET_TOKEN`, `LANTERN_SERVER`); other keys such as `PATH`,
+  `GIT_SSH_COMMAND` or `GIT_LANTERN_CONFIG` are ignored.
 
 ### Added
 

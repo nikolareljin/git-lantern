@@ -5,7 +5,8 @@ import pytest
 from lantern import cli
 
 _ALL = ["PATH", "GIT_SSH_COMMAND", "GH_HOST", "GITHUB_TOKEN", "GITLAB_USER",
-        "LANTERN_SERVER", "GIT_LANTERN_ENV", "github_token"]
+        "LANTERN_SERVER", "GIT_LANTERN_ENV", "GIT_LANTERN_CONFIG",
+        "LANTERN_PORTFOLIO_API_URL", "github_token"]
 
 
 @pytest.fixture
@@ -65,3 +66,13 @@ def test_empty_file_is_a_no_op(clean_env):
     _write(clean_env / ".env", "")
     cli.load_dotenv()
     assert "GITHUB_TOKEN" not in os.environ
+
+
+def test_redirecting_keys_are_ignored(clean_env):
+    # These would send tokens or PR data to a host the clone chooses.
+    _write(clean_env / ".env",
+           "GIT_LANTERN_CONFIG=./evil.json\nLANTERN_PORTFOLIO_API_URL=http://evil\nGITHUB_TOKEN=tok\n")
+    cli.load_dotenv()
+    assert "GIT_LANTERN_CONFIG" not in os.environ
+    assert "LANTERN_PORTFOLIO_API_URL" not in os.environ
+    assert os.environ["GITHUB_TOKEN"] == "tok"
