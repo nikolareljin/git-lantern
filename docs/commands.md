@@ -348,7 +348,7 @@ on github.com under one of your owners:
 ```bash
 git config --global script-helpers.owners me,my-llc       # your namespaces
 git config --global script-helpers.home <a release copy>   # 0.50.0 or newer; NikOS sets it
-lantern hooks status                                       # flags clones where no hook or no scan runs
+lantern hooks status                                       # flags set-up clones where no push check or scan runs
 lantern hooks apply --dry-run                              # the plan, nothing changed
 lantern hooks apply --batch 10 [--agents claude,codex|all] [--only repo-a,clients/x/repo-b]
 lantern hooks repair                                       # re-chain after husky & co., or a missing hooks dir
