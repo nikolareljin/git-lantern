@@ -640,7 +640,7 @@ Return 429 after five failed logins per IP.
 ## Git server commands (`lantern forge ...`)
 
 The `lantern forge` command group can target GitHub, GitLab, or Bitbucket using `--server` and the config file.
-It still supports `.env` fallbacks and will use the current directory if `--root` is not set.
+It also reads the environment variables below, from the shell or from a `.env` file (the file named by `GIT_LANTERN_ENV`, or `.env` in the lantern checkout itself; see the README). It uses the current directory if `--root` is not set.
 
 Environment fallbacks:
 - `GITHUB_USER`, `GITHUB_TOKEN`
@@ -650,7 +650,7 @@ Environment fallbacks:
 
 **Precedence**:
 - CLI flags (`--user`, `--token`, `--server`)
-- `.env` values (loaded from the current directory)
+- Environment variables (shell, then the `.env` file described above)
 - `config.json` values
 
 ### `lantern forge list`

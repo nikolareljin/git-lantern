@@ -99,3 +99,16 @@ def test_git_lantern_env_loads_from_any_cwd(clean_env, monkeypatch):
     cli.load_dotenv()
     assert os.environ["LANTERN_SERVER"] == "gitlab.com"
     assert os.environ["GITHUB_TOKEN"] == "mine"
+
+
+def test_inline_comment_after_unquoted_value(clean_env):
+    _write(clean_env / ".env", 'GITHUB_TOKEN=tok  # personal\nGITLAB_USER="a # b"\n')
+    cli.load_dotenv()
+    assert os.environ.get("GITHUB_TOKEN") == "tok"
+    assert os.environ.get("GITLAB_USER") == "a # b"
+
+
+def test_byte_order_mark_does_not_hide_the_first_key(clean_env):
+    (clean_env / ".env").write_bytes(b"\xef\xbb\xbfGITHUB_TOKEN=tok\n")
+    cli.load_dotenv()
+    assert os.environ.get("GITHUB_TOKEN") == "tok"

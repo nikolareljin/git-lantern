@@ -67,7 +67,8 @@ DOTENV_KEYS = frozenset(
 def _unquote(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
         return value[1:-1]
-    return value
+    # Unquoted: " #" starts a comment, as in shell and other .env readers.
+    return value.split(" #", 1)[0].rstrip()
 
 
 def load_dotenv() -> None:
@@ -82,7 +83,7 @@ def load_dotenv() -> None:
         path = os.path.join(cwd, ".env")
     if not os.path.isfile(path):
         return
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, "r", encoding="utf-8-sig") as handle:
         for raw in handle:
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
