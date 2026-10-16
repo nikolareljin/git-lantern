@@ -13,8 +13,8 @@ All notable changes to git-lantern are documented in this file.
 - Without `GIT_LANTERN_ENV`, `./.env` is read only when the current
   directory is the lantern checkout; a `.env` in any other directory is
   ignored and never opened.
-- An unreadable or non-UTF-8 `GIT_LANTERN_ENV` file prints an error
-  instead of crashing at startup.
+- An unreadable or non-UTF-8 `GIT_LANTERN_ENV` file, or such a `.env` in
+  the checkout, prints an error instead of crashing at startup.
 
 ### Added
 
