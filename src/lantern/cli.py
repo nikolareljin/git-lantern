@@ -117,7 +117,8 @@ def load_dotenv() -> None:
             return
         try:
             values = _read_dotenv(local)
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"lantern: {local} not read: {exc}", file=sys.stderr)
             return
     for key, value in values.items():
         os.environ.setdefault(key, value)

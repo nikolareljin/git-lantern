@@ -177,3 +177,10 @@ def test_checkout_match_ignores_case_on_windows(clean_env, monkeypatch):
     _write(clean_env / ".env", "GITHUB_TOKEN=tok\n")
     cli.load_dotenv()
     assert os.environ.get("GITHUB_TOKEN") == "tok"
+
+
+def test_bad_checkout_env_warns(clean_env, capsys):
+    (clean_env / ".env").write_bytes(b"GITHUB_TOKEN=\xff\n")
+    cli.load_dotenv()
+    assert "GITHUB_TOKEN" not in os.environ
+    assert ".env not read" in capsys.readouterr().err
