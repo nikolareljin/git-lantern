@@ -78,3 +78,9 @@ jobs:
           python -m pip install --quiet pytest
           $env:PYTHONPATH = "src"
           python -m pytest -q tests/test_hooks_cmd.py
+      # TODO files come from any OS: CRLF, path case and symlinks differ here.
+      - name: lantern todo parsing tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m pytest -q tests/test_todo_markdown.py tests/test_tui_todo_path.py

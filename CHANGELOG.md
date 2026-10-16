@@ -4,11 +4,22 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `lantern todo issues --todo-file` reads Markdown: a `.md` file gives one
+  issue per `## Title` heading (optional `ID:` line, `[TODO]` block honoured),
+  and a directory gives one issue per `*.md` file with optional front matter
+  (`title`, `labels`, `id`). Front matter labels are added to the issue.
+  A leading `Description:` label in a `.md` item is dropped, so the same item
+  in `.txt` and `.md` gives the same issue body.
+  In a directory, `*.md` symlinks pointing outside it are skipped.
+- `lantern todo issues` skips an item whose body exceeds GitHub's 65536
+  character limit, and escapes control characters in printed titles.
+
 ### Fixed
 
-- Release `homebrew` job: a rerun after the tap branch was pushed exited 0
-  without opening the tap pull request ("nothing to commit" ended the step). It
-  now opens the PR whenever the branch's formula differs from the tap's `main`.
+- TUI "TODO -> Issues": a relative TODO path is resolved against the selected
+  repository, not the directory lantern was started from; `~` is expanded.
 
 ## 2026-10-15 — v0.10.0
 

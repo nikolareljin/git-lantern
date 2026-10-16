@@ -586,6 +586,57 @@ lantern report --input data/repos.json --format md --output data/repos.md
 lantern report --input data/repos.json --format json
 ```
 
+### `lantern todo issues`
+
+**Purpose**: Create GitHub issues from a TODO list, skipping duplicates (same
+title and body, open or closed).
+
+**Input forms** (`--todo-file`, default `TODO.txt`):
+- `.txt`: `[TODO]...[/TODO]` block with `ID:`, `Title:`, `Description:` lines.
+- `.md`: one issue per `## Title` heading. An optional `ID: <id>` (or
+  `**ID:** <id>`) line may follow the heading; the rest is the description.
+  A leading `Description:` label is dropped, so an item gives the same issue
+  body from `.txt` and `.md` and duplicates are found across both.
+  If the file has a `[TODO]...[/TODO]` block, only that block is read.
+  A heading with no description is skipped with a message.
+- Directory: each `*.md` file (not recursive, dotfiles ignored) is one issue.
+  Optional front matter sets `title`, `labels` and `id` (keys are
+  case-insensitive; values are literal, so `title: Fix #12` keeps `#12`);
+  without `title` the first `# ` heading is used. `labels` is a list
+  (`[a, b]` or `- a` lines) or a comma-separated string. A file with no
+  title, an unclosed front matter block, invalid UTF-8 or a read error is
+  skipped with a message; the run continues.
+- Labels from `--label` and front matter are both applied; `--dry-run` lists them.
+- In a directory, a `*.md` symlink whose target is outside that directory is
+  skipped, so a cloned repo cannot publish a file such as `~/.ssh/id_rsa`.
+  A symlinked `--todo-file` path itself is followed.
+- An item whose issue body exceeds 65536 characters (GitHub's limit) is skipped
+  with a message and counted as `Skipped too long` in the final `Done.` line.
+- Control characters in titles and file names are printed escaped (`\x1b`).
+
+**Examples**:
+```bash
+lantern todo issues --todo-file TODO.txt --dry-run
+lantern todo issues --todo-file TODO.md --label backlog
+lantern todo issues --todo-file issues/
+```
+
+`TODO.md`:
+```markdown
+## Add login rate limit
+ID: 001
+Return 429 after five failed logins per IP.
+```
+
+`issues/rate-limit.md`:
+```markdown
+---
+title: Add login rate limit
+labels: [security, backend]
+---
+Return 429 after five failed logins per IP.
+```
+
 ## Git server commands (`lantern forge ...`)
 
 The `lantern forge` command group can target GitHub, GitLab, or Bitbucket using `--server` and the config file.
