@@ -4,6 +4,18 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- `.env` loading takes only the keys lantern reads (`GITHUB_USER`,
+  `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`,
+  `BITBUCKET_TOKEN`, `LANTERN_SERVER`); other keys such as `PATH`,
+  `GIT_SSH_COMMAND` or `GIT_LANTERN_CONFIG` are ignored.
+- Without `GIT_LANTERN_ENV`, `./.env` is read only when the current
+  directory is the lantern checkout; a `.env` in any other directory is
+  ignored and never opened.
+- An unreadable or non-UTF-8 `GIT_LANTERN_ENV` file, or such a `.env` in
+  the checkout, prints an error instead of crashing at startup.
+
 ### Added
 
 - `lantern todo issues --todo-file` reads Markdown: a `.md` file gives one

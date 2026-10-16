@@ -48,19 +48,76 @@ SERVER_PRESETS = {
 }
 
 
-def load_dotenv() -> None:
-    path = os.environ.get("GIT_LANTERN_ENV", os.path.join(os.getcwd(), ".env"))
-    if not os.path.isfile(path):
-        return
-    with open(path, "r", encoding="utf-8") as handle:
+# Keys a .env file may set. It is often read from the current directory, so
+# possibly an untrusted clone. GIT_LANTERN_CONFIG and LANTERN_PORTFOLIO_API_URL
+# are left out: they redirect where tokens and PR data are sent.
+DOTENV_KEYS = frozenset(
+    {
+        "GITHUB_USER",
+        "GITHUB_TOKEN",
+        "GITLAB_USER",
+        "GITLAB_TOKEN",
+        "BITBUCKET_USER",
+        "BITBUCKET_TOKEN",
+        "LANTERN_SERVER",
+    }
+)
+
+
+def _unquote(value: str) -> str:
+    if value[:1] in ("'", '"'):
+        close = value.find(value[0], 1)
+        rest = value[close + 1:].strip() if close > 0 else None
+        # A closed quote may be followed only by a " #" comment.
+        if rest is not None and (not rest or rest.startswith("#")):
+            return value[1:close]
+    # Unquoted: " #" starts a comment, as in shell and other .env readers.
+    return value.split(" #", 1)[0].rstrip()
+
+
+def _read_dotenv(path: str) -> Dict[str, str]:
+    """Return the allowed keys in path; the first occurrence of a key wins."""
+    values: Dict[str, str] = {}
+    with open(path, "r", encoding="utf-8-sig") as handle:
         for raw in handle:
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            if key in DOTENV_KEYS and key not in values:
+                values[key] = _unquote(value.strip())
+    return values
 
 
+def _same_dir(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def load_dotenv() -> None:
+    path = label = os.environ.get("GIT_LANTERN_ENV", "")
+    if path:
+        label = f"GIT_LANTERN_ENV={path}"
+    else:
+        # Without GIT_LANTERN_ENV, read ./.env only inside lantern's own
+        # checkout. Any other directory may be an untrusted clone whose .env
+        # could swap the user's token or server. Trust is decided from paths
+        # alone, so an untrusted .env is never opened.
+        cwd = os.getcwd()
+        if not _same_dir(cwd, os.path.dirname(_SRC_DIR)):
+            return
+        path = label = os.path.join(cwd, ".env")
+        if not os.path.isfile(path):
+            return
+    try:
+        values = _read_dotenv(path)
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"lantern: {label} not read: {exc}", file=sys.stderr)
+        return
+    for key, value in values.items():
+        os.environ.setdefault(key, value)
 
 
 def _application_version() -> str:

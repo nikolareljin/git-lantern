@@ -84,3 +84,9 @@ jobs:
         run: |
           $env:PYTHONPATH = "src"
           python -m pytest -q tests/test_todo_markdown.py tests/test_tui_todo_path.py
+      # .env trust compares paths with normcase and realpath, which differ here.
+      - name: lantern .env loading tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m pytest -q tests/test_load_dotenv.py
