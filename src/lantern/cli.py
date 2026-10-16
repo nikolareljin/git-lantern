@@ -48,6 +48,29 @@ SERVER_PRESETS = {
 }
 
 
+# Keys lantern reads from the environment. A .env file (often from the
+# current directory, so possibly an untrusted clone) may set only these.
+DOTENV_KEYS = frozenset(
+    {
+        "GITHUB_USER",
+        "GITHUB_TOKEN",
+        "GITLAB_USER",
+        "GITLAB_TOKEN",
+        "BITBUCKET_USER",
+        "BITBUCKET_TOKEN",
+        "LANTERN_SERVER",
+        "GIT_LANTERN_CONFIG",
+        "LANTERN_PORTFOLIO_API_URL",
+    }
+)
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
 def load_dotenv() -> None:
     path = os.environ.get("GIT_LANTERN_ENV", os.path.join(os.getcwd(), ".env"))
     if not os.path.isfile(path):
@@ -58,9 +81,12 @@ def load_dotenv() -> None:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
-
-
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            if key not in DOTENV_KEYS:
+                continue
+            os.environ.setdefault(key, _unquote(value.strip()))
 
 
 def _application_version() -> str:

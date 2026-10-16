@@ -4,6 +4,14 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- `.env` loading takes only the keys lantern reads (`GITHUB_USER`,
+  `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`,
+  `BITBUCKET_TOKEN`, `LANTERN_SERVER`, `GIT_LANTERN_CONFIG`,
+  `LANTERN_PORTFOLIO_API_URL`); other keys such as `PATH` or
+  `GIT_SSH_COMMAND` are ignored.
+
 ### Added
 
 - `lantern todo issues --todo-file` reads Markdown: a `.md` file gives one

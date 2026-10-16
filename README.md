@@ -87,7 +87,7 @@ Selection tips:
 
 ## Environment
 
-Create `.env` from `.env.example` if you want API access. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` or `~/.git-lantern/config.json`.
+Create `.env` from `.env.example` if you want API access. lantern reads `.env` from the current directory, or the file named by `GIT_LANTERN_ENV`, and takes only these keys: `GITHUB_USER`, `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`, `BITBUCKET_TOKEN`, `LANTERN_SERVER`, `GIT_LANTERN_CONFIG`, `LANTERN_PORTFOLIO_API_URL`. Other keys are ignored, and a variable already set in the shell wins. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` or `~/.git-lantern/config.json`.
 
 Export/import server config:
 ```bash
