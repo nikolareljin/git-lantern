@@ -154,26 +154,20 @@ def test_unreadable_git_lantern_env_warns(clean_env, monkeypatch, capsys):
     assert "Permission denied" in capsys.readouterr().err
 
 
-def test_ignored_cwd_env_with_lantern_keys_prints_one_note(clean_env, monkeypatch, capsys):
+def test_untrusted_cwd_env_is_never_opened(clean_env, monkeypatch, capsys):
     clone = clean_env / "clone"
     clone.mkdir()
-    _write(clone / ".env", "GITHUB_TOKEN=x\nLANTERN_SERVER=y\n")
-    monkeypatch.chdir(clone)
-    cli.load_dotenv()
-    err = capsys.readouterr().err
-    assert err.count("\n") == 1
-    assert "GIT_LANTERN_ENV" in err
-
-
-def test_ignored_cwd_env_without_lantern_keys_is_quiet(clean_env, monkeypatch, capsys):
-    clone = clean_env / "clone"
-    clone.mkdir()
-    _write(clone / ".env", "DATABASE_URL=x\n")
-    monkeypatch.chdir(clone)
-    cli.load_dotenv()
-    monkeypatch.setenv("_ARGCOMPLETE", "1")
     _write(clone / ".env", "GITHUB_TOKEN=x\n")
+    monkeypatch.chdir(clone)
+    real_open = open
+
+    def guarded(path, *args, **kwargs):
+        assert not str(path).endswith(".env"), f"opened {path}"
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", guarded)
     cli.load_dotenv()
+    assert "GITHUB_TOKEN" not in os.environ
     assert capsys.readouterr().err == ""
 
 

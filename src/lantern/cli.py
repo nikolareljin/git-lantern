@@ -109,20 +109,15 @@ def load_dotenv() -> None:
         # checkout. Any other directory may be an untrusted clone whose .env
         # could swap the user's token or server.
         cwd = os.getcwd()
+        # Decide trust from paths alone: an untrusted .env is never opened.
+        if not _same_dir(cwd, os.path.dirname(_SRC_DIR)):
+            return
         local = os.path.join(cwd, ".env")
         if not os.path.isfile(local):
             return
         try:
             values = _read_dotenv(local)
         except (OSError, UnicodeDecodeError):
-            return
-        if not _same_dir(cwd, os.path.dirname(_SRC_DIR)):
-            if values and not os.environ.get("_ARGCOMPLETE"):
-                print(
-                    "lantern: ignoring ./.env outside the lantern checkout;"
-                    " set GIT_LANTERN_ENV=<path> to use it.",
-                    file=sys.stderr,
-                )
             return
     for key, value in values.items():
         os.environ.setdefault(key, value)
