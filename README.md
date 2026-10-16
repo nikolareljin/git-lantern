@@ -87,7 +87,7 @@ Selection tips:
 
 ## Environment
 
-Create `.env` from `.env.example` if you want API access. lantern reads the file named by `GIT_LANTERN_ENV`, else `.env` in the current directory only when that directory is the lantern checkout itself (a `.env` in any other repo is ignored, so a cloned repo cannot swap your token or server). It takes only these keys: `GITHUB_USER`, `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`, `BITBUCKET_TOKEN`, `LANTERN_SERVER`. Other keys are ignored. Set `GIT_LANTERN_CONFIG` and `LANTERN_PORTFOLIO_API_URL` in the shell, not in `.env`. A variable already set in the shell wins. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` or `~/.git-lantern/config.json`.
+Create `.env` from `.env.example` if you want API access. lantern reads the file named by `GIT_LANTERN_ENV`, else `.env` in the current directory only when that directory is the lantern checkout itself (a `.env` in any other repo is ignored, so a cloned repo cannot swap your token or server). It takes only these keys: `GITHUB_USER`, `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`, `BITBUCKET_TOKEN`, `LANTERN_SERVER`. Other keys are ignored. Set `GIT_LANTERN_CONFIG` and `LANTERN_PORTFOLIO_API_URL` in the shell, not in `.env`. A variable already set in the shell wins; within the file the first occurrence of a key wins. A `.env` elsewhere that holds these keys gets a one-line note on stderr. If `GIT_LANTERN_ENV` names a file that cannot be read, lantern prints the error and continues without it. For multi-server setups (GitHub/GitLab/Bitbucket), use `~/.config/git-lantern/config.json` or `~/.git-lantern/config.json`.
 
 Export/import server config:
 ```bash

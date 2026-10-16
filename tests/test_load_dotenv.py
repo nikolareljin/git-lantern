@@ -112,3 +112,74 @@ def test_byte_order_mark_does_not_hide_the_first_key(clean_env):
     (clean_env / ".env").write_bytes(b"\xef\xbb\xbfGITHUB_TOKEN=tok\n")
     cli.load_dotenv()
     assert os.environ.get("GITHUB_TOKEN") == "tok"
+
+
+def test_quoted_value_with_trailing_comment(clean_env):
+    _write(clean_env / ".env", "GITHUB_TOKEN=\"tok\" # personal\nGITLAB_USER='me'  # work\n")
+    cli.load_dotenv()
+    assert os.environ.get("GITHUB_TOKEN") == "tok"
+    assert os.environ.get("GITLAB_USER") == "me"
+
+
+def test_first_duplicate_key_wins(clean_env):
+    _write(clean_env / ".env", "GITHUB_TOKEN=first\nGITHUB_TOKEN=second\n")
+    cli.load_dotenv()
+    assert os.environ.get("GITHUB_TOKEN") == "first"
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "not-utf8"])
+def test_bad_git_lantern_env_warns_and_does_not_crash(clean_env, monkeypatch, capsys, kind):
+    target = clean_env / "conf.env"
+    if kind == "directory":
+        target.mkdir()
+    elif kind == "not-utf8":
+        target.write_bytes(b"GITHUB_TOKEN=\xff\xfe\n")
+    monkeypatch.setenv("GIT_LANTERN_ENV", str(target))
+    cli.load_dotenv()
+    assert "GITHUB_TOKEN" not in os.environ
+    assert "GIT_LANTERN_ENV" in capsys.readouterr().err
+
+
+def test_unreadable_git_lantern_env_warns(clean_env, monkeypatch, capsys):
+    target = clean_env / "conf.env"
+    _write(target, "GITHUB_TOKEN=tok\n")
+    monkeypatch.setenv("GIT_LANTERN_ENV", str(target))
+
+    def deny(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr("builtins.open", deny)
+    cli.load_dotenv()
+    assert "GITHUB_TOKEN" not in os.environ
+    assert "Permission denied" in capsys.readouterr().err
+
+
+def test_ignored_cwd_env_with_lantern_keys_prints_one_note(clean_env, monkeypatch, capsys):
+    clone = clean_env / "clone"
+    clone.mkdir()
+    _write(clone / ".env", "GITHUB_TOKEN=x\nLANTERN_SERVER=y\n")
+    monkeypatch.chdir(clone)
+    cli.load_dotenv()
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert "GIT_LANTERN_ENV" in err
+
+
+def test_ignored_cwd_env_without_lantern_keys_is_quiet(clean_env, monkeypatch, capsys):
+    clone = clean_env / "clone"
+    clone.mkdir()
+    _write(clone / ".env", "DATABASE_URL=x\n")
+    monkeypatch.chdir(clone)
+    cli.load_dotenv()
+    monkeypatch.setenv("_ARGCOMPLETE", "1")
+    _write(clone / ".env", "GITHUB_TOKEN=x\n")
+    cli.load_dotenv()
+    assert capsys.readouterr().err == ""
+
+
+def test_checkout_match_ignores_case_on_windows(clean_env, monkeypatch):
+    monkeypatch.setattr(cli.os.path, "normcase", lambda p: p.lower())
+    monkeypatch.setattr(cli, "_SRC_DIR", str(clean_env).upper() + os.sep + "src")
+    _write(clean_env / ".env", "GITHUB_TOKEN=tok\n")
+    cli.load_dotenv()
+    assert os.environ.get("GITHUB_TOKEN") == "tok"

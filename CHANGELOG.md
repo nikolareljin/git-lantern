@@ -12,7 +12,9 @@ All notable changes to git-lantern are documented in this file.
   `GIT_SSH_COMMAND` or `GIT_LANTERN_CONFIG` are ignored.
 - Without `GIT_LANTERN_ENV`, `./.env` is read only when the current
   directory is the lantern checkout; a `.env` in any other directory is
-  ignored.
+  ignored, with a one-line stderr note when it holds any of those keys.
+- An unreadable or non-UTF-8 `GIT_LANTERN_ENV` file prints an error
+  instead of crashing at startup.
 
 ### Added
 
