@@ -97,29 +97,25 @@ def _same_dir(a: str, b: str) -> bool:
 
 
 def load_dotenv() -> None:
-    path = os.environ.get("GIT_LANTERN_ENV", "")
+    path = label = os.environ.get("GIT_LANTERN_ENV", "")
     if path:
-        try:
-            values = _read_dotenv(path)
-        except (OSError, UnicodeDecodeError) as exc:
-            print(f"lantern: GIT_LANTERN_ENV={path} not read: {exc}", file=sys.stderr)
-            return
+        label = f"GIT_LANTERN_ENV={path}"
     else:
         # Without GIT_LANTERN_ENV, read ./.env only inside lantern's own
         # checkout. Any other directory may be an untrusted clone whose .env
-        # could swap the user's token or server.
+        # could swap the user's token or server. Trust is decided from paths
+        # alone, so an untrusted .env is never opened.
         cwd = os.getcwd()
-        # Decide trust from paths alone: an untrusted .env is never opened.
         if not _same_dir(cwd, os.path.dirname(_SRC_DIR)):
             return
-        local = os.path.join(cwd, ".env")
-        if not os.path.isfile(local):
+        path = label = os.path.join(cwd, ".env")
+        if not os.path.isfile(path):
             return
-        try:
-            values = _read_dotenv(local)
-        except (OSError, UnicodeDecodeError) as exc:
-            print(f"lantern: {local} not read: {exc}", file=sys.stderr)
-            return
+    try:
+        values = _read_dotenv(path)
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"lantern: {label} not read: {exc}", file=sys.stderr)
+        return
     for key, value in values.items():
         os.environ.setdefault(key, value)
 

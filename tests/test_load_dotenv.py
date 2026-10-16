@@ -60,7 +60,8 @@ def test_syntax_variants(clean_env):
     cli.load_dotenv()
     assert os.environ["GITHUB_TOKEN"] == "quoted"
     assert os.environ["GITLAB_USER"] == "me"
-    assert "github_token" not in os.environ
+    # list(): os.environ lookups ignore case on Windows.
+    assert "github_token" not in list(os.environ)
     assert os.environ["PATH"] == "/usr/bin:/bin"
 
 
