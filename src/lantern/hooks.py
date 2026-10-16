@@ -273,7 +273,7 @@ def needs_repair(state: Dict[str, str]) -> bool:
     repository's own hooks, so the current security checks do not run there
     (script-helpers reports that as unscanned=yes), or its hooks directory is
     missing or lost its pre-push, so no push checks run (broken=yes, from
-    script-helpers newer than 0.53.1). A clone not set up yet is for apply."""
+    script-helpers 0.54.0 or newer). A clone not set up yet is for apply."""
     if state.get("taken_over") == "yes" or state.get("unscanned") == "yes":
         return True
     return state.get("broken") == "yes" and state.get("mode", "none") != "none"
