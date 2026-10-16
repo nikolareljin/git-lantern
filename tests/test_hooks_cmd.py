@@ -18,14 +18,14 @@ from lantern import hooks
 
 FAKE_SETUP = r'''#!/usr/bin/env bash
 state="$(git rev-parse --git-dir)/fake-hooks"
-mode=none; taken=no; agents=""; claude=no; unscanned=no
+mode=none; taken=no; agents=""; claude=no; unscanned=no; broken=no; hp=""
 [[ -f "$state" ]] && source "$state"
 echo "$(basename "$(pwd)") $*" >> "$FAKE_LOG"
 [[ -f "$(git rev-parse --git-dir)/fail-status" && "$*" == "--status --porcelain" ]] && { echo "boom"; exit 1; }
 case "$*" in
-  "--status --porcelain") printf 'mode=%s\ttaken_over=%s\tclaude_repo=%s\tagents=%s\tunscanned=%s\n' "$mode" "$taken" "$claude" "$agents" "$unscanned"; exit 0 ;;
-  "") mode=chained; taken=no ;;
-  "--repair") taken=no; unscanned=no ;;
+  "--status --porcelain") printf 'mode=%s\ttaken_over=%s\tcore_hooksPath=%s\tclaude_repo=%s\tagents=%s\tunscanned=%s\tbroken=%s\n' "$mode" "$taken" "$hp" "$claude" "$agents" "$unscanned" "$broken"; exit 0 ;;
+  "") mode=chained; taken=no; broken=no ;;
+  "--repair") taken=no; unscanned=no; broken=no ;;
   "--uninstall") mode=none ;;
   "--claude-repo") claude=yes ;;
   "--claude-repo --uninstall") claude=no ;;
@@ -33,7 +33,7 @@ case "$*" in
   --agent-repo*) set -- $*; agents="${agents:+$agents,}$2" ;;
   "--fail") exit 1 ;;
 esac
-printf 'mode=%s\ntaken=%s\nagents=%s\nclaude=%s\nunscanned=%s\n' "$mode" "$taken" "$agents" "$claude" "$unscanned" > "$state"
+printf 'mode=%s\ntaken=%s\nagents=%s\nclaude=%s\nunscanned=%s\nbroken=%s\nhp=%s\n' "$mode" "$taken" "$agents" "$claude" "$unscanned" "$broken" "$hp" > "$state"
 '''
 
 
@@ -169,6 +169,45 @@ class OwnershipAndApply(HooksTestBase):
         open(self.log, "w").close()
         self.assertEqual(self.run_cmd("apply"), 0)
         self.assertEqual(self.calls(), ["mine --repair"])
+
+    def test_broken_hooks_path_is_flagged_with_its_path_and_repaired(self):
+        path = self.clone("mine", "git@github.com:me/mine.git")
+        self.run_cmd("apply")
+        with open(os.path.join(path, ".git", "fake-hooks"), "a") as fh:
+            fh.write("broken=yes\nhp=scripts/git-hooks\n")
+        with mock.patch("sys.stdout") as out:
+            self.assertEqual(self.run_cmd("status"), 0)
+        text = "".join(c.args[0] for c in out.write.call_args_list)
+        self.assertIn("NO HOOK RUNS: scripts/git-hooks has no pre-push (lantern hooks repair)", text)
+        self.assertIn("1 clone(s) flagged above", text)
+        open(self.log, "w").close()
+        self.assertEqual(self.run_cmd("repair"), 0)
+        self.assertEqual(self.calls(), ["mine --repair"])
+        with open(os.path.join(path, ".git", "fake-hooks"), "a") as fh:
+            fh.write("broken=yes\n")
+        open(self.log, "w").close()
+        self.assertEqual(self.run_cmd("apply"), 0)
+        self.assertEqual(self.calls(), ["mine --repair"])
+
+    def test_broken_clone_not_set_up_is_for_apply_not_repair(self):
+        path = self.clone("mine", "git@github.com:me/mine.git")
+        with open(os.path.join(path, ".git", "fake-hooks"), "w") as fh:
+            fh.write("broken=yes\nhp=.githooks\n")
+        with mock.patch("sys.stdout") as out:
+            self.run_cmd("status")
+        self.assertIn("NO HOOK RUNS: .githooks has no pre-push (lantern hooks apply)",
+                      "".join(c.args[0] for c in out.write.call_args_list))
+        self.assertEqual(self.run_cmd("repair"), 0)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.run_cmd("apply"), 0)
+        self.assertEqual(self.calls(), ["mine"])
+
+    def test_a_healthy_status_flags_nothing(self):
+        self.clone("mine", "git@github.com:me/mine.git")
+        self.run_cmd("apply")
+        with mock.patch("sys.stdout") as out:
+            self.run_cmd("status")
+        self.assertNotIn("flagged", "".join(c.args[0] for c in out.write.call_args_list))
 
     def test_batch_limits_the_run(self):
         for n in ("a", "b", "c"):
@@ -333,7 +372,7 @@ class PushTests(HooksTestBase):
 
     def test_a_failed_hook_setup_does_not_set_it(self):
         with open(os.path.join(self.home, "scripts", "setup-hooks.sh"), "w", newline="\n") as fh:
-            fh.write(FAKE_SETUP.replace('"") mode=chained; taken=no ;;', '"") exit 1 ;;'))
+            fh.write(FAKE_SETUP.replace('"") mode=chained; taken=no; broken=no ;;', '"") exit 1 ;;'))
         self.assertEqual(self.run_cmd("apply", "--only", "private"), 1)
         self.assertEqual(push_tests(self.private), "")
 
