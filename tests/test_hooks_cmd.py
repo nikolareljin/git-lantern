@@ -178,7 +178,7 @@ class OwnershipAndApply(HooksTestBase):
         with mock.patch("sys.stdout") as out:
             self.assertEqual(self.run_cmd("status"), 0)
         text = "".join(c.args[0] for c in out.write.call_args_list)
-        self.assertIn("NO HOOK RUNS: scripts/git-hooks has no pre-push (lantern hooks repair)", text)
+        self.assertIn("NO PUSH CHECKS: scripts/git-hooks is missing or has no pre-push (lantern hooks repair)", text)
         self.assertIn("1 clone(s) flagged above", text)
         open(self.log, "w").close()
         self.assertEqual(self.run_cmd("repair"), 0)
@@ -195,7 +195,7 @@ class OwnershipAndApply(HooksTestBase):
             fh.write("broken=yes\nhp=.githooks\n")
         with mock.patch("sys.stdout") as out:
             self.run_cmd("status")
-        self.assertIn("NO HOOK RUNS: .githooks has no pre-push (lantern hooks apply)",
+        self.assertIn("NO PUSH CHECKS: .githooks is missing or has no pre-push (lantern hooks apply)",
                       "".join(c.args[0] for c in out.write.call_args_list))
         self.assertEqual(self.run_cmd("repair"), 0)
         self.assertEqual(self.calls(), [])

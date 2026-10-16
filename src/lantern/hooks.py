@@ -271,9 +271,9 @@ def plan_apply(state: Dict[str, str], agents: List[str]) -> List[List[str]]:
 def needs_repair(state: Dict[str, str]) -> bool:
     """Another tool took core.hooksPath over, or the setup points straight at the
     repository's own hooks, so the current security checks do not run there
-    (script-helpers reports that as unscanned=yes), or core.hooksPath names a
-    directory with no pre-push, so git runs no hook at all (broken=yes, from
-    script-helpers 0.54.0). A clone not set up yet is for apply, not repair."""
+    (script-helpers reports that as unscanned=yes), or its hooks directory is
+    missing or lost its pre-push, so no push checks run (broken=yes, from
+    script-helpers newer than 0.53.1). A clone not set up yet is for apply."""
     if state.get("taken_over") == "yes" or state.get("unscanned") == "yes":
         return True
     return state.get("broken") == "yes" and state.get("mode", "none") != "none"
@@ -284,7 +284,7 @@ def status_flag(state: Dict[str, str]) -> str:
     where = state.get("core_hooksPath") or "(unset)"
     if state.get("broken") == "yes":
         fix = "lantern hooks repair" if state.get("mode", "none") != "none" else "lantern hooks apply"
-        return "  NO HOOK RUNS: {} has no pre-push ({})".format(where, fix)
+        return "  NO PUSH CHECKS: {} is missing or has no pre-push ({})".format(where, fix)
     if state.get("taken_over") == "yes":
         return "  TAKEN OVER: now {} (lantern hooks repair)".format(where)
     if state.get("unscanned") == "yes":
