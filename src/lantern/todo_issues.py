@@ -438,7 +438,8 @@ def create_issue(
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Create GitHub issues from TODO.txt in the current repository while "
+            "Create GitHub issues from a TODO.txt, a Markdown TODO file or a "
+            "directory of Markdown issues in the current repository while "
             "skipping duplicates by normalized title and body fingerprint, "
             "including closed issues."
         )
