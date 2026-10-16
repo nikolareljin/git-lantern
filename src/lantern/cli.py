@@ -2725,7 +2725,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             hooks_action = _dialog_menu("Hooks", "script-helpers hooks on the clones under the workspace root:", [
                 ("status", "What is set up in each clone"),
                 ("apply", "Set up git hooks where missing, push-tests in private clones (shows the plan first)"),
-                ("repair", "Re-chain clones whose core.hooksPath another tool replaced"),
+                ("repair", "Re-chain clones another tool took over, or whose hooks dir is missing"),
                 ("back", "Back to main menu"),
             ], height, width)
             if hooks_action in (None, "back"):
@@ -5955,7 +5955,7 @@ def build_parser() -> argparse.ArgumentParser:
     hooks_sub = hooks_p.add_subparsers(dest="hooks_command", required=True)
     for name, text in (("status", "what is set up in each clone"),
                        ("apply", "set up the hooks in owned clones that lack them, and push-tests quick in private ones"),
-                       ("repair", "re-chain owned clones whose core.hooksPath another tool replaced"),
+                       ("repair", "re-chain owned clones another tool took over, or whose hooks dir is missing"),
                        ("remove", "undo the setup (restores what was there before)"),
                        ("export", "write the setup of owned clones to a file, for another machine"),
                        ("import", "apply an export to the clones found here")):
@@ -6062,7 +6062,7 @@ def build_parser() -> argparse.ArgumentParser:
     fleet_apply.add_argument("--refresh", action="store_true", help="ignore --snapshot and rebuild fleet context before apply")
     fleet_apply.add_argument("--log-json", default="", help="write full fleet apply execution log to JSON")
     fleet_apply.add_argument("--no-hooks-repair", action="store_true",
-                             help="do not re-chain owned clones whose core.hooksPath another tool replaced")
+                             help="do not re-chain owned clones another tool took over, or whose hooks dir is missing")
     fleet_apply.set_defaults(func=cmd_fleet_apply_and_repair)
 
     fleet_dirty = fleet_sub.add_parser("dirty", help="list repositories with tracked local changes")

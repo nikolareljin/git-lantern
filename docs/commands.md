@@ -347,16 +347,19 @@ on github.com under one of your owners:
 
 ```bash
 git config --global script-helpers.owners me,my-llc       # your namespaces
-git config --global script-helpers.home ~/Projects/script-helpers   # 0.50.0 or newer
-lantern hooks status
+git config --global script-helpers.home <a release copy>   # 0.50.0 or newer; NikOS sets it
+lantern hooks status                                       # flags set-up clones where no push check or scan runs
 lantern hooks apply --dry-run                              # the plan, nothing changed
 lantern hooks apply --batch 10 [--agents claude,codex|all] [--only repo-a,clients/x/repo-b]
-lantern hooks repair                                       # re-chain after husky & co.
+lantern hooks repair                                       # re-chain after husky & co., or a missing hooks dir
 lantern hooks remove [--agents codex]                      # all of ours, or those agents
 lantern hooks export hooks.json                            # this machine
 lantern hooks import hooks.json [--dry-run]                # another machine
 ```
 
+- `script-helpers.home` is where lantern runs `setup-hooks.sh` from. Point it
+  at a copy that stays on a release (NikOS pins one), not a checkout you switch
+  branches in: on an older branch, status and repair run that older code.
 - A clone whose `origin` is not under an owner (an employer's, someone else's)
   is listed as "not owned, left alone" and never changed.
 - `apply` also sets `git config script-helpers.push-tests quick` (quick tests

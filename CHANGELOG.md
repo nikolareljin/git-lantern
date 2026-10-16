@@ -4,6 +4,15 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `lantern hooks status` names what is wrong in a clone and where it points:
+  `NO PUSH CHECKS: <core.hooksPath> is missing or has no pre-push`
+  (script-helpers `broken=yes`, newer than 0.53.1), `TAKEN OVER: now <path>`,
+  `OWN HOOKS ONLY, NOT SCANNED: <path>`, then a count of the flagged clones.
+  Before, such a clone showed as set up while no push checks ran.
+  `repair` and `apply` fix a broken clone; one never set up is left to `apply`.
+
 ## 2026-10-15 — v0.11.0
 
 ### Security

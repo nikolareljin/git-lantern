@@ -271,8 +271,25 @@ def plan_apply(state: Dict[str, str], agents: List[str]) -> List[List[str]]:
 def needs_repair(state: Dict[str, str]) -> bool:
     """Another tool took core.hooksPath over, or the setup points straight at the
     repository's own hooks, so the current security checks do not run there
-    (script-helpers reports that as unscanned=yes)."""
-    return state.get("taken_over") == "yes" or state.get("unscanned") == "yes"
+    (script-helpers reports that as unscanned=yes), or its hooks directory is
+    missing or lost its pre-push, so no push checks run (broken=yes, from
+    script-helpers newer than 0.53.1). A clone not set up yet is for apply."""
+    if state.get("taken_over") == "yes" or state.get("unscanned") == "yes":
+        return True
+    return state.get("broken") == "yes" and state.get("mode", "none") != "none"
+
+
+def status_flag(state: Dict[str, str]) -> str:
+    """What is wrong in one clone, with the core.hooksPath it points at; "" when nothing."""
+    where = state.get("core_hooksPath") or "(unset)"
+    if state.get("broken") == "yes":
+        fix = "lantern hooks repair" if state.get("mode", "none") != "none" else "lantern hooks apply"
+        return "  NO PUSH CHECKS: {} is missing or has no pre-push ({})".format(where, fix)
+    if state.get("taken_over") == "yes":
+        return "  TAKEN OVER: now {} (lantern hooks repair)".format(where)
+    if state.get("unscanned") == "yes":
+        return "  OWN HOOKS ONLY, NOT SCANNED: {} (lantern hooks repair)".format(where)
+    return ""
 
 
 def describe(step: List[str]) -> str:
@@ -421,7 +438,7 @@ def cmd_status(repos: List[str], args) -> int:
     script, owners = _setup(args)
     selected = _selected(repos, args)
     print("owners: {}   script-helpers: {}".format(",".join(owners), os.path.dirname(os.path.dirname(script))))
-    failed = 0
+    failed = flagged = 0
     for path in selected:
         if not is_owned(path, owners):
             print("{:<40} not owned, left alone".format(_label(path, args)))
@@ -431,11 +448,13 @@ def cmd_status(repos: List[str], args) -> int:
             print("{:<40} status failed".format(_label(path, args)))
             failed += 1
             continue
-        flag = ("  TAKEN OVER (lantern hooks repair)" if st.get("taken_over") == "yes" else
-                "  OWN HOOKS ONLY, NOT SCANNED (lantern hooks repair)" if st.get("unscanned") == "yes" else "")
+        flag = status_flag(st)
+        flagged += 1 if flag else 0
         print("{:<40} git hooks: {:<8} agents: {:<14} push-tests: {}{}".format(
             _label(path, args), st.get("mode", "?"), ",".join(present_agents(st)) or "-",
             push_tests_value(path) or "-", flag))
+    if flagged:
+        print("{} clone(s) flagged above; lantern hooks repair fixes them (apply for one not set up)".format(flagged))
     return 1 if failed else 0
 
 
