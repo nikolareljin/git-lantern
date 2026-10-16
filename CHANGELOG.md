@@ -4,6 +4,8 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## 2026-10-15 — v0.11.0
+
 ### Security
 
 - `.env` loading takes only the keys lantern reads (`GITHUB_USER`,
