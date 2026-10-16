@@ -4,11 +4,18 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+## 2026-10-16 — v0.11.1
+
+### Changed
+
+- Vendored script-helpers 0.53.1 -> 0.54.0: `--status` reports a Claude hook
+  entry that is BROKEN or STALE, and repo porcelain adds `broken=`.
+
 ### Fixed
 
 - `lantern hooks status` names what is wrong in a clone and where it points:
   `NO PUSH CHECKS: <core.hooksPath> is missing or has no pre-push`
-  (script-helpers `broken=yes`, newer than 0.53.1), `TAKEN OVER: now <path>`,
+  (script-helpers `broken=yes`, 0.54.0 or newer), `TAKEN OVER: now <path>`,
   `OWN HOOKS ONLY, NOT SCANNED: <path>`, then a count of the flagged clones.
   Before, such a clone showed as set up while no push checks ran.
   `repair` and `apply` fix a broken clone; one never set up is left to `apply`.
