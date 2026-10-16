@@ -10,6 +10,9 @@ All notable changes to git-lantern are documented in this file.
   `GITHUB_TOKEN`, `GITLAB_USER`, `GITLAB_TOKEN`, `BITBUCKET_USER`,
   `BITBUCKET_TOKEN`, `LANTERN_SERVER`); other keys such as `PATH`,
   `GIT_SSH_COMMAND` or `GIT_LANTERN_CONFIG` are ignored.
+- Without `GIT_LANTERN_ENV`, `./.env` is read only when the current
+  directory is the lantern checkout; a `.env` in any other directory is
+  ignored.
 
 ### Added
 

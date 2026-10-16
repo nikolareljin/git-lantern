@@ -71,7 +71,15 @@ def _unquote(value: str) -> str:
 
 
 def load_dotenv() -> None:
-    path = os.environ.get("GIT_LANTERN_ENV", os.path.join(os.getcwd(), ".env"))
+    path = os.environ.get("GIT_LANTERN_ENV", "")
+    if not path:
+        # Without GIT_LANTERN_ENV, read ./.env only inside lantern's own
+        # checkout. Any other directory may be an untrusted clone whose .env
+        # could swap the user's token or server.
+        cwd = os.path.realpath(os.getcwd())
+        if cwd != os.path.realpath(os.path.dirname(_SRC_DIR)):
+            return
+        path = os.path.join(cwd, ".env")
     if not os.path.isfile(path):
         return
     with open(path, "r", encoding="utf-8") as handle:
