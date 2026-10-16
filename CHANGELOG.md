@@ -18,9 +18,6 @@ All notable changes to git-lantern are documented in this file.
 
 ### Fixed
 
-- Release `homebrew` job: a rerun after the tap branch was pushed exited 0
-  without opening the tap pull request ("nothing to commit" ended the step). It
-  now opens the PR whenever the branch's formula differs from the tap's `main`.
 - TUI "TODO -> Issues": a relative TODO path is resolved against the selected
   repository, not the directory lantern was started from; `~` is expanded.
 
