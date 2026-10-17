@@ -4,6 +4,13 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- The Homebrew formula is committed to the tap by ci-helpers
+  `homebrew-tap-publish.yml` with the tap's deploy key
+  (`HOMEBREW_TAP_DEPLOY_KEY`, `HOMEBREW_TAP_REPO` secrets). Before, each
+  release opened a tap pull request with `HOMEBREW_TAP_TOKEN` that had to be
+  merged by hand.
+
 ## 2026-10-16 — v0.11.1
 
 ### Changed
