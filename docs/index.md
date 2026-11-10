@@ -25,6 +25,7 @@ The default `lantern` command opens an interactive terminal UI when `dialog` is 
 - List repositories on GitHub, GitLab, or Bitbucket; clone a saved list; and manage gists and snippets where supported.
 - Configure servers interactively or import/export their configuration.
 - Find open pull requests with unresolved review threads using `lantern pr sweep`.
+- [Clean old local and remote branches](commands.md#lantern-fleet-cleanup) in selected repositories, with optional branch confirmation and PR/discussion exclusions.
 
 ## Recommended first workflow
 

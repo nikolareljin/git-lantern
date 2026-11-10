@@ -7,6 +7,37 @@ This guide focuses on real workflows. For the full command reference, see
 
 Lantern provides a full interactive TUI (terminal user interface) powered by the `dialog` CLI. This is ideal for users who prefer menu-driven interfaces over remembering command-line flags.
 
+## Clean old branches
+
+1. Run `lantern` and choose `branch_cleanup`.
+2. Choose the configured server and personal repository scope or an organization/group/workspace.
+3. Choose 30, 60, or 90 days, 6 months, or 1 year. The default is 30 days.
+4. Optionally enable `Confirm first`; it starts disabled.
+5. Select repositories with checkboxes and accept the selection to start cleanup.
+6. With `Confirm first` enabled, review branch checkboxes and confirm before each repository's deletions. Merged candidates start checked; unmerged candidates start unchecked.
+
+The first run records branch observations and normally skips deletion because
+branch age is not yet established. Run previews periodically, then clean after
+the selected cutoff has passed. Recently changed branches, open/Draft PRs,
+unresolved discussions, and recent comments remain excluded in either mode.
+The creator and creation date display `unknown` when unavailable; first-seen
+dates are shown separately.
+
+The same workflow is available from the CLI:
+
+```bash
+lantern fleet cleanup --root ~/workspace --server github.com --org my-org --select --dry-run
+lantern fleet cleanup --root ~/workspace --server github.com --org my-org --select --apply
+lantern fleet cleanup --root ~/workspace --server github.com --org my-org --select --confirm-first --apply
+```
+
+Without `Confirm first`, execution deletes only eligible old merged branches,
+both locally and remotely. The CLI requires `--apply` to delete; the TUI executes
+after repository selection. See the [command reference](commands.md#lantern-fleet-cleanup)
+for protection rules, credentials, metadata limits, and first-seen storage.
+
+## Interactive TUI setup and daily usage
+
 ### Launching TUI Mode
 
 ```bash

@@ -4,6 +4,12 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `lantern fleet cleanup` and TUI branch cleanup: repository checkboxes, age cutoffs,
+  local and remote deletion, and optional per-repository branch confirmation.
+  Open PRs, unresolved discussions, recent activity, and unknown age block deletion.
+- GitLab group and Bitbucket workspace filters for fleet repository discovery.
+
 ### Changed
 - The Homebrew formula is committed to the tap by ci-helpers
   `homebrew-tap-publish.yml` with the tap's deploy key

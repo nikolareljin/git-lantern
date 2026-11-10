@@ -20,6 +20,95 @@ pip install -e .
 source completions/lantern.bash
 ```
 
+## lantern fleet cleanup
+
+Clean old local and remote branches in repositories selected from the current
+workspace and configured server/user/organization scope. GitHub, GitHub Enterprise,
+GitLab, and Bitbucket Cloud API connections are supported. Merge classification
+uses ancestry and a byte-preserving reverse-patch check in a temporary index;
+it does not run configured merge drivers or modify the worktree.
+
+```bash
+# Preview selected repositories; this also records first-seen dates.
+lantern fleet cleanup --root ~/workspace --server github.com --select --dry-run
+
+# Delete only eligible merged branches without per-repository prompts.
+lantern fleet cleanup --root ~/workspace --org my-org --select --older-than 60d --apply
+
+# Review branches before deleting in each repository.
+lantern fleet cleanup --root ~/workspace --select --confirm-first --apply
+
+# Scriptable selection without dialog or a terminal.
+lantern fleet cleanup --root ~/workspace --repos my-org/repo-a,my-org/repo-b --apply
+```
+
+| Option | Behavior |
+| --- | --- |
+| `--select` | Repository checkbox selection using `dialog`. Also opens by default when `--repos` is omitted. |
+| `--repos` | Comma-separated full repository names or clone paths within the selected scope. Ambiguous names refuse cleanup. |
+| `--older-than` | `30d` (default), `60d`, `90d`, `6m`, or `1y`. Months and years use calendar subtraction in UTC. |
+| `--confirm-first` | Off by default. Review branch checkboxes and confirm separately for each repository. Unmerged branches start unchecked. |
+| `--apply` | Permit deletion. The CLI otherwise previews only. |
+| `--dry-run` | Explicit preview. Fetches refs and updates local observations; deletes no branches. |
+| `--server`, `--user`, `--org`, `--all-orgs`, `--with-user` | Existing fleet scope filters. GitLab organizations select groups; Bitbucket organizations select workspaces. |
+| `--root`, `--max-depth`, `--include-hidden`, `--include-forks` | Existing fleet discovery filters. |
+
+Without `--confirm-first`, only old branches whose current content has landed in
+the default branch are eligible. With it, old unmerged branches can be explicitly
+selected. Confirmation never overrides a safety exclusion. Cancellation or an
+empty selection deletes nothing.
+
+The branch checklist shows scope, merge status, creator, creation date, first-seen
+date, last commit author and committer, commit date, and latest activity. A
+scrollable details screen precedes the checklist so every field can be read.
+Git does not retain branch creation metadata. Unavailable creator/creation dates display
+`unknown`; commit authors and PR authors are never presented as branch creators.
+An intact local branch-creation reflog entry supplies the local creator and
+creation date. Remote branch creation metadata normally remains unavailable.
+
+Branch age is established by local first-seen tracking. Observations are stored
+in `$XDG_STATE_HOME/git-lantern/branch-observations.json`, defaulting to
+`~/.local/state/git-lantern/branch-observations.json`. A first run normally deletes
+nothing. Rerun previews periodically; after the full cutoff, unchanged branches
+may qualify. Missing/corrupt records, observed ref changes, or observed recreation
+restart the waiting period. An unobserved delete-and-recreate at the same SHA
+cannot be distinguished from an unchanged branch. First-seen is observation
+evidence, not a claimed creation timestamp.
+
+These branches are always excluded:
+
+- Default and server-protected branches; `main`, `master`, `trunk`, `develop`,
+  `production`, `release`, `release/*`, and `hotfix/*`.
+- Branches checked out in any worktree, and local branches with unpushed commits
+  or an uncertain/missing matching origin upstream.
+- Branches with open or Draft PRs/MRs, unresolved review discussions, or recent
+  PR/commit comments (including edits). Pending GitHub reviews also block cleanup.
+- Branches with recent commits, merges, reflog activity, or changed observations.
+- Branches whose protection, age, PR state, or discussion state cannot be verified.
+
+Discussion checks cover associated PR/MR history, its commits, the branch tip,
+and commits absent from the default branch. Shared base history is excluded.
+Bitbucket discussions with unavailable resolution data are retained, even when
+old. Branching-model restrictions whose scope cannot be resolved also refuse
+cleanup. Bitbucket restriction inspection requires repository administration
+permission; insufficient permissions skip cleanup rather than bypassing checks.
+Fork PR checks inspect source-ref associations on GitHub, accessible MRs across
+GitLab projects, and the accessible Bitbucket fork network. Incomplete evidence
+or inaccessible required endpoints refuse cleanup. Large GitHub PRs whose
+commit lists are truncated are also retained.
+
+Cleanup fetches each selected clone, validates origin identity, and checks live
+provider data. Shallow or un-cloned repositories are skipped. Before every
+deletion it repeats discovery and checks the expected SHA. Remote deletion uses
+an explicit SHA lease; local deletion uses a compare-and-swap ref update. The
+provider API checks and Git deletion are separate operations, so discussion
+changes can race with deletion after the final check.
+
+Output reports deleted, skipped, cancelled, and failed branches with reasons.
+Failures return exit code 1; previews and completed runs return 0. A repository
+failure does not expand the selected scope. Shell completion discovers these
+options through the existing `argcomplete` integration.
+
 ## Server configuration
 
 Lantern can read a `config.json` file to manage multiple git servers (GitHub, GitLab, Bitbucket, or self-hosted instances).

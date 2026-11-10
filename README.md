@@ -29,6 +29,7 @@ Commands (jump to detailed guides):
 - `lantern fleet plan` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern fleet apply` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
 - `lantern fleet logs` -> `docs/use-cases.md#unified-fleet-workflow-recommended`
+- `lantern fleet cleanup` -> [old branch cleanup](docs/commands.md#lantern-fleet-cleanup), with repository checkboxes and optional per-repository branch confirmation
 - `lantern repos` -> `docs/use-cases.md#lantern-repos`
 - `lantern scan` -> `docs/use-cases.md#lantern-scan`
 - `lantern status` -> `docs/use-cases.md#lantern-status`
@@ -63,6 +64,9 @@ lantern fleet apply --root ~/workspace --server github.com --clone-missing --pul
 lantern fleet apply --root ~/workspace --server github.com --checkout-latest-branch --repos repo-a,repo-b
 lantern fleet apply --root ~/workspace --server github.com --clone-missing --pull-behind --only-clean --log-json data/fleet-logs/latest.json
 lantern fleet logs --latest
+lantern fleet cleanup --root ~/workspace --server github.com --select --dry-run
+lantern fleet cleanup --root ~/workspace --server github.com --select --older-than 60d --apply
+lantern fleet cleanup --root ~/workspace --org my-org --select --confirm-first --apply
 lantern lazygit --root ~/workspace --select
 lantern status --root ~/workspace --fetch
 lantern status --root ~/workspace --fetch --with-prs
@@ -78,6 +82,7 @@ lantern pr sweep nikolareljin/git-lantern --json
 ```
 
 Selection tips:
+- Branch cleanup defaults to a 30-day cutoff and "Confirm first" off. First-seen tracking must establish branch age before deletion; a first run normally skips branches. See the [cleanup workflow](docs/use-cases.md#clean-old-branches).
 - Use `--repos repo-a,repo-b` for explicit multi-repo actions.
 - `--checkout-latest-branch` now auto-targets only repos whose detected latest branch would actually change something, while still letting you override the scope with `--repos`.
 - Latest-branch checkout skips repos with tracked uncommitted changes, but it still allows untracked-only worktrees.
