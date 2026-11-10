@@ -74,8 +74,24 @@ def fetch_repos(
             include_user=include_user,
         )
     if provider == "gitlab":
+        if organizations or not include_user:
+            repos = _fetch_gitlab_repos(user, token, include_forks, base_url, auth) if include_user else []
+            for org in organizations or []:
+                repos.extend(_fetch_gitlab_repos(user, org.get("token") or token, include_forks,
+                                                base_url, auth, group=org["name"]))
+            if not organizations and not include_user:
+                raise ValueError("No organizations selected; use --org or --with-user")
+            return list({repo["name"]: repo for repo in repos}.values())
         return _fetch_gitlab_repos(user, token, include_forks, base_url, auth)
     if provider == "bitbucket":
+        if organizations or not include_user:
+            repos = _fetch_bitbucket_repos(user, token, include_forks, base_url, auth) if include_user else []
+            for org in organizations or []:
+                repos.extend(_fetch_bitbucket_repos(user, org.get("token") or token,
+                                                   include_forks, base_url, auth, workspace=org["name"]))
+            if not organizations and not include_user:
+                raise ValueError("No organizations selected; use --org or --with-user")
+            return list({repo["name"]: repo for repo in repos}.values())
         return _fetch_bitbucket_repos(user, token, include_forks, base_url, auth)
     raise ValueError(f"Unsupported provider: {provider}")
 
@@ -103,8 +119,9 @@ def _fetch_gitlab_repos(
     include_forks: bool,
     base_url: str,
     auth: Optional[Dict[str, str]],
+    group: str = "",
 ) -> List[Dict]:
-    if not user and not token:
+    if not user and not token and not group:
         raise ValueError("User is required without a token.")
     per_page = 100
     page = 1
@@ -112,7 +129,10 @@ def _fetch_gitlab_repos(
     base_url = _base_url("gitlab", base_url).rstrip("/")
     headers = auth_headers("gitlab", user, token, auth)
 
-    if token and not user:
+    if group:
+        url_base = f"{base_url}/groups/{urllib.parse.quote(group, safe='')}/projects"
+        base_params = {"include_subgroups": "true", "with_shared": "false", "per_page": str(per_page)}
+    elif token and not user:
         url_base = f"{base_url}/projects"
         base_params = {"membership": "true", "per_page": str(per_page)}
     else:
@@ -149,12 +169,13 @@ def _fetch_bitbucket_repos(
     include_forks: bool,
     base_url: str,
     auth: Optional[Dict[str, str]],
+    workspace: str = "",
 ) -> List[Dict]:
-    if not user:
+    if not user and not workspace:
         raise ValueError("User is required for Bitbucket.")
     base_url = _base_url("bitbucket", base_url).rstrip("/")
     headers = auth_headers("bitbucket", user, token, auth)
-    url = f"{base_url}/repositories/{urllib.parse.quote(user)}?pagelen=100"
+    url = f"{base_url}/repositories/{urllib.parse.quote(workspace or user or '', safe='')}?pagelen=100"
     repos: List[Dict] = []
 
     while url:

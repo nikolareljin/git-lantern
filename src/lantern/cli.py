@@ -24,6 +24,7 @@ from . import git
 from . import github
 from . import hooks as lantern_hooks
 from . import todo_issues
+from . import cleanup_cmd
 from .table import render_table
 
 # Resolved path to the src/ directory for subprocess PYTHONPATH
@@ -418,12 +419,15 @@ def _dialog_yesno(
     text: str,
     height: int = 10,
     width: int = 60,
+    default_no: bool = False,
 ) -> bool:
     """Show a dialog yes/no box and return True for yes, False for no."""
     cmd = [
         "dialog", "--title", title, "--yesno", text,
         str(height), str(width),
     ]
+    if default_no:
+        cmd.insert(1, "--defaultno")
     result = subprocess.run(cmd, check=False)
     return result.returncode == 0
 
@@ -981,7 +985,7 @@ def _validate_session_root(root: str, height: int, width: int) -> bool:
     return False
 
 
-def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int = 0) -> None:
+def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int = 0) -> bool:
     """Display text in a scrollable dialog textbox using a temp file."""
     if height == 0 or width == 0:
         height, width = _dialog_init()
@@ -990,7 +994,7 @@ def _dialog_textbox_from_text(title: str, text: str, height: int = 0, width: int
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
         cmd = ["dialog", "--title", title, "--textbox", tmp_path, str(height), str(width)]
-        subprocess.run(cmd, check=False)
+        return subprocess.run(cmd, check=False).returncode == 0
     finally:
         try:
             os.remove(tmp_path)
@@ -1970,6 +1974,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             ("todo_issues", "Create GitHub issues from a TODO file or directory"),
             ("lazygit", "Open repository in lazygit"),
             ("fleet", "Unified fleet plan/apply (clone, pull, push)"),
+            ("branch_cleanup", "Clean old branches in selected repositories"),
             ("hooks", "Security hooks on your repositories (status, apply, repair)"),
             ("scan", "Scan repositories to JSON"),
             ("table", "Render table from JSON scan"),
@@ -2001,6 +2006,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
         if action == "dashboard":
             _handle_tui_dashboard_action(session, height, width, dirty_only=False)
+            continue
+
+        if action == "branch_cleanup":
+            cleanup_cmd.tui(session, height, width)
             continue
 
         if action == "dirty_repos":
@@ -5979,6 +5988,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fleet = sub.add_parser("fleet", help="unified multi-repo management (plan/apply)")
     fleet_sub = fleet.add_subparsers(dest="fleet_command", required=True)
+    cleanup_cmd.add_parser(fleet_sub)
 
     fleet_overview = fleet_sub.add_parser("overview", help="build the primary fleet dashboard view")
     fleet_overview.add_argument("--root", default=os.getcwd())
