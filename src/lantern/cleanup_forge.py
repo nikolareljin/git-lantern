@@ -148,6 +148,10 @@ class Provider:
             self.prs = self.bitbucket_network_prs(meta)
         if not isinstance(self.default_branch, str) or not self.default_branch:
             raise Unsafe("default branch unavailable")
+        repository_id = meta.get("uuid" if self.provider == "bitbucket" else "id")
+        if not repository_id:
+            raise Unsafe("stable repository identity unavailable")
+        self.identity = self.base + "/" + self.repo + "#" + str(repository_id)
 
     def protected(self, name):
         branches = [b for b in self.branches if b.get("name") == name]

@@ -569,3 +569,62 @@ def test_inherited_git_context_cannot_redirect_cleanup(repo, tmp_path, monkeypat
     assert cleanup.git(repo, "rev-parse", "--show-toplevel").stdout.strip() == repo
     with cleanup.Observations(tmp_path / "state.json") as store:
         assert len([row for row in aged_scan(repo, store) if not row.reason]) == 2
+
+
+def test_repeated_context_at_another_location_is_not_a_merge(repo):
+    block = "start\na\nb\nc\nd\ne\nf\nend\n"
+    (Path(repo) / "repeat").write_text(block * 4)
+    command(repo, "add", "repeat")
+    command(repo, "commit", "-m", "repeated blocks")
+    command(repo, "checkout", "-b", "not-landed")
+    (Path(repo) / "repeat").write_text(block.replace("d\n", "NEW\nd\n", 1) + block * 3)
+    command(repo, "commit", "-am", "change first block")
+    tip = command(repo, "rev-parse", "HEAD")
+    command(repo, "checkout", "main")
+    (Path(repo) / "repeat").write_text(block * 2 + block.replace("d\n", "NEW\nd\n", 1) + block)
+    command(repo, "commit", "-am", "change third block")
+    assert not cleanup.merge_state(repo, command(repo, "rev-parse", "HEAD"), tip)
+
+
+@pytest.mark.parametrize("provider", ["github", "gitlab", "bitbucket"])
+def test_server_id_change_resets_branch_age(monkeypatch, provider):
+    api = adapter(provider)
+    meta = {"id": 1, "uuid": "one", "default_branch": "main", "mainbranch": {"name": "main"}}
+    monkeypatch.setattr(api, "request", lambda *args: (meta, {}))
+    monkeypatch.setattr(api, "pages", lambda *args: [])
+    monkeypatch.setattr(api, "bitbucket_network_prs", lambda *args: [])
+    api.refresh()
+    original = api.identity
+    meta.update(id=2, uuid="two")
+    api.refresh()
+    assert api.identity != original
+
+
+@pytest.mark.parametrize("name", ["clone with spaces", pytest.param(
+    'clone with "quotes"', marks=pytest.mark.skipif(os.name == "nt", reason="Windows disallows quotes in directory names")
+)])
+def test_isolated_merge_reads_objects_from_quoted_paths(repo, name):
+    moved = Path(repo).with_name(name)
+    Path(repo).rename(moved)
+    base = command(moved, "rev-parse", "main")
+    tree = command(moved, "rev-parse", "main^{tree}")
+    parent = command(moved, "rev-parse", "old-feature")
+    equivalent = command(moved, "commit-tree", tree, "-p", parent, "-m", "equivalent tree")
+    assert cleanup.merge_state(str(moved), base, equivalent)
+
+
+def test_global_merge_driver_cannot_discard_branch_work(repo, tmp_path, monkeypatch):
+    global_config = tmp_path / "global-config"
+    global_config.write_text('[merge "discard"]\n\tdriver = true\n')
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    (Path(repo) / ".gitattributes").write_text("file merge=discard\n")
+    command(repo, "add", ".gitattributes")
+    command(repo, "commit", "-m", "attributes")
+    command(repo, "checkout", "-b", "global-driver-test")
+    (Path(repo) / "file").write_text("branch content\n")
+    command(repo, "commit", "-am", "branch")
+    tip = command(repo, "rev-parse", "HEAD")
+    command(repo, "checkout", "main")
+    (Path(repo) / "file").write_text("base content\n")
+    command(repo, "commit", "-am", "base")
+    assert not cleanup.merge_state(repo, command(repo, "rev-parse", "HEAD"), tip)

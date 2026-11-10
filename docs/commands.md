@@ -25,8 +25,10 @@ source completions/lantern.bash
 Clean old local and remote branches in repositories selected from the current
 workspace and configured server/user/organization scope. GitHub, GitHub Enterprise,
 GitLab, and Bitbucket Cloud API connections are supported. Merge classification
-uses ancestry and a byte-preserving reverse-patch check in a temporary index;
-it does not run configured merge drivers or modify the worktree.
+uses ancestry and a three-way merge in an isolated temporary object store.
+Only Git's text merge driver is allowed; repository/global merge configuration
+is excluded, and the worktree is unchanged. Non-ancestry classification requires
+Git 2.38 or newer (`merge-tree --write-tree`).
 
 ```bash
 # Preview selected repositories; this also records first-seen dates.
@@ -71,7 +73,9 @@ in `$XDG_STATE_HOME/git-lantern/branch-observations.json`, defaulting to
 `~/.local/state/git-lantern/branch-observations.json`. A first run normally deletes
 nothing. Rerun previews periodically; after the full cutoff, unchanged branches
 may qualify. Missing/corrupt records, observed ref changes, or observed recreation
-restart the waiting period. An unobserved delete-and-recreate at the same SHA
+restart the waiting period. A changed server repository ID also starts a new
+observation history, including when a repository is recreated at the same URL.
+An unobserved delete-and-recreate of a branch at the same SHA
 cannot be distinguished from an unchanged branch. First-seen is observation
 evidence, not a claimed creation timestamp.
 

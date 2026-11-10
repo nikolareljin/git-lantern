@@ -47,7 +47,7 @@ def cutoff(age: str, now: datetime) -> datetime:
     return now.replace(year=year, month=month, day=min(now.day, calendar.monthrange(year, month)[1]))
 
 
-def git(path: str, *args: str, check: bool = True, index_file=None, input=None) -> subprocess.CompletedProcess:
+def git(path: str, *args: str, check: bool = True, isolated: bool = False) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX",
                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
@@ -56,11 +56,12 @@ def git(path: str, *args: str, check: bool = True, index_file=None, input=None) 
     for key in list(env):
         if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
             del env[key]
-    if index_file:
-        env["GIT_INDEX_FILE"] = index_file
+    if isolated:
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull,
+                   GIT_CONFIG_NOSYSTEM="1", GIT_ATTR_NOSYSTEM="1")
     result = subprocess.run(
         ["git", "--no-replace-objects", "-C", path, *args], capture_output=True, text=True, timeout=120, check=False,
-        env=env, input=input,
+        env=env, stdin=subprocess.DEVNULL,
     )
     if check and result.returncode:
         # Git errors can contain authenticated remote URLs. Keep them out of reports.
@@ -171,21 +172,25 @@ def merge_state(path: str, base: str, sha: str) -> bool:
         return True
     if ancestor.returncode != 1:
         raise Unsafe("cannot establish merge ancestry")
-    common = git(path, "merge-base", base, sha).stdout.strip()
-    patch = git(path, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", "--full-index",
-                common, sha, "--").stdout
-    if not patch:
-        return True
-    # Reverse the complete branch patch against a private index. This bypasses
-    # configured merge drivers and preserves whitespace and binary differences.
+    git(path, "merge-base", base, sha)
+    objects = git(path, "rev-parse", "--git-path", "objects").stdout.strip()
+    objects = os.path.realpath(os.path.join(path, objects))
+    object_format = git(path, "rev-parse", "--show-object-format").stdout.strip()
+    base_tree = git(path, "rev-parse", base + "^{tree}").stdout.strip()
+    # Use normal three-way text merging in an isolated object store. A reverse
+    # patch can match the wrong repeated block and discard unmerged work.
     with tempfile.TemporaryDirectory(prefix="lantern-merge-") as directory:
-        index_file = os.path.join(directory, "index")
-        git(path, "read-tree", base, index_file=index_file)
-        result = git(path, "-c", "apply.ignoreWhitespace=no", "apply", "--cached", "--reverse", "--check",
-                     "--whitespace=nowarn", "-", index_file=index_file, input=patch, check=False)
+        git(directory, "init", "--bare", "--template=", "--object-format=" + object_format, isolated=True)
+        Path(directory, "objects", "info", "alternates").write_text(
+            json.dumps(objects, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        Path(directory, "info").mkdir(exist_ok=True)
+        Path(directory, "info", "attributes").write_text("* merge=text\n", encoding="utf-8")
+        result = git(directory, "-c", "merge.renormalize=false", "-c", "merge.renames=false",
+                     "merge-tree", "--write-tree", base, sha, isolated=True, check=False)
     if result.returncode not in (0, 1):
         raise Unsafe("cannot verify branch content against the default branch")
-    return result.returncode == 0
+    return result.returncode == 0 and result.stdout.splitlines()[0] == base_tree
 
 
 def local_guard(path: str, candidate: Candidate) -> None:
