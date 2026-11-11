@@ -4,10 +4,6 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-- Package builds use SPDX license metadata without setuptools deprecation warnings.
-  Hatchling preserves Python 3.8 build support and reads the version from VERSION.
-
 ### Added
 - `lantern fleet cleanup` and TUI branch cleanup: repository checkboxes, age cutoffs,
   local and remote deletion, and optional per-repository branch confirmation.
@@ -15,6 +11,8 @@ All notable changes to git-lantern are documented in this file.
 - GitLab group and Bitbucket workspace filters for fleet repository discovery.
 
 ### Changed
+- Package builds use SPDX license metadata without setuptools deprecation warnings.
+  Hatchling preserves Python 3.8 build support and reads the version from VERSION.
 - The Homebrew formula is committed to the tap by ci-helpers
   `homebrew-tap-publish.yml` with the tap's deploy key
   (`HOMEBREW_TAP_DEPLOY_KEY`, `HOMEBREW_TAP_REPO` secrets). Before, each
