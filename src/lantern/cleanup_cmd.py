@@ -1,6 +1,7 @@
 """CLI and dialog frontends for the shared branch cleanup policy."""
 
 import argparse
+from collections import Counter
 import contextlib
 import io
 import os
@@ -142,6 +143,15 @@ def run(args):
                     print("  No eligible branches. Nothing deleted in this repository.")
                     if any("first observation" in row.reason for row in rows):
                         print(f"  Branch age is not yet established. First-seen observations must be older than {args.older_than}.")
+                if args.confirm_first and not eligible:
+                    reasons = Counter(row.reason or "not eligible in this mode" for row in rows)
+                    notice = f"{name}: 0 selectable branches ({len(rows)} inspected).\n\n"
+                    notice += "\n".join(f"{count}: {reason}" for reason, count in reasons.most_common(5))
+                    if any("first observation" in row.reason for row in rows):
+                        notice += (f"\n\nBranches must be observed unchanged for {args.older_than}. "
+                                   "An old commit does not establish branch creation age.")
+                    notice += "\n\nNothing deleted. The final branch list is a read-only report with all skip reasons."
+                    cli._dialog_msgbox("No branches eligible for selection", notice, 0, 0)
                 if args.confirm_first and eligible:
                     details = "\n\n".join("[{}] {}".format(i, row.label().replace("; ", "\n    "))
                                             for i, row in enumerate(eligible))

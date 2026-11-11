@@ -65,7 +65,8 @@ inspection, PR/comment checks, revalidation, and deletion. Each selected
 repository is identified by its position in the run. The final report lists
 every inspected branch and its eligibility/skip reason, even when zero branches
 qualify. This final screen is labeled `Cleanup results (read-only)`. When no
-branches qualify, no checkbox list opens and the report explains each exclusion.
+branches qualify, no checkbox list opens. Confirm first shows an explicit
+`No branches eligible for selection` notice with skip counts before the report.
 Branches excluded before merge classification show `not checked`.
 Accepting the options dialog with `Confirm first` unchecked continues normally;
 Cancel stops the operation.

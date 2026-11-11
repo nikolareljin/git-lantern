@@ -21,6 +21,10 @@ metadata, skip reasons, and deletion counts, including when no branches qualify.
 5. Select repositories with checkboxes and accept the selection to start cleanup.
 6. With `Confirm first` enabled, the eligible branch checkboxes open directly. Press Space to select branches, then choose `Review deletion` and confirm. Press F1 for full branch metadata; Exit returns to selection. Merged candidates start checked; unmerged candidates start unchecked.
 
+If Confirm first shows `No branches eligible for selection`, the following list
+is a read-only report, not a branch selector. The notice summarizes the skip
+reasons. An old last commit alone does not prove the branch itself is old.
+
 The first run records branch observations and normally skips deletion because
 branch age is not yet established. Run previews periodically, then clean after
 the selected cutoff has passed. Recently changed branches, open/Draft PRs,

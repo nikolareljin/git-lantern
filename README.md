@@ -206,7 +206,15 @@ lantern sync --root "$HOME/workspace" --pull --only-clean --only-upstream
 
 Use `./install --dry-run` to print the resolved prefix and launcher path
 without changing the machine. Use explicit `--prefix` and `--bin-link` values
-when another tool owns the installation paths.
+when another tool owns the installation paths. The installer warns when `PATH`
+selects a different installation. On Linux, the defaults are `/opt/git-lantern`
+and `/usr/local/bin/lantern`. To update an existing per-user installation:
+
+```bash
+./install --prefix "$HOME/.local/opt/git-lantern" --bin-link "$HOME/.local/bin/lantern"
+```
+
+Use `command -v lantern` to check which launcher your shell selects.
 
 ## Shell completion
 

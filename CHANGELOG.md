@@ -5,6 +5,9 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Confirm first explains when no branches can be selected, including the initial
+  observation waiting period, before showing the read-only report.
+- The installer warns when PATH selects a different installation from its target.
 - Confirm first opens branch checkboxes directly; F1 shows full metadata and
   returns to the same selection instead of blocking cleanup behind an Exit screen.
 - TUI background operations show animated progress and elapsed time instead of

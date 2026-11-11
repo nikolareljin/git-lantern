@@ -698,3 +698,21 @@ def test_branch_checklist_metadata_lifetime_and_cancel(monkeypatch, status, outp
     assert cleanup_cmd.choose("Branches", "Select", [("1", "old", False)],
                               details="creator=Test; created=2020-01-01") == expected
     assert len(files) == 1 and not files[0].exists()
+
+
+def test_first_run_confirm_explains_why_no_selector_opens(monkeypatch, tmp_path, repo):
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--confirm-first", "--apply"])
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": repo, "adapter": Provider()}])
+    monkeypatch.setattr(cleanup_cmd, "choose", lambda *args, **kwargs: pytest.fail("excluded branch offered"))
+    monkeypatch.setattr(cleanup, "delete", lambda *args: pytest.fail("unknown-age branch deleted"))
+    notices = []
+    monkeypatch.setattr(cli, "_dialog_msgbox", lambda title, text, *args: notices.append((title, text)))
+    assert cleanup_cmd.command(args) == 0
+    assert len(notices) == 1
+    assert notices[0][0] == "No branches eligible for selection"
+    assert "30d" in notices[0][1]
+    assert "old commit" in notices[0][1]
+    assert "protected branch name" in notices[0][1]
