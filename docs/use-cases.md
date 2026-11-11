@@ -19,14 +19,15 @@ metadata, skip reasons, and deletion counts, including when no branches qualify.
 3. Choose 30, 60, or 90 days, 6 months, or 1 year. The default is 30 days.
 4. Optionally enable `Confirm first`; it starts disabled.
 5. Select repositories with checkboxes and accept the selection to start cleanup.
-6. With `Confirm first` enabled, the eligible branch checkboxes open directly. Press Space to select branches, then choose `Review deletion` and confirm. Press F1 for full branch metadata; Exit returns to selection. Merged candidates start checked; unmerged candidates start unchecked.
+6. With `Confirm first` enabled, the eligible branch checkboxes open directly. Press Space to select branches, then choose `Review deletion` and confirm. Press F1 for full branch metadata; Exit returns to selection. Merged candidates with established age start checked; unmerged and unknown-age candidates start unchecked. Unknown creation age requires a separate explicit approval before the final deletion confirmation.
 
 If Confirm first shows `No branches eligible for selection`, the following list
 is a read-only report, not a branch selector. The notice summarizes the skip
 reasons. An old last commit alone does not prove the branch itself is old.
 
-The first run records branch observations and normally skips deletion because
-branch age is not yet established. Run previews periodically, then clean after
+Automatic cleanup records branch observations and normally skips deletion on
+its first run. Confirm first can show old inactive branches immediately, marking
+unknown creation age and requiring explicit approval before deletion. Run previews periodically, then clean after
 the selected cutoff has passed. Recently changed branches, open/Draft PRs,
 unresolved discussions, and recent comments remain excluded in either mode.
 The creator and creation date display `unknown` when unavailable; first-seen

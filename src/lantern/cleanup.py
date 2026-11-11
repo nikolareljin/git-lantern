@@ -151,6 +151,7 @@ class Candidate:
     first_seen: str = "unknown"
     reason: str = ""
     merge_checked: bool = False
+    age_uncertain: bool = False
 
     @property
     def ref(self) -> str:
@@ -160,8 +161,12 @@ class Candidate:
         state = "merged" if self.merged else "UNMERGED"
         if self.reason and not self.merge_checked:
             state = "not checked"
+        age = "UNKNOWN - manual approval required" if self.age_uncertain else "established"
+        if self.reason and not self.merge_checked and not self.age_uncertain:
+            age = "not checked"
         return (f"{self.scope} {self.name} [{state}] "
                 f"creator={self.creator}; created={self.created}; first-seen={self.first_seen}; "
+                f"creation-age={age}; "
                 f"last-author={self.author}; last-committer={self.committer}; "
                 f"last-commit={self.changed}; activity={self.activity}")
 
@@ -213,7 +218,7 @@ def local_guard(path: str, candidate: Candidate) -> None:
             raise Unsafe("local branch has unpushed commits")
 
 
-def scan(path, provider, observations, age, now=None) -> List[Candidate]:
+def scan(path, provider, observations, age, now=None, review_unknown_age=False) -> List[Candidate]:
     now = now or datetime.now(timezone.utc)
     limit = cutoff(age, now)
     progress.report("Validating the clone and origin...")
@@ -271,10 +276,19 @@ def scan(path, provider, observations, age, now=None) -> List[Candidate]:
             # Reflogs detect a local ref updated recently even when its commit is old.
             log = git(path, "reflog", "show", "-1", "--date=iso-strict", "--format=%gD", ref).stdout.strip()
             if "@{" in log:
-                last_commit = max(last_commit, timestamp(log.rsplit("@{", 1)[1].rstrip("}")))
-            row.activity = max(last_commit, first).isoformat()
+                ref_changed = timestamp(log.rsplit("@{", 1)[1].rstrip("}"))
+                # A tracking ref's first fetch is not evidence of server-side creation.
+                tracking_creation = False
+                if scope == "remote" and review_unknown_age and first >= limit:
+                    entries = git(path, "reflog", "show", "--format=%gs", ref).stdout.splitlines()
+                    tracking_creation = len(entries) == 1 and entries[0].endswith(": storing head")
+                if not tracking_creation:
+                    last_commit = max(last_commit, ref_changed)
             if first >= limit:
-                raise Unsafe("branch age not established; waiting since first observation")
+                if not review_unknown_age:
+                    raise Unsafe("branch age not established; waiting since first observation")
+                row.age_uncertain = row.created == "unknown"
+            row.activity = last_commit.isoformat()
             if last_commit >= limit:
                 raise Unsafe("recent branch activity")
             progress.report(branch_status + "\nChecking whether the current tip is merged...")
@@ -285,7 +299,7 @@ def scan(path, provider, observations, age, now=None) -> List[Candidate]:
             activity = provider.activity(name, commits)
             if activity.blocked:
                 raise Unsafe(activity.blocked)
-            latest = max([last_commit, first] + activity.dates)
+            latest = max([last_commit] + ([] if review_unknown_age else [first]) + activity.dates)
             row.activity = latest.isoformat()
             if latest >= limit:
                 raise Unsafe("recent branch activity")

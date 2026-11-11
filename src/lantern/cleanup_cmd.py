@@ -27,7 +27,7 @@ def add_parser(sub):
     parser.add_argument("--repos", default="", help="comma-separated full repository names or clone paths")
     parser.add_argument("--select", action="store_true", help="select repositories using checkboxes (requires dialog)")
     parser.add_argument("--older-than", choices=cleanup.AGES, default="30d")
-    parser.add_argument("--confirm-first", action="store_true", help="review branches per repository; unmerged branches start unchecked")
+    parser.add_argument("--confirm-first", action="store_true", help="review branches per repository; unmerged and unknown-age branches start unchecked")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--apply", action="store_true", help="delete eligible branches; otherwise preview only")
     action.add_argument("--dry-run", action="store_true", help="preview without deleting branches")
@@ -130,7 +130,7 @@ def run(args):
                 continue
             try:
                 rows = work(heading + "\nInspecting local and remote branches...",
-                            cleanup.scan, path, adapter, observations, args.older_than)
+                            cleanup.scan, path, adapter, observations, args.older_than, None, args.confirm_first)
                 inspected += len(rows)
                 for row in rows:
                     verdict = row.reason or ("eligible" if row.merged else "requires explicit unmerged selection")
@@ -156,12 +156,22 @@ def run(args):
                     details = "\n\n".join("[{}] {}".format(i, row.label().replace("; ", "\n    "))
                                             for i, row in enumerate(eligible))
                     tags = choose("Branch cleanup: " + name,
-                                  "Space: toggle branch. F1: full branch details. Accept to review deletion.\n"
+                                  "Space: toggle branch. F1: full branch details. Unknown creation age starts unchecked.\n"
                                   "UNMERGED branches can contain work absent from the default branch.",
-                                  [(str(i), row.label(), row.merged) for i, row in enumerate(eligible)], details=details)
+                                  [(str(i), row.label(), row.merged and not row.age_uncertain) for i, row in enumerate(eligible)], details=details)
                     eligible = [row for i, row in enumerate(eligible) if str(i) in tags]
                     if not eligible:
                         print("  No branches selected; nothing deleted in this repository.")
+                        continue
+                    uncertain = [row for row in eligible if row.age_uncertain]
+                    if uncertain and args.apply and not cli._dialog_yesno(
+                        "Approve unknown branch creation age",
+                        f"Creation dates cannot be established for {len(uncertain)} selected branches in {name}.\n\n"
+                        "Their activity is old, but they may be newly created refs pointing to old commits. "
+                        "Allow deletion of these specific selected branches despite unknown creation age?",
+                        height=0, width=0, default_no=True,
+                    ):
+                        print("  cancelled: unknown creation age was not approved; nothing deleted in this repository")
                         continue
                     if eligible and args.apply and not cli._dialog_yesno(
                         "Confirm branch deletion", "Delete {} selected branches in {}?".format(len(eligible), name),
@@ -176,9 +186,9 @@ def run(args):
                 for row in eligible:
                     # Rebuild evidence after the prompt and before each individual deletion.
                     fresh = work(heading + f"\nRechecking {row.scope} {row.name} before deletion...",
-                                 cleanup.scan, path, adapter, observations, args.older_than)
+                                 cleanup.scan, path, adapter, observations, args.older_than, None, args.confirm_first)
                     current = next((r for r in fresh if (r.name, r.scope) == (row.name, row.scope)), None)
-                    if current is None or current.sha != row.sha or current.reason or current.merged != row.merged:
+                    if current is None or current.sha != row.sha or current.reason or current.merged != row.merged or current.age_uncertain != row.age_uncertain:
                         print("  skipped {} {}: evidence changed or branch disappeared".format(row.scope, row.name))
                         continue
                     work(heading + f"\nDeleting {row.scope} {row.name}...", cleanup.delete, path, adapter, current)
@@ -218,7 +228,7 @@ def tui(session, height, width):
     scope = cli._dialog_menu("Cleanup scope", "Choose repository group:", scopes, height, width)
     if not scope:
         return
-    age = cli._dialog_menu("Branch age", "Minimum inactivity and observed branch age:",
+    age = cli._dialog_menu("Branch age", "Minimum inactivity (automatic cleanup also requires observed age):",
                            [("30d", "30 days (default)"), ("60d", "60 days"), ("90d", "90 days"),
                             ("6m", "6 months"), ("1y", "1 year")], height, width)
     if not age:

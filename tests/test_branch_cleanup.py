@@ -700,19 +700,73 @@ def test_branch_checklist_metadata_lifetime_and_cancel(monkeypatch, status, outp
     assert len(files) == 1 and not files[0].exists()
 
 
-def test_first_run_confirm_explains_why_no_selector_opens(monkeypatch, tmp_path, repo):
+@pytest.mark.parametrize("approve_unknown", [False, True])
+def test_first_run_confirm_reviews_real_old_refs_with_explicit_age_approval(monkeypatch, tmp_path, repo, approve_unknown):
     args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--confirm-first", "--apply"])
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cli, "_dialog_available", lambda: True)
     monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": repo, "adapter": Provider()}])
-    monkeypatch.setattr(cleanup_cmd, "choose", lambda *args, **kwargs: pytest.fail("excluded branch offered"))
-    monkeypatch.setattr(cleanup, "delete", lambda *args: pytest.fail("unknown-age branch deleted"))
-    notices = []
-    monkeypatch.setattr(cli, "_dialog_msgbox", lambda title, text, *args: notices.append((title, text)))
+    def choose(title, text, items, **kwargs):
+        assert len(items) == 2
+        unknown = [(tag, label, checked) for tag, label, checked in items if "remote old-feature" in label]
+        assert len(unknown) == 1 and not unknown[0][2]
+        assert "UNKNOWN - manual approval required" in unknown[0][1]
+        return [unknown[0][0]]
+    monkeypatch.setattr(cleanup_cmd, "choose", choose)
+    monkeypatch.setattr(cli, "_dialog_msgbox", lambda *args: pytest.fail("old inactive branches were hidden"))
+    prompts = []
+    def confirm(title, text, **kwargs):
+        assert kwargs["default_no"]
+        prompts.append(title)
+        if title == "Approve unknown branch creation age":
+            assert "newly created refs" in text
+            return approve_unknown
+        return True
+    monkeypatch.setattr(cli, "_dialog_yesno", confirm)
     assert cleanup_cmd.command(args) == 0
-    assert len(notices) == 1
-    assert notices[0][0] == "No branches eligible for selection"
-    assert "30d" in notices[0][1]
-    assert "old commit" in notices[0][1]
-    assert "protected branch name" in notices[0][1]
+    assert prompts == (["Approve unknown branch creation age", "Confirm branch deletion"] if approve_unknown else ["Approve unknown branch creation age"])
+    assert bool(command(repo, "ls-remote", "--heads", "origin", "old-feature")) is not approve_unknown
+    assert command(repo, "branch", "--list", "old-feature")
+
+
+@pytest.mark.parametrize("mode", ["blocked", "recent", "failed"])
+def test_unknown_age_review_still_checks_server_activity(repo, tmp_path, monkeypatch, mode):
+    api = Provider()
+    def activity(*args):
+        if mode == "failed":
+            raise cleanup.Unsafe("PR checks unavailable")
+        return cleanup_forge.Activity(blocked="open PR or unresolved discussion" if mode == "blocked" else "",
+                                      dates=[NOW] if mode == "recent" else [])
+    monkeypatch.setattr(api, "activity", activity)
+    with cleanup.Observations(tmp_path / "state.json") as observations:
+        rows = cleanup.scan(repo, api, observations, "30d", NOW, True)
+    assert all(row.reason for row in rows)
+
+
+def test_unknown_age_review_does_not_admit_recent_local_ref(repo, tmp_path):
+    subprocess.run(["git", "-C", repo, "branch", "new-local", "old-feature"],check=True)
+    command(repo, "push", "-u", "origin", "new-local")
+    with cleanup.Observations(tmp_path / "state.json") as observations:
+        rows = cleanup.scan(repo, Provider(), observations, "30d", None, True)
+    row = next(row for row in rows if row.name == "new-local")
+    assert row.reason == "recent branch activity"
+
+
+def test_interrupt_stops_remaining_branch_deletions(monkeypatch, tmp_path):
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--apply"])
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": "clone", "adapter": Provider()}])
+    rows = [cleanup.Candidate("old-a", "remote", "a", merged=True), cleanup.Candidate("old-b", "remote", "b", merged=True)]
+    monkeypatch.setattr(cleanup, "scan", lambda *args: rows)
+    deleted = []
+    def delete(path, adapter, row):
+        deleted.append(row.name)
+        raise KeyboardInterrupt
+    monkeypatch.setattr(cleanup, "delete", delete)
+    monkeypatch.setattr(cli, "_main", lambda: cleanup_cmd.run(args))
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 130 and deleted == ["old-a"]
+    with cleanup.Observations() as observations:
+        assert observations.entries == {}

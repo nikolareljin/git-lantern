@@ -6420,7 +6420,7 @@ def cmd_fleet_apply_and_repair(args: argparse.Namespace) -> int:
     return rc
 
 
-def main() -> None:
+def _main() -> None:
     load_dotenv()
     parser = build_parser()
     if argcomplete:
@@ -6432,3 +6432,11 @@ def main() -> None:
         raise SystemExit(cmd_tui(args))
 
     raise SystemExit(args.func(args))
+
+
+def main() -> None:
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        raise SystemExit(130) from None

@@ -5,6 +5,10 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Ctrl+C stops commands and remaining cleanup work with exit 130 and no traceback.
+- Confirm first lists old inactive unknown-age branches unchecked, after PR and
+  activity checks, and requires explicit age approval before deletion. Automatic
+  cleanup keeps its first-seen age requirement.
 - Confirm first explains when no branches can be selected, including the initial
   observation waiting period, before showing the read-only report.
 - The installer warns when PATH selects a different installation from its target.
