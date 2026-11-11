@@ -9,6 +9,11 @@ Lantern provides a full interactive TUI (terminal user interface) powered by the
 
 ## Clean old branches
 
+Repository discovery, fetches, branch inspection, and deletion show a live status
+dialog with the current stage and elapsed time. It closes before selection or
+confirmation dialogs open. Cleanup always shows a final report with branch
+metadata, skip reasons, and deletion counts, including when no branches qualify.
+
 1. Run `lantern` and choose `branch_cleanup`.
 2. Choose the configured server and personal repository scope or an organization/group/workspace.
 3. Choose 30, 60, or 90 days, 6 months, or 1 year. The default is 30 days.
@@ -37,6 +42,11 @@ after repository selection. See the [command reference](commands.md#lantern-flee
 for protection rules, credentials, metadata limits, and first-seen storage.
 
 ## Interactive TUI setup and daily usage
+
+Workspace scans, status collection, remote listings, fleet planning, and other
+captured background commands show an animated activity indicator and elapsed
+time. Repository and branch counts appear when available. Interactive tools keep
+their own terminal screen; background indicators stop before prompts appear.
 
 ### Launching TUI Mode
 

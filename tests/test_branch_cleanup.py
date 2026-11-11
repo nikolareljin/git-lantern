@@ -13,6 +13,11 @@ from lantern import cleanup, cleanup_cmd, cleanup_forge, cli, forge  # noqa: E40
 NOW = datetime(2026, 11, 10, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def quiet_progress_dialogs(monkeypatch):
+    monkeypatch.setattr(cli, "_dialog_infobox", lambda *args, **kwargs: None)
+
+
 def command(path, *args):
     env = dict(os.environ, GIT_AUTHOR_DATE="2020-01-01T00:00:00Z", GIT_COMMITTER_DATE="2020-01-01T00:00:00Z")
     return subprocess.run(["git", "-C", str(path), *args], env=env, check=True,
@@ -372,6 +377,8 @@ def test_gitlab_global_mr_discovery(monkeypatch):
     called = []
     monkeypatch.setattr(api, "pages", lambda url: called.append(url) or [])
     api.refresh()
+    assert "https://gitlab.com/api/v4/merge_requests?state=all&scope=all" not in called
+    api.activity("old", set())
     assert "https://gitlab.com/api/v4/merge_requests?state=all&scope=all" in called
 
 
@@ -628,3 +635,14 @@ def test_global_merge_driver_cannot_discard_branch_work(repo, tmp_path, monkeypa
     (Path(repo) / "file").write_text("base content\n")
     command(repo, "commit", "-am", "base")
     assert not cleanup.merge_state(repo, command(repo, "rev-parse", "HEAD"), tip)
+
+
+def test_fresh_observations_do_not_check_merge_or_discussions(repo, tmp_path, monkeypatch):
+    api = Provider()
+    monkeypatch.setattr(api, "activity", lambda *args: pytest.fail("new branch checked discussion history"))
+    monkeypatch.setattr(cleanup, "merge_state", lambda *args: pytest.fail("new branch checked merge history"))
+    with cleanup.Observations(tmp_path / "state.json") as store:
+        rows = cleanup.scan(repo, api, store, "30d", NOW)
+    assert all(row.reason for row in rows)
+    assert any("first observation" in row.reason for row in rows)
+    assert all("[not checked]" in row.label() for row in rows if "first observation" in row.reason)

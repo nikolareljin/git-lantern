@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from . import progress
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -148,13 +150,17 @@ class Candidate:
     activity: str = "unknown"
     first_seen: str = "unknown"
     reason: str = ""
+    merge_checked: bool = False
 
     @property
     def ref(self) -> str:
         return ("refs/heads/" if self.scope == "local" else "refs/remotes/origin/") + self.name
 
     def label(self) -> str:
-        return (f"{self.scope} {self.name} [{'merged' if self.merged else 'UNMERGED'}] "
+        state = "merged" if self.merged else "UNMERGED"
+        if self.reason and not self.merge_checked:
+            state = "not checked"
+        return (f"{self.scope} {self.name} [{state}] "
                 f"creator={self.creator}; created={self.created}; first-seen={self.first_seen}; "
                 f"last-author={self.author}; last-committer={self.committer}; "
                 f"last-commit={self.changed}; activity={self.activity}")
@@ -210,6 +216,7 @@ def local_guard(path: str, candidate: Candidate) -> None:
 def scan(path, provider, observations, age, now=None) -> List[Candidate]:
     now = now or datetime.now(timezone.utc)
     limit = cutoff(age, now)
+    progress.report("Validating the clone and origin...")
     if git(path, "rev-parse", "--is-shallow-repository").stdout.strip() != "false":
         raise Unsafe("shallow repository: complete history is required")
     grafts = git(path, "rev-parse", "--git-path", "info/grafts").stdout.strip()
@@ -219,8 +226,10 @@ def scan(path, provider, observations, age, now=None) -> List[Candidate]:
     provider.verify_origin(git(path, "remote", "get-url", "--push", "origin").stdout.strip())
     if len(git(path, "remote", "get-url", "--push", "--all", "origin").stdout.splitlines()) != 1:
         raise Unsafe("multiple push URLs")
+    progress.report("Fetching current branch refs from origin...")
     git(path, "-c", "fetch.pruneTags=false", "-c", "remote.origin.pruneTags=false", "fetch",
         "--no-tags", "--refmap=", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    progress.report("Reading default branch and server protection rules...")
     provider.refresh()
     base = git(path, "rev-parse", "--verify", "refs/remotes/origin/" + provider.default_branch).stdout.strip()
     raw = git(path, "for-each-ref", "--format=%(refname)%09%(objectname)",
@@ -228,13 +237,16 @@ def scan(path, provider, observations, age, now=None) -> List[Candidate]:
     prefix = json.dumps([provider.identity, os.path.realpath(path)], separators=(",", ":")) + ":"
     present = []
     rows = []
-    for line in raw.splitlines():
+    lines = raw.splitlines()
+    for index, line in enumerate(lines, 1):
         ref, sha = line.split("\t")
         scope = "local" if ref.startswith("refs/heads/") else "remote"
         name = ref[len("refs/heads/"):] if scope == "local" else ref[len("refs/remotes/origin/"):]
         if name == "HEAD":
             continue
         row = Candidate(name, scope, sha)
+        branch_status = f"Branch {index}/{len(lines)}: {scope} {name}"
+        progress.report(branch_status + "\nChecking age and local safety rules...")
         key = prefix + scope + ":" + name
         present.append(key)
         first = observations.observe(key, sha, now)
@@ -260,15 +272,21 @@ def scan(path, provider, observations, age, now=None) -> List[Candidate]:
             log = git(path, "reflog", "show", "-1", "--date=iso-strict", "--format=%gD", ref).stdout.strip()
             if "@{" in log:
                 last_commit = max(last_commit, timestamp(log.rsplit("@{", 1)[1].rstrip("}")))
+            row.activity = max(last_commit, first).isoformat()
+            if first >= limit:
+                raise Unsafe("branch age not established; waiting since first observation")
+            if last_commit >= limit:
+                raise Unsafe("recent branch activity")
+            progress.report(branch_status + "\nChecking whether the current tip is merged...")
             row.merged = merge_state(path, base, sha)
+            row.merge_checked = True
             commits = set(git(path, "rev-list", sha, "^" + base).stdout.splitlines()) | {sha}
+            progress.report(branch_status + "\nChecking pull requests, discussions, and comments...")
             activity = provider.activity(name, commits)
             if activity.blocked:
                 raise Unsafe(activity.blocked)
             latest = max([last_commit, first] + activity.dates)
             row.activity = latest.isoformat()
-            if first >= limit:
-                raise Unsafe("branch age not established; waiting since first observation")
             if latest >= limit:
                 raise Unsafe("recent branch activity")
         except Unsafe as exc:

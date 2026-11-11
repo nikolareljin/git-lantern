@@ -9,8 +9,11 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from . import progress
+
 
 def _request(url: str, token: Optional[str]) -> Any:
+    progress.detail("Waiting for the GitHub API response...")
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"token {token}")

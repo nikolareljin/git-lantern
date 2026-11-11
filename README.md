@@ -82,6 +82,7 @@ lantern pr sweep nikolareljin/git-lantern --json
 ```
 
 Selection tips:
+- Background TUI operations show the current stage and an animated elapsed timer. Cleanup always ends with a branch report, including skip reasons when nothing qualifies.
 - Branch cleanup defaults to a 30-day cutoff and "Confirm first" off. First-seen tracking must establish branch age before deletion; a first run normally skips branches. See the [cleanup workflow](docs/use-cases.md#clean-old-branches).
 - Use `--repos repo-a,repo-b` for explicit multi-repo actions.
 - `--checkout-latest-branch` now auto-targets only repos whose detected latest branch would actually change something, while still letting you override the scope with `--repos`.

@@ -4,6 +4,11 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- TUI background operations show animated progress and elapsed time instead of
+  leaving a silent dialog. Cleanup reports branch metadata, skip reasons, and
+  totals even when no branches qualify, and skips expensive checks for new branches.
+
 ### Added
 - `lantern fleet cleanup` and TUI branch cleanup: repository checkboxes, age cutoffs,
   local and remote deletion, and optional per-repository branch confirmation.

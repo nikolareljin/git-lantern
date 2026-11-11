@@ -60,6 +60,19 @@ the default branch are eligible. With it, old unmerged branches can be explicitl
 selected. Confirmation never overrides a safety exclusion. Cancellation or an
 empty selection deletes nothing.
 
+The TUI displays live progress during repository discovery, fetches, branch
+inspection, PR/comment checks, revalidation, and deletion. Each selected
+repository is identified by its position in the run. The final report lists
+every inspected branch and its eligibility/skip reason, even when zero branches
+qualify. Branches excluded before merge classification show `not checked`.
+Accepting the options dialog with `Confirm first` unchecked continues normally;
+Cancel stops the operation.
+
+Newly observed or recently changed branches are rejected before expensive merge
+and discussion checks. GitLab MR discovery and Bitbucket fork history are loaded
+only when an old branch reaches those checks. These shortcuts cannot authorize a
+deletion; all existing protection and PR checks still run for eligible branches.
+
 The branch checklist shows scope, merge status, creator, creation date, first-seen
 date, last commit author and committer, commit date, and latest activity. A
 scrollable details screen precedes the checklist so every field can be read.
