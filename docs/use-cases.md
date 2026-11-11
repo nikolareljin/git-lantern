@@ -19,7 +19,7 @@ metadata, skip reasons, and deletion counts, including when no branches qualify.
 3. Choose 30, 60, or 90 days, 6 months, or 1 year. The default is 30 days.
 4. Optionally enable `Confirm first`; it starts disabled.
 5. Select repositories with checkboxes and accept the selection to start cleanup.
-6. With `Confirm first` enabled, review branch checkboxes and confirm before each repository's deletions. Merged candidates start checked; unmerged candidates start unchecked.
+6. With `Confirm first` enabled, the eligible branch checkboxes open directly. Press Space to select branches, then choose `Review deletion` and confirm. Press F1 for full branch metadata; Exit returns to selection. Merged candidates start checked; unmerged candidates start unchecked.
 
 The first run records branch observations and normally skips deletion because
 branch age is not yet established. Run previews periodically, then clean after

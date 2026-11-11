@@ -5,6 +5,8 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Confirm first opens branch checkboxes directly; F1 shows full metadata and
+  returns to the same selection instead of blocking cleanup behind an Exit screen.
 - TUI background operations show animated progress and elapsed time instead of
   leaving a silent dialog. Cleanup reports branch metadata, skip reasons, and
   totals even when no branches qualify, and skips expensive checks for new branches.

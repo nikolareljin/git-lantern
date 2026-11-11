@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 
 from . import cleanup, cleanup_forge, config, progress
 
@@ -69,10 +70,18 @@ def repositories(args):
     return rows
 
 
-def choose(title, text, rows):
+def choose(title, text, rows, details=""):
     from . import cli
 
-    return cli._dialog_checklist(title, text, rows)
+    if not details:
+        return cli._dialog_checklist(title, text, rows)
+    with tempfile.TemporaryDirectory(prefix="lantern-branch-details-") as directory:
+        filename = os.path.join(directory, "details.txt")
+        with open(filename, "w", encoding="utf-8") as handle:
+            handle.write(details)
+        return cli._dialog_checklist_result(
+            title, text, rows, help_file=filename, ok_label="Review deletion",
+        ) or []
 
 
 def run(args):
@@ -136,12 +145,10 @@ def run(args):
                 if args.confirm_first and eligible:
                     details = "\n\n".join("[{}] {}".format(i, row.label().replace("; ", "\n    "))
                                             for i, row in enumerate(eligible))
-                    if not cli._dialog_textbox_from_text("Branch details: " + name, details):
-                        print("  cancelled: nothing deleted in this repository")
-                        continue
                     tags = choose("Branch cleanup: " + name,
-                                  "Select branches to delete. UNMERGED branches can contain work absent from the default branch.",
-                                  [(str(i), row.label(), row.merged) for i, row in enumerate(eligible)])
+                                  "Space: toggle branch. F1: full branch details. Accept to review deletion.\n"
+                                  "UNMERGED branches can contain work absent from the default branch.",
+                                  [(str(i), row.label(), row.merged) for i, row in enumerate(eligible)], details=details)
                     eligible = [row for i, row in enumerate(eligible) if str(i) in tags]
                     if not eligible:
                         print("  No branches selected; nothing deleted in this repository.")
@@ -175,7 +182,7 @@ def run(args):
     print(f"\nCleanup summary: {len(records)} repositories selected; {inspected} branches inspected; "
           f"{eligible_total} eligible; {deleted} deleted; {failures} repository failures.")
     if not eligible_total:
-        print("No branches were approved for cleanup. See the reasons above; no branches were deleted.")
+        print("No eligible branches: no branch checkbox list was opened. See the skip reasons above; nothing deleted.")
     return 1 if failures else 0
 
 
@@ -222,4 +229,4 @@ def tui(session, height, width):
     output = io.StringIO()
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
         status = command(args)
-    cli._dialog_textbox_from_text("Branch cleanup" + (" (errors)" if status else ""), output.getvalue(), height, width)
+    cli._dialog_textbox_from_text("Cleanup results (read-only)" + (" (errors)" if status else ""), output.getvalue(), height, width)

@@ -64,7 +64,9 @@ The TUI displays live progress during repository discovery, fetches, branch
 inspection, PR/comment checks, revalidation, and deletion. Each selected
 repository is identified by its position in the run. The final report lists
 every inspected branch and its eligibility/skip reason, even when zero branches
-qualify. Branches excluded before merge classification show `not checked`.
+qualify. This final screen is labeled `Cleanup results (read-only)`. When no
+branches qualify, no checkbox list opens and the report explains each exclusion.
+Branches excluded before merge classification show `not checked`.
 Accepting the options dialog with `Confirm first` unchecked continues normally;
 Cancel stops the operation.
 
@@ -74,8 +76,10 @@ only when an old branch reaches those checks. These shortcuts cannot authorize a
 deletion; all existing protection and PR checks still run for eligible branches.
 
 The branch checklist shows scope, merge status, creator, creation date, first-seen
-date, last commit author and committer, commit date, and latest activity. A
-scrollable details screen precedes the checklist so every field can be read.
+date, last commit author and committer, commit date, and latest activity. The
+checkbox list opens directly. Press Space to toggle a branch, then choose
+`Review deletion` and confirm. Press F1 for full metadata in a scrollable
+view; Exit returns to the same checkbox selection.
 Git does not retain branch creation metadata. Unavailable creator/creation dates display
 `unknown`; commit authors and PR authors are never presented as branch creators.
 An intact local branch-creation reflog entry supplies the local creator and

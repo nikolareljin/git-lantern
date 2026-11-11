@@ -368,6 +368,9 @@ def _dialog_checklist_result(
     items: List[Tuple[str, str, bool]],
     height: int = 0,
     width: int = 0,
+    *,
+    help_file: str = "",
+    ok_label: str = "",
 ) -> Optional[List[str]]:
     """Return selected tags, including an empty selection, or None on cancel."""
     if height == 0 or width == 0:
@@ -377,6 +380,10 @@ def _dialog_checklist_result(
         "dialog", "--stdout", "--separate-output", "--title", title, "--checklist", text,
         str(height), str(width), str(max(menu_height, 1)),
     ]
+    if help_file:
+        cmd[1:1] = ["--hfile", help_file, "--hline", "F1: full branch details; Exit returns to selection"]
+    if ok_label:
+        cmd[1:1] = ["--ok-label", ok_label]
     for tag, description, selected in items:
         cmd.extend([tag, description, "on" if selected else "off"])
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)

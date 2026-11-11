@@ -133,6 +133,8 @@ def test_cleanup_two_repos_show_kept_branches_and_summary(monkeypatch, tmp_path)
 
     def results(title, text, *args):
         assert not progress.active()
+        assert title == "Cleanup results (read-only)"
+        assert "No eligible branches: no branch checkbox list was opened" in text
         output.append(text)
         return True
 
@@ -197,3 +199,35 @@ def test_interactive_captured_child_keeps_report_without_parent_indicator(monkey
     monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="Branch report", stderr=""))
     result = cli._run_lantern_subprocess(["lantern", "fleet", "cleanup", "--select"], 24, 100, background=False)
     assert result.stdout == "Branch report"
+
+
+def test_cleanup_tui_confirm_first_selects_each_repo_before_deleting(monkeypatch, tmp_path):
+    setup_dialog(monkeypatch)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(cleanup_cmd.config, "load_config", lambda: {})
+    monkeypatch.setattr(cli, "_tui_select_server", lambda *args: "github.com")
+    menus = iter(["user", "30d"])
+    monkeypatch.setattr(cli, "_dialog_menu", lambda *args: next(menus))
+    monkeypatch.setattr(cli, "_dialog_checklist_result", lambda *args: ["confirm"])
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda args: [
+        {"name": "team/a", "path": "a", "adapter": object()},
+        {"name": "team/b", "path": "b", "adapter": object()}])
+    monkeypatch.setattr(cleanup, "scan", lambda path, *args: [
+        cleanup.Candidate("old-" + path, "remote", "a", merged=True),
+        cleanup.Candidate("new-" + path, "remote", "b", reason="too new")])
+    events = []
+
+    def choose(title, text, rows, **kwargs):
+        if title == "Branch cleanup":
+            return ["0", "1"]
+        assert len(rows) == 1
+        assert "creator=" in kwargs["details"]
+        events.append(title)
+        return ["0"]
+
+    monkeypatch.setattr(cleanup_cmd, "choose", choose)
+    monkeypatch.setattr(cli, "_dialog_yesno", lambda *args, **kwargs: True)
+    monkeypatch.setattr(cleanup, "delete", lambda path, adapter, row: events.append("deleted " + row.name))
+    monkeypatch.setattr(cli, "_dialog_textbox_from_text", lambda *args: events.append("results"))
+    cleanup_cmd.tui({"root": str(tmp_path), "max_depth": 6, "include_hidden": False, "include_forks": False}, 24, 100)
+    assert events == ["Branch cleanup: team/a", "deleted old-a", "Branch cleanup: team/b", "deleted old-b", "results"]
