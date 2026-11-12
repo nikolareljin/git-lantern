@@ -32,7 +32,7 @@ def main():
         with zipfile.ZipFile(wheels[0]) as wheel:
             metadata_name = next(name for name in wheel.namelist() if name.endswith(".dist-info/METADATA"))
             metadata = email.parser.Parser().parsestr(wheel.read(metadata_name).decode("utf-8"))
-            expected = {"Version": version, "License-Expression": "MIT", "Requires-Python": ">=3.8"}
+            expected = {"Version": version, "License-Expression": "MIT", "Requires-Python": ">=3.12"}
             for field, value in expected.items():
                 if metadata[field] != value:
                     raise RuntimeError("Unexpected {}: {}".format(field, metadata[field]))

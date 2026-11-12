@@ -12,7 +12,7 @@ def test_pyproject_version_is_sourced_from_version_file():
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
 
     assert 'dynamic = ["version"]' in pyproject
-    assert 'path = "VERSION"' in pyproject
+    assert 'version = {file = ["VERSION"]}' in pyproject
     assert f'version = "{version}"' not in pyproject
 
 

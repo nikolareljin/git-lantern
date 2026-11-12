@@ -192,7 +192,7 @@ See `docs/use-cases.md#interactive-tui-mode` for detailed TUI workflows.
 
 On macOS, `./install` uses a per-user prefix by default and creates
 `~/.local/bin/lantern`. Add `~/.local/bin` to your shell `PATH` if it is not
-already present. Git Lantern requires Python 3.8+ and Git; install Git through
+already present. Git Lantern requires Python 3.12+ and Git; install Git through
 Xcode Command Line Tools or Homebrew before running the installer.
 
 ```bash
@@ -258,11 +258,11 @@ make test
 make ci
 ```
 
-Package builds use Hatchling 1.27+ for SPDX license metadata while retaining Python 3.8 support.
+Package builds use setuptools 77+ and SPDX license metadata. Python 3.12+ is required.
 `./install --dev` also installs pytest, Ruff and the distribution build frontend.
 See [packaging validation](docs/installation.md) for artifact checks and installer examples.
 
-The scripts automatically detect a suitable `python3` (3.8+) and use a local virtualenv at `./.venv`. You can optionally set `PYTHON_BIN` to point to a specific Python 3.8+ interpreter, or set `VENV_DIR` to change the virtualenv location before running the scripts. If virtualenv creation fails, install `python3-venv` (Debian/Ubuntu) or the equivalent package for your OS.
+The scripts automatically detect a suitable `python3` (3.12+) and use a local virtualenv at `./.venv`. You can optionally set `PYTHON_BIN` to point to a specific Python 3.12+ interpreter, or set `VENV_DIR` to change the virtualenv location before running the scripts. If virtualenv creation fails, install `python3-venv` (Debian/Ubuntu) or the equivalent package for your OS.
 
 ## Git hooks
 

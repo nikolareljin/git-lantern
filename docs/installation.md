@@ -1,8 +1,9 @@
 # Installation and packaging
 
-Python distributions use Hatchling 1.27+ and declare `license = "MIT"` as an [SPDX expression](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license). This removes the repeated setuptools license-table deprecation during
-wheel builds, editable installs and `./install`. Python 3.8 remains supported;
-the version comes from `VERSION`, and the console command remains `lantern`.
+Python 3.12+ and Git are required. Builds use setuptools 77+ with `license = "MIT"`
+as an [SPDX expression](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license).
+This removes the repeated license-table deprecation during wheel builds, editable
+installs and `./install`. The version comes from `VERSION`; the command is `lantern`.
 
 Install from the checkout into a writable prefix:
 
@@ -14,6 +15,12 @@ Install from the checkout into a writable prefix:
 `--dev` adds pytest, Ruff 0.15.8 and the `build` frontend. The `docs` extra is
 separate: use `python3 -m pip install ".[docs]"` for MkDocs.
 The runtime installation does not require documentation dependencies.
+
+Install Python 3.12+ before upgrading an older installation. Set `PYTHON_BIN` if
+your shell's default Python is older. An existing installation virtualenv running
+older Python is refused before package changes; choose a new `--prefix` or recreate
+that dedicated virtualenv with Python 3.12+. A development `.venv` on older Python
+is recreated by the development scripts after checking that it is a virtualenv.
 
 Validate distribution artifacts from a development virtualenv:
 
@@ -27,6 +34,7 @@ warnings treated as errors, verifies license/version/runtime metadata and module
 contents, and installs the wheel with development dependencies into a temporary
 virtualenv. It checks the installed launcher and dependency consistency outside
 the checkout. Artifacts are temporary. Package downloads require network access.
-CI runs this check on Python 3.8 and 3.12.
+CI runs this check on Python 3.12 and 3.13. Checkout and Python setup actions use
+the Node 24 runtime to avoid Node 20 deprecation warnings.
 
 Native package workflow settings live in the deb, rpm, Homebrew and PPA folders.
