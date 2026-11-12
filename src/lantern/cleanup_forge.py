@@ -9,7 +9,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import List
 
-from . import forge
+from . import forge, progress
 from .cleanup import Unsafe, timestamp
 
 
@@ -60,9 +60,11 @@ class Provider:
         self.root = self.base + ("/projects/" if provider == "gitlab" else
                                  "/repositories/" if provider == "bitbucket" else "/repos/") + encoded
         self.default_branch = ""
+        self.prs = [] if provider == "github" else None
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def request(self, url, data=None):
+        progress.detail(f"Waiting for the {self.provider} API response...")
         parsed = urllib.parse.urlsplit(url)
         if (parsed.scheme, parsed.netloc) != urllib.parse.urlsplit(self.base)[:2]:
             raise Unsafe("untrusted API pagination URL")
@@ -140,12 +142,12 @@ class Provider:
             self.default_branch = meta.get("default_branch")
             self.branches = self.pages("/repository/branches")
             # Project MR lists cover target projects only; include outgoing fork MRs.
-            self.prs = self.pages(self.base + "/merge_requests?state=all&scope=all")
+            self.prs = None
         else:
             self.default_branch = (meta.get("mainbranch") or {}).get("name")
             self.branches = self.pages("/refs/branches")
             self.rules = self.pages("/branch-restrictions")
-            self.prs = self.bitbucket_network_prs(meta)
+            self.prs = None
         if not isinstance(self.default_branch, str) or not self.default_branch:
             raise Unsafe("default branch unavailable")
         repository_id = meta.get("uuid" if self.provider == "bitbucket" else "id")
@@ -277,6 +279,9 @@ class Provider:
 
     def activity(self, name, commits):
         activity = Activity()
+        if self.prs is None:
+            self.prs = (self.pages(self.base + "/merge_requests?state=all&scope=all")
+                        if self.provider == "gitlab" else self.bitbucket_network_prs(self.meta))
         prs = self.github_associated_prs(name) if self.provider == "github" else self.prs
         for pr in prs:
             if self.provider == "github":

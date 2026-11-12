@@ -7,10 +7,16 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from lantern import cleanup, cleanup_cmd, cleanup_forge, cli, forge  # noqa: E402
+from lantern import cleanup, cleanup_cmd, cleanup_forge, cli, forge, progress  # noqa: E402
 
 
 NOW = datetime(2026, 11, 10, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def quiet_progress_dialogs(monkeypatch):
+    monkeypatch.setattr(cli, "_dialog_infobox", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "_dialog_taskbox", lambda *args, **kwargs: False, raising=False)
 
 
 def command(path, *args):
@@ -265,7 +271,7 @@ def test_confirm_first_unmerged_unchecked_and_cancel(monkeypatch, tmp_path):
     rows = [cleanup.Candidate("merged", "remote", "a", merged=True), cleanup.Candidate("unmerged", "remote", "b")]
     monkeypatch.setattr(cleanup, "scan", lambda *a: rows)
 
-    def choose(title, text, items):
+    def choose(title, text, items, **kwargs):
         assert [i[2] for i in items] == [True, False]
         assert "creator=unknown" in items[0][1]
         return ["0", "1"]
@@ -372,6 +378,8 @@ def test_gitlab_global_mr_discovery(monkeypatch):
     called = []
     monkeypatch.setattr(api, "pages", lambda url: called.append(url) or [])
     api.refresh()
+    assert "https://gitlab.com/api/v4/merge_requests?state=all&scope=all" not in called
+    api.activity("old", set())
     assert "https://gitlab.com/api/v4/merge_requests?state=all&scope=all" in called
 
 
@@ -538,17 +546,47 @@ def test_bitbucket_workspace_keeps_basic_auth_user(monkeypatch):
     assert calls[0][1]["Authorization"] == "Basic " + base64.b64encode(b"login:token").decode()
 
 
-def test_cancelled_branch_details_never_deletes(monkeypatch, tmp_path):
+@pytest.mark.parametrize("selection,confirm,expected", [(["1"], True, ["unmerged"]), (["0"], True, ["merged"]), ([], True, []), (["0"], False, [])])
+def test_confirm_first_selects_before_deletion(monkeypatch, tmp_path, selection, confirm, expected):
     args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--confirm-first", "--apply"])
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cli, "_dialog_available", lambda: True)
     monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": "clone", "adapter": Provider()}])
-    monkeypatch.setattr(cleanup, "scan", lambda *args: [cleanup.Candidate("old", "remote", "a", merged=True)])
-    monkeypatch.setattr(cli, "_dialog_textbox_from_text", lambda *args: False)
-    monkeypatch.setattr(cleanup_cmd, "choose", lambda *args: pytest.fail("cancel did not abort selection"))
-    monkeypatch.setattr(cleanup, "delete", lambda *args: pytest.fail("cancel deleted a branch"))
+    rows = [cleanup.Candidate("merged", "remote", "a", merged=True),
+            cleanup.Candidate("unmerged", "remote", "b"),
+            cleanup.Candidate("open-pr", "remote", "c", merged=True, reason="open PR"),
+            cleanup.Candidate("draft-pr", "remote", "d", merged=True, reason="draft PR"),
+            cleanup.Candidate("new", "remote", "e", reason="branch is too new"),
+            cleanup.Candidate("discussion", "remote", "f", reason="active discussion")]
+    monkeypatch.setattr(cleanup, "scan", lambda *args: rows)
+    monkeypatch.setattr(cli, "_dialog_textbox_from_text", lambda *args: pytest.fail("read-only screen blocked branch selection"))
+    events = []
+
+    def choose(title, text, items, **kwargs):
+        assert len(items) == 2
+        assert [item[2] for item in items] == [True, False]
+        assert "merged" in items[0][1] and "unmerged" in items[1][1]
+        for field in ("creator=", "created=", "last-author=", "last-committer=", "last-commit="):
+            assert all(field in item[1] for item in items)
+        events.append("select")
+        return selection
+
+    def approve(*args, **kwargs):
+        assert events == ["select"]
+        events.append("confirm")
+        return confirm
+
+    deleted = []
+    monkeypatch.setattr(cleanup_cmd, "choose", choose)
+    monkeypatch.setattr(cli, "_dialog_yesno", approve)
+    def delete(path, adapter, row):
+        assert events == ["select", "confirm"]
+        deleted.append(row.name)
+    monkeypatch.setattr(cleanup, "delete", delete)
     assert cleanup_cmd.command(args) == 0
+    assert events[0] == "select"
+    assert deleted == expected
 
 
 def test_concurrent_cleanup_refuses_same_observation_store(tmp_path):
@@ -628,3 +666,197 @@ def test_global_merge_driver_cannot_discard_branch_work(repo, tmp_path, monkeypa
     (Path(repo) / "file").write_text("base content\n")
     command(repo, "commit", "-am", "base")
     assert not cleanup.merge_state(repo, command(repo, "rev-parse", "HEAD"), tip)
+
+
+def test_fresh_observations_do_not_check_merge_or_discussions(repo, tmp_path, monkeypatch):
+    api = Provider()
+    monkeypatch.setattr(api, "activity", lambda *args: pytest.fail("new branch checked discussion history"))
+    monkeypatch.setattr(cleanup, "merge_state", lambda *args: pytest.fail("new branch checked merge history"))
+    with cleanup.Observations(tmp_path / "state.json") as store:
+        rows = cleanup.scan(repo, api, store, "30d", NOW)
+    assert all(row.reason for row in rows)
+    assert any("first observation" in row.reason for row in rows)
+    assert all("[not checked]" in row.label() for row in rows if "first observation" in row.reason)
+
+
+@pytest.mark.parametrize("status,output,expected", [(0, "1\n", ["1"]), (0, "", []), (1, "1\n", [])])
+def test_branch_checklist_metadata_lifetime_and_cancel(monkeypatch, status, output, expected):
+    from types import SimpleNamespace
+
+    files = []
+    monkeypatch.setattr(cli, "_dialog_init", lambda: (24, 100))
+
+    def dialog(command, **kwargs):
+        assert "--checklist" in command
+        assert "--textbox" not in command
+        assert command[command.index("--ok-label") + 1] == "Review deletion"
+        filename = Path(command[command.index("--hfile") + 1])
+        assert filename.read_text() == "creator=Test; created=2020-01-01"
+        files.append(filename)
+        return SimpleNamespace(returncode=status, stdout=output)
+
+    monkeypatch.setattr(cli.subprocess, "run", dialog)
+    assert cleanup_cmd.choose("Branches", "Select", [("1", "old", False)],
+                              details="creator=Test; created=2020-01-01") == expected
+    assert len(files) == 1 and not files[0].exists()
+
+
+@pytest.mark.parametrize("approve_unknown", [False, True])
+def test_first_run_confirm_reviews_real_old_refs_with_explicit_age_approval(monkeypatch, tmp_path, repo, approve_unknown):
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--confirm-first", "--apply"])
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": repo, "adapter": Provider()}])
+    def choose(title, text, items, **kwargs):
+        assert len(items) == 2
+        unknown = [(tag, label, checked) for tag, label, checked in items if "remote old-feature" in label]
+        assert len(unknown) == 1 and not unknown[0][2]
+        assert "UNKNOWN - manual approval required" in unknown[0][1]
+        return [unknown[0][0]]
+    monkeypatch.setattr(cleanup_cmd, "choose", choose)
+    monkeypatch.setattr(cli, "_dialog_msgbox", lambda *args: pytest.fail("old inactive branches were hidden"))
+    prompts = []
+    def confirm(title, text, **kwargs):
+        assert kwargs["default_no"]
+        prompts.append(title)
+        if title == "Approve unknown branch creation age":
+            assert "newly created refs" in text
+            return approve_unknown
+        return True
+    monkeypatch.setattr(cli, "_dialog_yesno", confirm)
+    assert cleanup_cmd.command(args) == 0
+    assert prompts == (["Approve unknown branch creation age", "Confirm branch deletion"] if approve_unknown else ["Approve unknown branch creation age"])
+    assert bool(command(repo, "ls-remote", "--heads", "origin", "old-feature")) is not approve_unknown
+    assert command(repo, "branch", "--list", "old-feature")
+
+
+@pytest.mark.parametrize("mode", ["blocked", "recent", "failed"])
+def test_unknown_age_review_still_checks_server_activity(repo, tmp_path, monkeypatch, mode):
+    api = Provider()
+    def activity(*args):
+        if mode == "failed":
+            raise cleanup.Unsafe("PR checks unavailable")
+        return cleanup_forge.Activity(blocked="open PR or unresolved discussion" if mode == "blocked" else "",
+                                      dates=[NOW] if mode == "recent" else [])
+    monkeypatch.setattr(api, "activity", activity)
+    with cleanup.Observations(tmp_path / "state.json") as observations:
+        rows = cleanup.scan(repo, api, observations, "30d", NOW, True)
+    assert all(row.reason for row in rows)
+
+
+def test_unknown_age_review_does_not_admit_recent_local_ref(repo, tmp_path):
+    subprocess.run(["git", "-C", repo, "branch", "new-local", "old-feature"],check=True)
+    command(repo, "push", "-u", "origin", "new-local")
+    with cleanup.Observations(tmp_path / "state.json") as observations:
+        rows = cleanup.scan(repo, Provider(), observations, "30d", None, True)
+    row = next(row for row in rows if row.name == "new-local")
+    assert row.reason == "recent branch activity"
+
+
+@pytest.mark.parametrize("stop", ["interrupt", "task-stop"])
+def test_interrupt_stops_remaining_branch_deletions(monkeypatch, tmp_path, stop):
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--apply"])
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": "clone", "adapter": Provider()}])
+    rows = [cleanup.Candidate("old-a", "remote", "a", merged=True), cleanup.Candidate("old-b", "remote", "b", merged=True)]
+    monkeypatch.setattr(cleanup, "scan", lambda *args: rows)
+    deleted = []
+    def delete(path, adapter, row):
+        deleted.append(row.name)
+        raise (KeyboardInterrupt if stop == "interrupt" else progress.TaskCancelled)
+    monkeypatch.setattr(cleanup, "delete", delete)
+    monkeypatch.setattr(cli, "_main", lambda: cleanup_cmd.run(args))
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 130 and deleted == ["old-a"]
+    with cleanup.Observations() as observations:
+        assert observations.entries == {}
+
+
+def test_apply_revalidates_one_ref_per_deletion(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    api = Provider()
+    with cleanup.Observations() as store:
+        aged_scan(repo, store, api)
+    calls = []
+    monkeypatch.setattr(api, "activity", lambda name, commits: calls.append(name) or cleanup_forge.Activity())
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--apply"])
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": repo, "adapter": api}])
+    assert cleanup_cmd.command(args) == 0
+    # Two initial candidates plus one fresh check for each of their deletions.
+    assert calls == ["old-feature"] * 4
+    assert command(repo, "branch", "--list", "old-feature") == ""
+    assert command(repo, "ls-remote", "--heads", "origin", "old-feature") == ""
+
+
+def test_recreated_server_invalidates_unknown_age_approval(monkeypatch, tmp_path):
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--confirm-first", "--apply"])
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    api = Provider()
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": "clone", "adapter": api}])
+    row = cleanup.Candidate("old", "remote", "sha", merged=True, age_uncertain=True)
+    scans = []
+    def scan(*args):
+        if scans:
+            api.identity = "https://example.test/team/repo#replacement"
+        scans.append(True)
+        return [row]
+    monkeypatch.setattr(cleanup, "scan", scan)
+    monkeypatch.setattr(cleanup_cmd, "choose", lambda *args, **kwargs: ["0"])
+    monkeypatch.setattr(cli, "_dialog_yesno", lambda *args, **kwargs: True)
+    monkeypatch.setattr(cleanup, "delete", lambda *args: pytest.fail("approval transferred to replacement repository"))
+    assert cleanup_cmd.command(args) == 0
+    assert len(scans) == 2
+
+
+@pytest.mark.parametrize("mode", ["unchanged", "protected", "open-pr", "recent", "moved", "missing", "checked-out", "unpushed"])
+def test_targeted_revalidation_refreshes_safety_and_preserves_other_observations(repo, tmp_path, monkeypatch, mode):
+    api = Provider()
+    with cleanup.Observations(tmp_path / "state.json") as store:
+        rows = aged_scan(repo, store, api)
+        target = next(row for row in rows if row.name == "old-feature" and row.scope == "remote")
+        if mode in ("checked-out", "unpushed"):
+            target = next(row for row in rows if row.name == "old-feature" and row.scope == "local")
+        other_key = next(key for key in store.entries if key.endswith(":local:main"))
+        other_observation = dict(store.entries[other_key])
+        activity_calls = []
+        merge_calls = []
+        merge_state = cleanup.merge_state
+        def classify(*args):
+            merge_calls.append(args)
+            return merge_state(*args)
+        monkeypatch.setattr(cleanup, "merge_state", classify)
+        def refresh():
+            if mode == "protected":
+                monkeypatch.setattr(api, "protected", lambda name: True)
+        monkeypatch.setattr(api, "refresh", refresh)
+        def activity(name, commits):
+            activity_calls.append(name)
+            return cleanup_forge.Activity(dates=[NOW] if mode == "recent" else [],
+                                          blocked="open PR" if mode == "open-pr" else "")
+        monkeypatch.setattr(api, "activity", activity)
+        if mode == "moved":
+            command(repo, "push", "--force", "origin", "main:old-feature")
+        elif mode == "missing":
+            command(repo, "push", "origin", ":old-feature")
+        elif mode == "checked-out":
+            command(repo, "checkout", "old-feature")
+        elif mode == "unpushed":
+            command(repo, "checkout", "old-feature")
+            (Path(repo) / "unpushed").write_text("local work\n")
+            command(repo, "add", "unpushed")
+            command(repo, "commit", "-m", "local work")
+            command(repo, "checkout", "main")
+        fresh = cleanup.scan(repo, api, store, "30d", NOW, False, target)
+        assert store.entries[other_key] == other_observation
+        assert len(merge_calls) <= 1 and len(activity_calls) <= 1
+        if mode == "missing":
+            assert fresh == []
+            assert not any(key.endswith(":remote:old-feature") for key in store.entries)
+        else:
+            assert len(fresh) == 1
+            assert (fresh[0].name, fresh[0].scope) == (target.name, target.scope)
+            assert bool(fresh[0].reason) is (mode != "unchanged")

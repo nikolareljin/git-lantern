@@ -4,6 +4,26 @@ All notable changes to git-lantern are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Cleanup revalidates only the selected ref before each deletion instead of
+  repeating every branch's merge and discussion checks. Show deletion X/Y.
+- Reject deletion if the server repository identity changes after branch selection.
+- Interrupted TUI scan saves retain the previous JSON file.
+- Enter on Stop task or Escape cancels background work and returns to the TUI
+  menu with session settings preserved. Ctrl+C still exits the application.
+- Ctrl+C stops commands and remaining cleanup work with exit 130 and no traceback.
+- Confirm first lists old inactive unknown-age branches unchecked, after PR and
+  activity checks, and requires explicit age approval before deletion. Automatic
+  cleanup keeps its first-seen age requirement.
+- Confirm first explains when no branches can be selected, including the initial
+  observation waiting period, before showing the read-only report.
+- The installer warns when PATH selects a different installation from its target.
+- Confirm first opens branch checkboxes directly; F1 shows full metadata and
+  returns to the same selection instead of blocking cleanup behind an Exit screen.
+- TUI background operations show animated progress and elapsed time instead of
+  leaving a silent dialog. Cleanup reports branch metadata, skip reasons, and
+  totals even when no branches qualify, and skips expensive checks for new branches.
+
 ### Added
 - `lantern fleet cleanup` and TUI branch cleanup: repository checkboxes, age cutoffs,
   local and remote deletion, and optional per-repository branch confirmation.

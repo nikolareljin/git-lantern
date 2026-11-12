@@ -49,7 +49,7 @@ lantern fleet cleanup --root ~/workspace --repos my-org/repo-a,my-org/repo-b --a
 | `--select` | Repository checkbox selection using `dialog`. Also opens by default when `--repos` is omitted. |
 | `--repos` | Comma-separated full repository names or clone paths within the selected scope. Ambiguous names refuse cleanup. |
 | `--older-than` | `30d` (default), `60d`, `90d`, `6m`, or `1y`. Months and years use calendar subtraction in UTC. |
-| `--confirm-first` | Off by default. Review branch checkboxes and confirm separately for each repository. Unmerged branches start unchecked. |
+| `--confirm-first` | Off by default. Review branch checkboxes and confirm separately for each repository. Unmerged and unknown-age branches start unchecked. Unknown creation age requires an additional explicit approval. |
 | `--apply` | Permit deletion. The CLI otherwise previews only. |
 | `--dry-run` | Explicit preview. Fetches refs and updates local observations; deletes no branches. |
 | `--server`, `--user`, `--org`, `--all-orgs`, `--with-user` | Existing fleet scope filters. GitLab organizations select groups; Bitbucket organizations select workspaces. |
@@ -57,12 +57,37 @@ lantern fleet cleanup --root ~/workspace --repos my-org/repo-a,my-org/repo-b --a
 
 Without `--confirm-first`, only old branches whose current content has landed in
 the default branch are eligible. With it, old unmerged branches can be explicitly
-selected. Confirmation never overrides a safety exclusion. Cancellation or an
-empty selection deletes nothing.
+selected. Old inactive branches with unknown creation age also appear unchecked.
+Deleting them requires approving a separate unknown-age warning and the final
+deletion confirmation. New refs pointing to old commits can have unknown creation
+age; approving this warning explicitly permits deletion despite that uncertainty.
+PR, protection, worktree, unpushed-work, and recent-activity exclusions still apply.
+Cancellation or an empty selection deletes nothing.
+
+The TUI displays live progress during repository discovery, fetches, branch
+inspection, PR/comment checks, revalidation, and deletion. Each selected
+repository is identified by its position in the run. The final report lists
+every inspected branch and its eligibility/skip reason, even when zero branches
+qualify. This final screen is labeled `Cleanup results (read-only)`. When no
+branches qualify, no checkbox list opens. Confirm first shows an explicit
+`No branches eligible for selection` notice with skip counts before the report.
+Branches excluded before merge classification show `not checked`.
+Accepting the options dialog with `Confirm first` unchecked continues normally;
+Cancel stops the operation.
+
+Automatic cleanup rejects newly observed or recently changed branches before
+expensive merge and discussion checks. Confirm first checks merge state, PRs,
+discussions, and comments for old inactive unknown-age candidates before showing
+them. Creating a remote-tracking ref during its first fetch does not prove the
+server branch was created recently; later ref updates still count as activity. GitLab MR discovery and Bitbucket fork history are loaded
+only when an old branch reaches those checks. These shortcuts cannot authorize a
+deletion; all existing protection and PR checks still run for eligible branches.
 
 The branch checklist shows scope, merge status, creator, creation date, first-seen
-date, last commit author and committer, commit date, and latest activity. A
-scrollable details screen precedes the checklist so every field can be read.
+date, last commit author and committer, commit date, and latest activity. The
+checkbox list opens directly. Press Space to toggle a branch, then choose
+`Review deletion` and confirm. Press F1 for full metadata in a scrollable
+view; Exit returns to the same checkbox selection.
 Git does not retain branch creation metadata. Unavailable creator/creation dates display
 `unknown`; commit authors and PR authors are never presented as branch creators.
 An intact local branch-creation reflog entry supplies the local creator and
@@ -70,8 +95,9 @@ creation date. Remote branch creation metadata normally remains unavailable.
 
 Branch age is established by local first-seen tracking. Observations are stored
 in `$XDG_STATE_HOME/git-lantern/branch-observations.json`, defaulting to
-`~/.local/state/git-lantern/branch-observations.json`. A first run normally deletes
-nothing. Rerun previews periodically; after the full cutoff, unchanged branches
+`~/.local/state/git-lantern/branch-observations.json`. Automatic cleanup on a first run normally deletes
+nothing. Confirm first can review old inactive branches immediately as described
+above. Rerun automatic previews periodically; after the full cutoff, unchanged branches
 may qualify. Missing/corrupt records, observed ref changes, or observed recreation
 restart the waiting period. A changed server repository ID also starts a new
 observation history, including when a repository is recreated at the same URL.
@@ -88,7 +114,9 @@ These branches are always excluded:
 - Branches with open or Draft PRs/MRs, unresolved review discussions, or recent
   PR/commit comments (including edits). Pending GitHub reviews also block cleanup.
 - Branches with recent commits, merges, reflog activity, or changed observations.
-- Branches whose protection, age, PR state, or discussion state cannot be verified.
+- Branches whose protection, PR state, or discussion state cannot be verified.
+  Unknown creation age is excluded from automatic cleanup; Confirm first requires
+  the explicit age approval described above.
 
 Discussion checks cover associated PR/MR history, its commits, the branch tip,
 and commits absent from the default branch. Shared base history is excluded.
@@ -907,3 +935,16 @@ lantern pr sweep --no-skip-frozen --dry-run
 # Machine-readable output for a downstream fix workflow
 lantern pr sweep --json
 ```
+
+
+## Cancellation
+
+In the TUI, press Enter on `Stop task` or press Escape while a background task
+is running to stop only that task and return to the main menu. Session settings
+are preserved. The stop control appears when background work lasts long enough
+for the next status refresh. Completed changes remain applied.
+TUI scan saves replace the JSON atomically; interruption preserves the previous file.
+
+Press Ctrl+C to stop the current command and exit with status 130. The CLI stops
+its progress display and prints `Cancelled.` without a Python traceback. Cleanup
+stops before further deletions; deletions already completed remain applied.

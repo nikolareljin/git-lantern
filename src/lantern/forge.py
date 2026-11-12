@@ -5,6 +5,7 @@ import urllib.request
 from typing import Dict, List, Optional, Tuple
 
 from . import github
+from . import progress
 
 DEFAULT_BASE_URLS = {
     "github": "https://api.github.com",
@@ -14,6 +15,7 @@ DEFAULT_BASE_URLS = {
 
 
 def _request(url: str, headers: Dict[str, str]) -> Tuple[object, Dict[str, str]]:
+    progress.detail("Waiting for the repository server response...")
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=20) as resp:
         data = resp.read().decode("utf-8")

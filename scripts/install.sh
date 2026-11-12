@@ -33,7 +33,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+warn_launcher_selection() {
+  local active_launcher
+  active_launcher="$(command -v lantern || true)"
+  if [[ -n "$active_launcher" && "$active_launcher" != "$BIN_LINK" ]] \
+      && [[ ! "$active_launcher" -ef "$VENV_DIR/bin/lantern" ]]; then
+    printf 'Warning: PATH selects another lantern installation: %s\n' "$active_launcher" >&2
+    printf 'This installer targets: %s\n' "$BIN_LINK" >&2
+    printf 'Run the target directly or update PATH to use this installation.\n' >&2
+  fi
+}
+
 if $DRY_RUN; then
+  warn_launcher_selection
   printf 'install_root=%s\nvenv_dir=%s\nbin_link=%s\n' "$INSTALL_ROOT" "$VENV_DIR" "$BIN_LINK"
   exit 0
 fi
@@ -136,4 +148,5 @@ run_cmd ln -sf "$VENV_DIR/bin/lantern" "$BIN_LINK"
 run_cmd "$BIN_LINK" --version
 
 echo "Installed lantern to $BIN_LINK"
+warn_launcher_selection
 echo "User config stays per-user at ~/.git-lantern/config.json or ~/.config/git-lantern/config.json"

@@ -9,15 +9,31 @@ Lantern provides a full interactive TUI (terminal user interface) powered by the
 
 ## Clean old branches
 
+Repository discovery, fetches, branch inspection, and deletion show a live status
+dialog with the current stage and elapsed time. It closes before selection or
+confirmation dialogs open. Cleanup always shows a final report with branch
+metadata, skip reasons, and deletion counts, including when no branches qualify.
+Before each deletion, only that selected ref receives fresh merge, PR and activity
+checks; repository identity, protection and default-branch context are refreshed.
+If the repository identity changes after selection, deletion is refused.
+The display shows `Deletion X/Y`. Stop task (Enter) or Escape cancels the current
+task and returns to the main menu. Ctrl+C exits the application. Completed
+deletions remain applied.
+
 1. Run `lantern` and choose `branch_cleanup`.
 2. Choose the configured server and personal repository scope or an organization/group/workspace.
 3. Choose 30, 60, or 90 days, 6 months, or 1 year. The default is 30 days.
 4. Optionally enable `Confirm first`; it starts disabled.
 5. Select repositories with checkboxes and accept the selection to start cleanup.
-6. With `Confirm first` enabled, review branch checkboxes and confirm before each repository's deletions. Merged candidates start checked; unmerged candidates start unchecked.
+6. With `Confirm first` enabled, the eligible branch checkboxes open directly. Press Space to select branches, then choose `Review deletion` and confirm. Press F1 for full branch metadata; Exit returns to selection. Merged candidates with established age start checked; unmerged and unknown-age candidates start unchecked. Unknown creation age requires a separate explicit approval before the final deletion confirmation.
 
-The first run records branch observations and normally skips deletion because
-branch age is not yet established. Run previews periodically, then clean after
+If Confirm first shows `No branches eligible for selection`, the following list
+is a read-only report, not a branch selector. The notice summarizes the skip
+reasons. An old last commit alone does not prove the branch itself is old.
+
+Automatic cleanup records branch observations and normally skips deletion on
+its first run. Confirm first can show old inactive branches immediately, marking
+unknown creation age and requiring explicit approval before deletion. Run previews periodically, then clean after
 the selected cutoff has passed. Recently changed branches, open/Draft PRs,
 unresolved discussions, and recent comments remain excluded in either mode.
 The creator and creation date display `unknown` when unavailable; first-seen
@@ -37,6 +53,11 @@ after repository selection. See the [command reference](commands.md#lantern-flee
 for protection rules, credentials, metadata limits, and first-seen storage.
 
 ## Interactive TUI setup and daily usage
+
+Workspace scans, status collection, remote listings, fleet planning, and other
+captured background commands show an animated activity indicator and elapsed
+time. Repository and branch counts appear when available. Interactive tools keep
+their own terminal screen; background indicators stop before prompts appear.
 
 ### Launching TUI Mode
 
