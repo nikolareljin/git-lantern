@@ -8,6 +8,22 @@ on:
   pull_request:
 
 jobs:
+  packaging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check source archive, wheel and development installation
+        run: |
+          python -m pip install "build>=1.2.2"
+          python scripts/check_package.py
+
   python:
     uses: nikolareljin/ci-helpers/.github/workflows/python.yml@production
     with:

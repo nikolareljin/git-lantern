@@ -13,6 +13,9 @@ All notable changes to git-lantern are documented in this file.
 ### Changed
 - Package builds use SPDX license metadata without setuptools deprecation warnings.
   Hatchling preserves Python 3.8 build support and reads the version from VERSION.
+- `./install --dev` installs pytest, Ruff and the build frontend instead of warning
+  that the dev extra does not exist. CI checks source-archive rebuilds, wheel
+  metadata and isolated development installations on Python 3.8 and 3.12.
 - The Homebrew formula is committed to the tap by ci-helpers
   `homebrew-tap-publish.yml` with the tap's deploy key
   (`HOMEBREW_TAP_DEPLOY_KEY`, `HOMEBREW_TAP_REPO` secrets). Before, each

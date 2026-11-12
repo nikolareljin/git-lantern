@@ -259,6 +259,8 @@ make ci
 ```
 
 Package builds use Hatchling 1.27+ for SPDX license metadata while retaining Python 3.8 support.
+`./install --dev` also installs pytest, Ruff and the distribution build frontend.
+See [packaging validation](docs/installation.md) for artifact checks and installer examples.
 
 The scripts automatically detect a suitable `python3` (3.8+) and use a local virtualenv at `./.venv`. You can optionally set `PYTHON_BIN` to point to a specific Python 3.8+ interpreter, or set `VENV_DIR` to change the virtualenv location before running the scripts. If virtualenv creation fails, install `python3-venv` (Debian/Ubuntu) or the equivalent package for your OS.
 
