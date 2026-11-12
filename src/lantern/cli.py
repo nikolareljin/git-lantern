@@ -522,13 +522,8 @@ def _tui_read_json(path):
 
 
 def _tui_save_scan(path, payload):
-    def save():
-        directory = os.path.dirname(path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2)
-    return _dialog_work("Saving results", "Writing the scan results...", save)
+    return _dialog_work("Saving results", "Writing the scan results...",
+                        _write_json_secure, os.path.realpath(path), payload)
 
 
 def _show_about_dialog(height: int = 12, width: int = 76) -> None:

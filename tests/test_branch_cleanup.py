@@ -790,6 +790,28 @@ def test_apply_revalidates_one_ref_per_deletion(repo, tmp_path, monkeypatch):
     assert command(repo, "ls-remote", "--heads", "origin", "old-feature") == ""
 
 
+def test_recreated_server_invalidates_unknown_age_approval(monkeypatch, tmp_path):
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--confirm-first", "--apply"])
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "_dialog_available", lambda: True)
+    api = Provider()
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": "clone", "adapter": api}])
+    row = cleanup.Candidate("old", "remote", "sha", merged=True, age_uncertain=True)
+    scans = []
+    def scan(*args):
+        if scans:
+            api.identity = "https://example.test/team/repo#replacement"
+        scans.append(True)
+        return [row]
+    monkeypatch.setattr(cleanup, "scan", scan)
+    monkeypatch.setattr(cleanup_cmd, "choose", lambda *args, **kwargs: ["0"])
+    monkeypatch.setattr(cli, "_dialog_yesno", lambda *args, **kwargs: True)
+    monkeypatch.setattr(cleanup, "delete", lambda *args: pytest.fail("approval transferred to replacement repository"))
+    assert cleanup_cmd.command(args) == 0
+    assert len(scans) == 2
+
+
 @pytest.mark.parametrize("mode", ["unchanged", "protected", "open-pr", "recent", "moved", "missing", "checked-out", "unpushed"])
 def test_targeted_revalidation_refreshes_safety_and_preserves_other_observations(repo, tmp_path, monkeypatch, mode):
     api = Provider()

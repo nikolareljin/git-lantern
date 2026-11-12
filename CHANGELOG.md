@@ -7,6 +7,8 @@ All notable changes to git-lantern are documented in this file.
 ### Fixed
 - Cleanup revalidates only the selected ref before each deletion instead of
   repeating every branch's merge and discussion checks. Show deletion X/Y.
+- Reject deletion if the server repository identity changes after branch selection.
+- Interrupted TUI scan saves retain the previous JSON file.
 - Enter on Stop task or Escape cancels background work and returns to the TUI
   menu with session settings preserved. Ctrl+C still exits the application.
 - Ctrl+C stops commands and remaining cleanup work with exit 130 and no traceback.

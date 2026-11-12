@@ -86,8 +86,17 @@ cli.main()
             ended, status_value = os.waitpid(pid, os.WNOHANG)
             if ended:
                 status = status_value
+        if status is not None:
+            while select.select([fd], [], [], 0)[0]:
+                try:
+                    remaining = os.read(fd, 65536)
+                except OSError:
+                    break
+                if not remaining:
+                    break
+                output += remaining
         assert sent and status is not None, output[-4096:]
-        assert os.waitstatus_to_exitcode(status) == expected, output[-4096:]
+        assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == expected, output[-4096:]
         assert b"Traceback" not in output
         assert (b"APPLICATION_ALIVE" in output) is (expected == 0)
     finally:

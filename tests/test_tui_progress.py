@@ -244,6 +244,7 @@ def test_task_stop_button_and_escape_differ_from_refresh_timeout(monkeypatch, st
     assert cli._dialog_taskbox("Task", "Checking", 24, 100) is stop
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="task signals require a POSIX terminal")
 def test_task_stop_unwinds_work_restores_signal_and_returns_to_same_session(monkeypatch):
     import signal
 
@@ -268,3 +269,34 @@ def test_task_stop_unwinds_work_restores_signal_and_returns_to_same_session(monk
     assert cli._run_tui_session(session, 24, 100) == 0
     assert session["setting"] == "keep"
     assert messages[0][0] == "Task stopped"
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_stopping_scan_save_keeps_previous_json(monkeypatch, tmp_path, symlink):
+    target = tmp_path / "scan.json"
+    target.write_text('{"repos": []}', encoding="utf-8")
+    path = target
+    if symlink:
+        path = tmp_path / "scan-link.json"
+        path.symlink_to(target)
+    def interrupted_dump(payload, handle, **kwargs):
+        handle.write('{"repos": [')
+        raise progress.TaskCancelled
+    monkeypatch.setattr(cli.json, "dump", interrupted_dump)
+    with pytest.raises(progress.TaskCancelled):
+        cli._tui_save_scan(str(path), {"repos": ["new"]})
+    assert target.read_text() == '{"repos": []}'
+    assert not list(tmp_path.glob(".lantern.*"))
+    assert path.is_symlink() is symlink
+
+
+def test_scan_save_updates_symlink_target(tmp_path):
+    import json
+
+    target = tmp_path / "scan.json"
+    target.write_text('{"repos": []}', encoding="utf-8")
+    path = tmp_path / "scan-link.json"
+    path.symlink_to(target)
+    cli._tui_save_scan(str(path), {"repos": ["new"]})
+    assert path.is_symlink()
+    assert json.loads(target.read_text()) == {"repos": ["new"]}

@@ -131,6 +131,7 @@ def run(args):
             try:
                 rows = work(heading + "\nInspecting local and remote branches...",
                             cleanup.scan, path, adapter, observations, args.older_than, None, args.confirm_first)
+                selection_identity = getattr(adapter, "identity", None)
                 inspected += len(rows)
                 for row in rows:
                     verdict = row.reason or ("eligible" if row.merged else "requires explicit unmerged selection")
@@ -189,7 +190,9 @@ def run(args):
                     fresh = work(deletion_heading + "\nRechecking safety before deletion...",
                                  cleanup.scan, path, adapter, observations, args.older_than, None, args.confirm_first, row)
                     current = next((r for r in fresh if (r.name, r.scope) == (row.name, row.scope)), None)
-                    if current is None or current.sha != row.sha or current.reason or current.merged != row.merged or current.age_uncertain != row.age_uncertain:
+                    if (getattr(adapter, "identity", None) != selection_identity or current is None
+                            or current.sha != row.sha or current.reason or current.merged != row.merged
+                            or current.age_uncertain != row.age_uncertain):
                         print("  skipped {} {}: evidence changed or branch disappeared".format(row.scope, row.name))
                         continue
                     work(deletion_heading + "\nDeleting branch...", cleanup.delete, path, adapter, current)
