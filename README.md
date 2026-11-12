@@ -82,6 +82,8 @@ lantern pr sweep nikolareljin/git-lantern --json
 ```
 
 Selection tips:
+- During background work, use Stop task (Enter) or Escape to return to the menu.
+  Ctrl+C exits the application. Completed changes remain applied.
 - Background TUI operations show the current stage and an animated elapsed timer. Cleanup always ends with a branch report, including skip reasons when nothing qualifies.
 - Branch cleanup defaults to a 30-day cutoff and "Confirm first" off. Automatic cleanup requires established first-seen age. Confirm first shows old inactive unknown-age branches unchecked and requires separate age approval before deletion. See the [cleanup workflow](docs/use-cases.md#clean-old-branches).
 - Use `--repos repo-a,repo-b` for explicit multi-repo actions.

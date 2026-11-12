@@ -939,6 +939,11 @@ lantern pr sweep --json
 
 ## Cancellation
 
+In the TUI, press Enter on `Stop task` or press Escape while a background task
+is running to stop only that task and return to the main menu. Session settings
+are preserved. The stop control appears when background work lasts long enough
+for the next status refresh. Completed changes remain applied.
+
 Press Ctrl+C to stop the current command and exit with status 130. The CLI stops
 its progress display and prints `Cancelled.` without a Python traceback. Cleanup
 stops before further deletions; deletions already completed remain applied.

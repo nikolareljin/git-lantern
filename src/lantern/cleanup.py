@@ -218,7 +218,7 @@ def local_guard(path: str, candidate: Candidate) -> None:
             raise Unsafe("local branch has unpushed commits")
 
 
-def scan(path, provider, observations, age, now=None, review_unknown_age=False) -> List[Candidate]:
+def scan(path, provider, observations, age, now=None, review_unknown_age=False, target=None) -> List[Candidate]:
     now = now or datetime.now(timezone.utc)
     limit = cutoff(age, now)
     progress.report("Validating the clone and origin...")
@@ -249,11 +249,14 @@ def scan(path, provider, observations, age, now=None, review_unknown_age=False) 
         name = ref[len("refs/heads/"):] if scope == "local" else ref[len("refs/remotes/origin/"):]
         if name == "HEAD":
             continue
-        row = Candidate(name, scope, sha)
-        branch_status = f"Branch {index}/{len(lines)}: {scope} {name}"
-        progress.report(branch_status + "\nChecking age and local safety rules...")
         key = prefix + scope + ":" + name
         present.append(key)
+        if target is not None and ref != target.ref:
+            continue
+        row = Candidate(name, scope, sha)
+        branch_status = (f"Revalidating {scope} {name}" if target is not None
+                         else f"Branch {index}/{len(lines)}: {scope} {name}")
+        progress.report(branch_status + "\nChecking age and local safety rules...")
         first = observations.observe(key, sha, now)
         row.first_seen = first.isoformat()
         try:

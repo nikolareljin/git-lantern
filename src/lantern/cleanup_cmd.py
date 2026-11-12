@@ -183,15 +183,16 @@ def run(args):
                     for row in eligible:
                         print("  dry-run: " + row.label())
                     continue
-                for row in eligible:
-                    # Rebuild evidence after the prompt and before each individual deletion.
-                    fresh = work(heading + f"\nRechecking {row.scope} {row.name} before deletion...",
-                                 cleanup.scan, path, adapter, observations, args.older_than, None, args.confirm_first)
+                for deletion_index, row in enumerate(eligible, 1):
+                    # Refresh repository context, then revalidate only this selected ref.
+                    deletion_heading = heading + f"\nDeletion {deletion_index}/{len(eligible)}: {row.scope} {row.name}"
+                    fresh = work(deletion_heading + "\nRechecking safety before deletion...",
+                                 cleanup.scan, path, adapter, observations, args.older_than, None, args.confirm_first, row)
                     current = next((r for r in fresh if (r.name, r.scope) == (row.name, row.scope)), None)
                     if current is None or current.sha != row.sha or current.reason or current.merged != row.merged or current.age_uncertain != row.age_uncertain:
                         print("  skipped {} {}: evidence changed or branch disappeared".format(row.scope, row.name))
                         continue
-                    work(heading + f"\nDeleting {row.scope} {row.name}...", cleanup.delete, path, adapter, current)
+                    work(deletion_heading + "\nDeleting branch...", cleanup.delete, path, adapter, current)
                     deleted += 1
                     print("  deleted {} {}".format(row.scope, row.name))
             except (cleanup.Unsafe, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:

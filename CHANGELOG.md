@@ -5,6 +5,10 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Cleanup revalidates only the selected ref before each deletion instead of
+  repeating every branch's merge and discussion checks. Show deletion X/Y.
+- Enter on Stop task or Escape cancels background work and returns to the TUI
+  menu with session settings preserved. Ctrl+C still exits the application.
 - Ctrl+C stops commands and remaining cleanup work with exit 130 and no traceback.
 - Confirm first lists old inactive unknown-age branches unchecked, after PR and
   activity checks, and requires explicit age approval before deletion. Automatic

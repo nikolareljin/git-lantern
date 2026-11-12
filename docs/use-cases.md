@@ -13,6 +13,11 @@ Repository discovery, fetches, branch inspection, and deletion show a live statu
 dialog with the current stage and elapsed time. It closes before selection or
 confirmation dialogs open. Cleanup always shows a final report with branch
 metadata, skip reasons, and deletion counts, including when no branches qualify.
+Before each deletion, only that selected ref receives fresh merge, PR and activity
+checks; repository identity, protection and default-branch context are refreshed.
+The display shows `Deletion X/Y`. Stop task (Enter) or Escape cancels the current
+task and returns to the main menu. Ctrl+C exits the application. Completed
+deletions remain applied.
 
 1. Run `lantern` and choose `branch_cleanup`.
 2. Choose the configured server and personal repository scope or an organization/group/workspace.

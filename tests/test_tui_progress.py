@@ -65,6 +65,7 @@ def setup_dialog(monkeypatch):
     monkeypatch.setattr(cli, "_dialog_available", lambda: True)
     monkeypatch.setattr(cli, "_dialog_init", lambda: (24, 100))
     monkeypatch.setattr(cli, "_dialog_infobox", lambda title, text, *args: frames.append(text))
+    monkeypatch.setattr(cli, "_dialog_taskbox", lambda title, text, *args: frames.append(text) or False)
     return frames
 
 
@@ -231,3 +232,39 @@ def test_cleanup_tui_confirm_first_selects_each_repo_before_deleting(monkeypatch
     monkeypatch.setattr(cli, "_dialog_textbox_from_text", lambda *args: events.append("results"))
     cleanup_cmd.tui({"root": str(tmp_path), "max_depth": 6, "include_hidden": False, "include_forks": False}, 24, 100)
     assert events == ["Branch cleanup: team/a", "deleted old-a", "Branch cleanup: team/b", "deleted old-b", "results"]
+
+
+@pytest.mark.parametrize("status,stop", [(0, True), (255, True), (124, False), (254, False)])
+def test_task_stop_button_and_escape_differ_from_refresh_timeout(monkeypatch, status, stop):
+    def dialog(args, **kwargs):
+        assert args[args.index("--ok-label") + 1] == "Stop task"
+        assert kwargs["env"]["DIALOG_TIMEOUT"] == "124"
+        return SimpleNamespace(returncode=status)
+    monkeypatch.setattr(cli.subprocess, "run", dialog)
+    assert cli._dialog_taskbox("Task", "Checking", 24, 100) is stop
+
+
+def test_task_stop_unwinds_work_restores_signal_and_returns_to_same_session(monkeypatch):
+    import signal
+
+    session = {"root": "workspace", "setting": "keep", "include_hidden": False,
+               "include_forks": False, "max_depth": 6, "scan_path": "scan.json"}
+    setup_dialog(monkeypatch)
+    previous = signal.getsignal(signal.SIGUSR1)
+    monkeypatch.setattr(cli, "_dialog_taskbox", lambda *args: True)
+    with pytest.raises(progress.TaskCancelled):
+        cli._dialog_work("Task", "Working", lambda: threading.Event().wait(5))
+    assert not progress.active()
+    assert signal.getsignal(signal.SIGUSR1) == previous
+    actions = iter(["branch_cleanup", "exit"])
+    monkeypatch.setattr(cli, "_dialog_menu", lambda *args: next(actions))
+    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+    def cancel(*args):
+        assert args[0] is session
+        raise progress.TaskCancelled
+    monkeypatch.setattr(cleanup_cmd, "tui", cancel)
+    messages = []
+    monkeypatch.setattr(cli, "_dialog_msgbox", lambda *args: messages.append(args))
+    assert cli._run_tui_session(session, 24, 100) == 0
+    assert session["setting"] == "keep"
+    assert messages[0][0] == "Task stopped"

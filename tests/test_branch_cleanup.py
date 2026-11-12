@@ -7,7 +7,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from lantern import cleanup, cleanup_cmd, cleanup_forge, cli, forge  # noqa: E402
+from lantern import cleanup, cleanup_cmd, cleanup_forge, cli, forge, progress  # noqa: E402
 
 
 NOW = datetime(2026, 11, 10, tzinfo=timezone.utc)
@@ -16,6 +16,7 @@ NOW = datetime(2026, 11, 10, tzinfo=timezone.utc)
 @pytest.fixture(autouse=True)
 def quiet_progress_dialogs(monkeypatch):
     monkeypatch.setattr(cli, "_dialog_infobox", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "_dialog_taskbox", lambda *args, **kwargs: False, raising=False)
 
 
 def command(path, *args):
@@ -753,7 +754,8 @@ def test_unknown_age_review_does_not_admit_recent_local_ref(repo, tmp_path):
     assert row.reason == "recent branch activity"
 
 
-def test_interrupt_stops_remaining_branch_deletions(monkeypatch, tmp_path):
+@pytest.mark.parametrize("stop", ["interrupt", "task-stop"])
+def test_interrupt_stops_remaining_branch_deletions(monkeypatch, tmp_path, stop):
     args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--apply"])
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": "clone", "adapter": Provider()}])
@@ -762,7 +764,7 @@ def test_interrupt_stops_remaining_branch_deletions(monkeypatch, tmp_path):
     deleted = []
     def delete(path, adapter, row):
         deleted.append(row.name)
-        raise KeyboardInterrupt
+        raise (KeyboardInterrupt if stop == "interrupt" else progress.TaskCancelled)
     monkeypatch.setattr(cleanup, "delete", delete)
     monkeypatch.setattr(cli, "_main", lambda: cleanup_cmd.run(args))
     with pytest.raises(SystemExit) as error:
@@ -770,3 +772,69 @@ def test_interrupt_stops_remaining_branch_deletions(monkeypatch, tmp_path):
     assert error.value.code == 130 and deleted == ["old-a"]
     with cleanup.Observations() as observations:
         assert observations.entries == {}
+
+
+def test_apply_revalidates_one_ref_per_deletion(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    api = Provider()
+    with cleanup.Observations() as store:
+        aged_scan(repo, store, api)
+    calls = []
+    monkeypatch.setattr(api, "activity", lambda name, commits: calls.append(name) or cleanup_forge.Activity())
+    args = cli.build_parser().parse_args(["fleet", "cleanup", "--repos", "team/repo", "--apply"])
+    monkeypatch.setattr(cleanup_cmd, "repositories", lambda _: [{"name": "team/repo", "path": repo, "adapter": api}])
+    assert cleanup_cmd.command(args) == 0
+    # Two initial candidates plus one fresh check for each of their deletions.
+    assert calls == ["old-feature"] * 4
+    assert command(repo, "branch", "--list", "old-feature") == ""
+    assert command(repo, "ls-remote", "--heads", "origin", "old-feature") == ""
+
+
+@pytest.mark.parametrize("mode", ["unchanged", "protected", "open-pr", "recent", "moved", "missing", "checked-out", "unpushed"])
+def test_targeted_revalidation_refreshes_safety_and_preserves_other_observations(repo, tmp_path, monkeypatch, mode):
+    api = Provider()
+    with cleanup.Observations(tmp_path / "state.json") as store:
+        rows = aged_scan(repo, store, api)
+        target = next(row for row in rows if row.name == "old-feature" and row.scope == "remote")
+        if mode in ("checked-out", "unpushed"):
+            target = next(row for row in rows if row.name == "old-feature" and row.scope == "local")
+        other_key = next(key for key in store.entries if key.endswith(":local:main"))
+        other_observation = dict(store.entries[other_key])
+        activity_calls = []
+        merge_calls = []
+        merge_state = cleanup.merge_state
+        def classify(*args):
+            merge_calls.append(args)
+            return merge_state(*args)
+        monkeypatch.setattr(cleanup, "merge_state", classify)
+        def refresh():
+            if mode == "protected":
+                monkeypatch.setattr(api, "protected", lambda name: True)
+        monkeypatch.setattr(api, "refresh", refresh)
+        def activity(name, commits):
+            activity_calls.append(name)
+            return cleanup_forge.Activity(dates=[NOW] if mode == "recent" else [],
+                                          blocked="open PR" if mode == "open-pr" else "")
+        monkeypatch.setattr(api, "activity", activity)
+        if mode == "moved":
+            command(repo, "push", "--force", "origin", "main:old-feature")
+        elif mode == "missing":
+            command(repo, "push", "origin", ":old-feature")
+        elif mode == "checked-out":
+            command(repo, "checkout", "old-feature")
+        elif mode == "unpushed":
+            command(repo, "checkout", "old-feature")
+            (Path(repo) / "unpushed").write_text("local work\n")
+            command(repo, "add", "unpushed")
+            command(repo, "commit", "-m", "local work")
+            command(repo, "checkout", "main")
+        fresh = cleanup.scan(repo, api, store, "30d", NOW, False, target)
+        assert store.entries[other_key] == other_observation
+        assert len(merge_calls) <= 1 and len(activity_calls) <= 1
+        if mode == "missing":
+            assert fresh == []
+            assert not any(key.endswith(":remote:old-feature") for key in store.entries)
+        else:
+            assert len(fresh) == 1
+            assert (fresh[0].name, fresh[0].scope) == (target.name, target.scope)
+            assert bool(fresh[0].reason) is (mode != "unchanged")

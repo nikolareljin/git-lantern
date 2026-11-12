@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -461,17 +462,36 @@ def _dialog_infobox(title: str, text: str, height: int = 10, width: int = 70) ->
     subprocess.run(cmd, check=False)
 
 
+def _dialog_taskbox(title, text, height, width):
+    env = dict(os.environ, DIALOG_TIMEOUT="124", DIALOG_OK="0", DIALOG_ESC="255", DIALOG_ERROR="254")
+    result = subprocess.run(
+        ["dialog", "--title", title, "--ok-label", "Stop task", "--timeout", "1",
+         "--msgbox", text + "\n\nEnter / Escape: stop this task. Ctrl+C: exit application.", str(height), str(width)],
+        env=env, check=False,
+    )
+    return result.returncode in (0, 255)
+
+
 @contextlib.contextmanager
 def _dialog_busy(title, text, height=0, width=0):
     render = None
-    if sys.stdin.isatty() and _dialog_available():
-        if not height or not width:
-            height, width = _dialog_init()
+    with contextlib.ExitStack() as stack:
+        if sys.stdin.isatty() and _dialog_available():
+            if not height or not width:
+                height, width = _dialog_init()
+            cancellation = (stack.enter_context(progress.TaskCancellation())
+                            if hasattr(signal, "SIGUSR1") else None)
+            first_frame = True
 
-        def render(message):
-            _dialog_infobox(title, message, height, width)
-    with progress.Busy(text, render) as task:
-        yield task
+            def render(message):
+                nonlocal first_frame
+                if cancellation is None or first_frame:
+                    first_frame = False
+                    _dialog_infobox(title, message, height, width)
+                elif _dialog_taskbox(title, message, height, width):
+                    cancellation.request()
+        with progress.Busy(text, render) as task:
+            yield task
 
 
 def _dialog_work(title, message, operation, /, *args, **kwargs):
@@ -2030,6 +2050,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
         "include_forks": False,
     }
 
+    return _run_tui_session(session, height, width)
+
+
+def _run_tui_session(session, height, width):
+    while True:
+        try:
+            return _tui_menu_loop(session, height, width)
+        except progress.TaskCancelled:
+            _dialog_msgbox("Task stopped", "The current task was stopped. Completed changes remain applied.", height, width)
+
+
+def _tui_menu_loop(session, height, width):
     while True:
         subprocess.run(["clear"], check=False)
 
@@ -6437,6 +6469,6 @@ def _main() -> None:
 def main() -> None:
     try:
         _main()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, progress.TaskCancelled):
         print("\nCancelled.", file=sys.stderr)
         raise SystemExit(130) from None

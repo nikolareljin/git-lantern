@@ -1,11 +1,35 @@
 """Scoped progress feedback for synchronous background work."""
 
 import contextvars
+import signal
 import threading
 import time
 
 
 _current = contextvars.ContextVar("lantern_progress", default=None)
+
+
+class TaskCancelled(BaseException):
+    """Stop one task without treating cancellation as an operation failure."""
+
+
+class TaskCancellation:
+    """Deliver a task stop to the main thread, including during blocking I/O."""
+
+    def __enter__(self):
+        self.previous = signal.signal(signal.SIGUSR1, self.handle)
+        return self
+
+    def handle(self, signum, frame):
+        raise TaskCancelled
+
+    def request(self):
+        if threading.current_thread() is threading.main_thread():
+            raise TaskCancelled
+        signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1)
+
+    def __exit__(self, exc_type, exc, tb):
+        signal.signal(signal.SIGUSR1, self.previous)
 
 
 def active():
