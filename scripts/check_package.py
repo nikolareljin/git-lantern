@@ -4,6 +4,7 @@
 import email.parser
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,7 +14,10 @@ import zipfile
 def run(args, **kwargs):
     result = subprocess.run(args, capture_output=True, text=True, **kwargs)
     output = result.stdout + result.stderr
-    if result.returncode or "WARNING:" in output or "DeprecationWarning" in output:
+    if result.returncode:
+        raise RuntimeError("Packaging command failed (exit {})\n{}".format(result.returncode, output))
+    plain_output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output)
+    if re.search(r"(?m)^\s*(?:WARNING:|(?:.*:\d+: )?\w*Warning:)", plain_output):
         raise RuntimeError(output)
     return result.stdout.strip()
 
@@ -24,8 +28,12 @@ def main():
     env = dict(os.environ, PYTHONWARNINGS="error")
     with tempfile.TemporaryDirectory(prefix="lantern-package-check-") as directory:
         stage = Path(directory)
+        build_prefix = stage / "builder"
+        run([sys.executable, "-m", "venv", str(build_prefix)])
+        build_python = build_prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        run([str(build_python), "-m", "pip", "install", "--upgrade", "pip", "build>=1.2.2"])
         # The default build creates an sdist, then rebuilds its wheel in isolation.
-        run([sys.executable, "-m", "build", "--outdir", str(stage), str(root)], env=env)
+        run([str(build_python), "-m", "build", "--outdir", str(stage), str(root)], env=env)
         wheels = list(stage.glob("*.whl"))
         if len(wheels) != 1 or len(list(stage.glob("*.tar.gz"))) != 1:
             raise RuntimeError("Expected one wheel and one source archive")

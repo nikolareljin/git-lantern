@@ -44,3 +44,23 @@ def test_installer_refuses_old_virtualenv_before_package_changes(tmp_path):
     assert "Choose a new --prefix or recreate" in result.stderr
     assert "pip" not in result.stdout
     assert marker.read_text() == "existing installation"
+
+
+@pytest.mark.parametrize("version", ["3.11", "missing", "3.13"])
+def test_explicit_interpreter_is_never_silently_replaced(tmp_path, version):
+    bash = shutil.which("bash")
+    fake_python(tmp_path / "python3", "3.12")
+    requested = tmp_path / "requested-python"
+    if version != "missing":
+        fake_python(requested, version)
+    result = subprocess.run(
+        [bash, "-c", 'source "$1"; resolve_python3 "$2"', "bash",
+         str(ROOT / "scripts/python_helpers.sh"), str(requested)],
+        env=dict(os.environ, PATH=str(tmp_path)), capture_output=True, text=True,
+    )
+    if version == "3.13":
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(requested)
+    else:
+        assert result.returncode == 1
+        assert result.stdout == ""

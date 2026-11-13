@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from . import github
 from . import hooks as lantern_hooks
 from . import todo_issues
 from . import cleanup_cmd
+from . import progress
 from .table import render_table
 
 # Resolved path to the src/ directory for subprocess PYTHONPATH
@@ -162,6 +164,7 @@ def _is_git_repo_root(path: str) -> bool:
 def find_repos(root: str, max_depth: int, include_hidden: bool) -> List[str]:
     matches = []
     for current, dirs, files in os.walk(root):
+        progress.report("Scanning workspace: " + current)
         if not include_hidden:
             dirs[:] = [d for d in dirs if not d.startswith(".")]
         if _is_git_repo_root(current):
@@ -263,6 +266,8 @@ def _format_divergence(ahead: Optional[int], behind: Optional[int]) -> str:
 def _progress_line(current: int, total: int, message: str) -> None:
     if total <= 0:
         return
+    if progress.report(f"[{current}/{total}] {message}"):
+        return
     if sys.stderr.isatty():
         print(f"\r[{current}/{total}] {message:<60}", end="", file=sys.stderr, flush=True)
     else:
@@ -270,6 +275,8 @@ def _progress_line(current: int, total: int, message: str) -> None:
 
 
 def _progress_done() -> None:
+    if progress.active():
+        return
     if sys.stderr.isatty():
         print(file=sys.stderr)
 
@@ -356,14 +363,17 @@ def _dialog_menu(
     return result.stdout.strip()
 
 
-def _dialog_checklist(
+def _dialog_checklist_result(
     title: str,
     text: str,
     items: List[Tuple[str, str, bool]],
     height: int = 0,
     width: int = 0,
-) -> List[str]:
-    """Show a dialog checklist and return selected tags."""
+    *,
+    help_file: str = "",
+    ok_label: str = "",
+) -> Optional[List[str]]:
+    """Return selected tags, including an empty selection, or None on cancel."""
     if height == 0 or width == 0:
         height, width = _dialog_init()
     menu_height = min(len(items), height - 8)
@@ -371,12 +381,20 @@ def _dialog_checklist(
         "dialog", "--stdout", "--separate-output", "--title", title, "--checklist", text,
         str(height), str(width), str(max(menu_height, 1)),
     ]
+    if help_file:
+        cmd[1:1] = ["--hfile", help_file, "--hline", "F1: full branch details; Exit returns to selection"]
+    if ok_label:
+        cmd[1:1] = ["--ok-label", ok_label]
     for tag, description, selected in items:
         cmd.extend([tag, description, "on" if selected else "off"])
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        return []
+        return None
     return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _dialog_checklist(title, text, items, height=0, width=0) -> List[str]:
+    return _dialog_checklist_result(title, text, items, height, width) or []
 
 
 def _dialog_inputbox(
@@ -442,6 +460,70 @@ def _dialog_infobox(title: str, text: str, height: int = 10, width: int = 70) ->
     """Show a non-blocking informational dialog."""
     cmd = ["dialog", "--title", title, "--infobox", text, str(height), str(width)]
     subprocess.run(cmd, check=False)
+
+
+def _dialog_taskbox(title, text, height, width):
+    env = dict(os.environ, DIALOG_TIMEOUT="124", DIALOG_OK="0", DIALOG_ESC="255", DIALOG_ERROR="254")
+    result = subprocess.run(
+        ["dialog", "--title", title, "--ok-label", "Stop task", "--timeout", "1",
+         "--msgbox", text + "\n\nEnter / Escape: stop this task. Ctrl+C: exit application.", str(height), str(width)],
+        env=env, check=False,
+    )
+    return result.returncode in (0, 255)
+
+
+@contextlib.contextmanager
+def _dialog_busy(title, text, height=0, width=0):
+    render = None
+    with contextlib.ExitStack() as stack:
+        if sys.stdin.isatty() and _dialog_available():
+            if not height or not width:
+                height, width = _dialog_init()
+            cancellation = (stack.enter_context(progress.TaskCancellation())
+                            if hasattr(signal, "SIGUSR1") else None)
+            first_frame = True
+
+            def render(message):
+                nonlocal first_frame
+                if cancellation is None or first_frame:
+                    first_frame = False
+                    _dialog_infobox(title, message, height, width)
+                elif _dialog_taskbox(title, message, height, width):
+                    cancellation.request()
+        with progress.Busy(text, render) as task:
+            yield task
+
+
+def _dialog_work(title, message, operation, /, *args, **kwargs):
+    with _dialog_busy(title, message):
+        return operation(*args, **kwargs)
+
+
+def _tui_find_repos(session):
+    return _dialog_work("Repositories", "Scanning the workspace for repositories...",
+                        find_repos, session["root"], session["max_depth"], session["include_hidden"])
+
+
+def _tui_origin_records(paths):
+    def collect():
+        records = []
+        for index, path in enumerate(paths, 1):
+            progress.report(f"Reading repository {index}/{len(paths)}: {os.path.basename(path)}")
+            records.append({"name": os.path.basename(path), "path": path, "origin": git.get_origin_url(path)})
+        return records
+    return _dialog_work("Repositories", "Reading repository remotes...", collect)
+
+
+def _tui_read_json(path):
+    def read():
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    return _dialog_work("Loading results", "Reading the saved results...", read)
+
+
+def _tui_save_scan(path, payload):
+    return _dialog_work("Saving results", "Writing the scan results...",
+                        _write_json_secure, os.path.realpath(path), payload)
 
 
 def _show_about_dialog(height: int = 12, width: int = 76) -> None:
@@ -943,6 +1025,7 @@ def _run_lantern_subprocess(
     width: int,
     capture: bool = True,
     show_live_output: bool = True,
+    background: bool = True,
 ) -> "subprocess.CompletedProcess[str]":
     """Run a lantern subprocess with correct PYTHONPATH and error handling."""
     env: Dict[str, str] = dict(os.environ)
@@ -961,7 +1044,10 @@ def _run_lantern_subprocess(
     elif not show_live_output:
         kwargs["stdout"] = subprocess.DEVNULL
         kwargs["stderr"] = subprocess.PIPE
-    result = subprocess.run(cmd_args, **kwargs)
+    if background and (capture or not show_live_output):
+        result = _dialog_work("Running operation", "Running the selected command...", subprocess.run, cmd_args, **kwargs)
+    else:
+        result = subprocess.run(cmd_args, **kwargs)
     if result.returncode != 0 and capture:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
@@ -1027,8 +1113,15 @@ def _handle_tui_command_action(height: int, width: int) -> None:
         _dialog_msgbox("Command", "Command cancelled.", height, width)
         return
     cmd_args = [sys.executable, "-m", "lantern", *argv]
-    result = _run_lantern_subprocess(cmd_args, height, width)
-    if result.returncode == 0 and result.stdout:
+    interactive = (any(flag in argv for flag in ("--select", "--confirm-first", "--tui", "-t"))
+                   or argv[0] in {"tui", "lazygit"} or argv[:2] == ["config", "setup"]
+                   or (argv[:2] == ["fleet", "cleanup"] and not any(arg == "--repos" or arg.startswith("--repos=") for arg in argv))
+                   or (argv[:2] == ["pr", "sweep"] and not any(flag in argv for flag in ("--json", "--dry-run"))))
+    terminal_app = argv[0] in {"tui", "lazygit"} or any(flag in argv for flag in ("--tui", "-t"))
+    result = _run_lantern_subprocess(cmd_args, height, width, capture=not terminal_app, background=not interactive)
+    if terminal_app:
+        _dialog_msgbox("Command", f"Interactive command finished with status {result.returncode}.", height, width)
+    elif result.returncode == 0 and result.stdout:
         _dialog_textbox_from_text("Command Output", result.stdout, height, width)
     elif result.returncode == 0:
         _dialog_msgbox("Command", "Command completed with no output.", height, width)
@@ -1039,7 +1132,7 @@ def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: 
     if not _validate_session_root(session["root"], height, width):
         return
 
-    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+    repos_list = _tui_find_repos(session)
     if not repos_list:
         _dialog_msgbox("TODO -> Issues", f"No repositories found in:\n{session['root']}", height, width)
         return
@@ -1158,13 +1251,14 @@ def _handle_tui_todo_issues_action(session: Dict[str, Any], height: int, width: 
         max(8, height // 3),
         max(60, width // 2),
     )
-    result = subprocess.run(
-        cmd_args,
-        cwd=repo_path,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    with _dialog_busy("TODO -> Issues", "Processing TODO items..."):
+        result = subprocess.run(
+            cmd_args,
+            cwd=repo_path,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     subprocess.run(["clear"], check=False)
 
     output_lines: List[str] = []
@@ -1587,7 +1681,7 @@ def _tui_load_fleet_snapshot(
         _dialog_msgbox("Fleet Dashboard", f"Failed to build fleet snapshot.\n\n{stderr}", height, width)
         return None
     try:
-        payload = _load_snapshot_payload(snapshot_path)
+        payload = _dialog_work("Fleet Dashboard", "Loading the saved fleet snapshot...", _load_snapshot_payload, snapshot_path)
     except Exception as exc:
         session["snapshot_fetched"] = False
         _dialog_msgbox("Fleet Dashboard", f"Failed to read fleet snapshot.\n\n{exc}", height, width)
@@ -1951,6 +2045,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
         "include_forks": False,
     }
 
+    return _run_tui_session(session, height, width)
+
+
+def _run_tui_session(session, height, width):
+    while True:
+        try:
+            return _tui_menu_loop(session, height, width)
+        except progress.TaskCancelled:
+            _dialog_msgbox("Task stopped", "The current task was stopped. Completed changes remain applied.", height, width)
+
+
+def _tui_menu_loop(session, height, width):
     while True:
         subprocess.run(["clear"], check=False)
 
@@ -2117,7 +2223,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 output = _dialog_inputbox("Export", "Enter output file path:", "git-lantern-servers.json")
                 if output:
                     export_args = argparse.Namespace(output=output, include_secrets=False)
-                    result = cmd_config_export(export_args)
+                    result = _dialog_work("Configuration", "Exporting configuration...", cmd_config_export, export_args)
                     if result == 0:
                         _dialog_msgbox("Export", f"Configuration exported to:\n{output}")
                     else:
@@ -2127,7 +2233,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 if input_file and os.path.isfile(input_file):
                     replace = _dialog_yesno("Replace", "Replace existing servers? (No = merge)")
                     import_args = argparse.Namespace(input=input_file, output="", replace=replace)
-                    result = cmd_config_import(import_args)
+                    result = _dialog_work("Configuration", "Importing configuration...", cmd_config_import, import_args)
                     if result == 0:
                         _dialog_msgbox("Import", "Configuration imported successfully.")
                     else:
@@ -2139,17 +2245,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if not _validate_session_root(session["root"], height, width):
                 continue
             # Run repos command and display output
-            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            repos_list = _tui_find_repos(session)
             if not repos_list:
                 _dialog_msgbox("Repositories", f"No repositories found in:\n{session['root']}")
                 continue
-            records = []
-            for path in repos_list:
-                records.append({
-                    "name": os.path.basename(path),
-                    "path": path,
-                    "origin": git.get_origin_url(path),
-                })
+            records = _tui_origin_records(repos_list)
             records = _sort_records_by_repo_name(records)
             output_text = render_table(records, ["name", "path", "origin"])
             _dialog_textbox_from_text("Repositories", output_text, height, width)
@@ -2158,7 +2258,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if not _validate_session_root(session["root"], height, width):
                 continue
             fetch = _dialog_yesno("Fetch", "Run 'git fetch' before showing status?")
-            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            repos_list = _tui_find_repos(session)
             if not repos_list:
                 _dialog_msgbox("Status", f"No repositories found in:\n{session['root']}")
                 continue
@@ -2168,7 +2268,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 max(8, height // 3),
                 max(60, width // 2),
             )
-            records = [add_divergence_fields(record) for record in _collect_repo_records_with_progress(repos_list, fetch, "status")]
+            records = [add_divergence_fields(record) for record in _dialog_work("Status", "Collecting repository status...", _collect_repo_records_with_progress, repos_list, fetch, "status")]
             subprocess.run(["clear"], check=False)
             records = _sort_records_by_repo_name(records)
             columns = ["name", "branch", "upstream", "up", "main_ref", "main"]
@@ -2259,7 +2359,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     flat=not use_namespace,
                 )
                 try:
-                    smart_rows, _smart_meta = _fleet_plan_records(smart_plan_args)
+                    smart_rows, _smart_meta = _dialog_work("Smart Sync", "Preparing fleet context...", _fleet_plan_records, smart_plan_args)
                 except Exception as exc:
                     subprocess.run(["clear"], check=False)
                     _dialog_msgbox("Error", str(exc), height, width)
@@ -2534,7 +2634,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 flat=not use_namespace,
             )
             try:
-                rows, _meta = _fleet_plan_records(plan_args)
+                rows, _meta = _dialog_work("Fleet Apply", "Loading repositories, branches and PR context...", _fleet_plan_records, plan_args)
             except Exception as exc:
                 subprocess.run(["clear"], check=False)
                 _dialog_msgbox("Error", str(exc), height, width)
@@ -2762,7 +2862,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     width,
                 )
                 continue
-            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            repos_list = _tui_find_repos(session)
             if not repos_list:
                 _dialog_msgbox("lazygit", f"No repositories found in:\n{session['root']}", height, width)
                 continue
@@ -2787,22 +2887,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             output = session["scan_path"]
             fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
-            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            repos_list = _tui_find_repos(session)
             _dialog_infobox(
                 "Scan",
                 "Scanning repositories...\n\nPlease wait.",
                 max(8, height // 3),
                 max(60, width // 2),
             )
-            records = _collect_repo_records_with_progress(repos_list, fetch, "scan")
+            records = _dialog_work("Scan", "Collecting repository status...", _collect_repo_records_with_progress, repos_list, fetch, "scan")
             subprocess.run(["clear"], check=False)
             payload = {"root": session["root"], "repos": records}
-            output_dir = os.path.dirname(output)
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
             try:
-                with open(output, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, indent=2)
+                _tui_save_scan(output, payload)
                 _dialog_msgbox("Scan", f"Scan complete. Found {len(records)} repositories.\n\nOutput saved to:\n{output}")
             except OSError as exc:
                 _dialog_msgbox("Error", f"Failed to write output: {exc}")
@@ -2817,22 +2913,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     width,
                 ):
                     fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
-                    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+                    repos_list = _tui_find_repos(session)
                     _dialog_infobox(
                         "Scan",
                         "Scanning repositories...\n\nPlease wait.",
                         max(8, height // 3),
                         max(60, width // 2),
                     )
-                    records = _collect_repo_records_with_progress(repos_list, fetch, "scan")
+                    records = _dialog_work("Scan", "Collecting repository status...", _collect_repo_records_with_progress, repos_list, fetch, "scan")
                     subprocess.run(["clear"], check=False)
                     payload = {"root": session["root"], "repos": records}
-                    output_dir = os.path.dirname(input_file)
-                    if output_dir:
-                        os.makedirs(output_dir, exist_ok=True)
                     try:
-                        with open(input_file, "w", encoding="utf-8") as handle:
-                            json.dump(payload, handle, indent=2)
+                        _tui_save_scan(input_file, payload)
                     except OSError as exc:
                         _dialog_msgbox("Error", f"Failed to write scan file: {exc}")
                         continue
@@ -2842,8 +2934,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
             if not os.path.isfile(input_file):
                 continue
             try:
-                with open(input_file, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
+                payload = _tui_read_json(input_file)
                 records = payload.get("repos", [])
                 if not records:
                     _dialog_msgbox("Table", "No records found in the JSON file.")
@@ -2868,11 +2959,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             name = _dialog_inputbox("Name Filter", "Filter by repository name (leave empty for all):", "")
             remote = _dialog_inputbox("Remote Filter", "Filter by remote URL (leave empty for all):", "")
-            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            repos_list = _tui_find_repos(session)
             records = []
-            for path in repos_list:
-                repo_name = os.path.basename(path)
-                origin = git.get_origin_url(path)
+            for record in _tui_origin_records(repos_list):
+                repo_name, path, origin = record["name"], record["path"], record["origin"]
                 if name and name not in repo_name:
                     continue
                 if remote and (not origin or remote not in origin):
@@ -2888,10 +2978,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
         elif action == "duplicates":
             if not _validate_session_root(session["root"], height, width):
                 continue
-            repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+            repos_list = _tui_find_repos(session)
             groups: Dict[str, List[str]] = {}
-            for path in repos_list:
-                origin = git.get_origin_url(path)
+            for record in _tui_origin_records(repos_list):
+                path, origin = record["path"], record["origin"]
                 if not origin:
                     continue
                 groups.setdefault(origin, []).append(path)
@@ -3105,22 +3195,18 @@ def cmd_tui(args: argparse.Namespace) -> int:
                     width,
                 ):
                     fetch = _dialog_yesno("Fetch", "Run 'git fetch' before scanning?")
-                    repos_list = find_repos(session["root"], session["max_depth"], session["include_hidden"])
+                    repos_list = _tui_find_repos(session)
                     _dialog_infobox(
                         "Scan",
                         "Scanning repositories...\n\nPlease wait.",
                         max(8, height // 3),
                         max(60, width // 2),
                     )
-                    records = _collect_repo_records_with_progress(repos_list, fetch, "scan")
+                    records = _dialog_work("Scan", "Collecting repository status...", _collect_repo_records_with_progress, repos_list, fetch, "scan")
                     subprocess.run(["clear"], check=False)
                     payload = {"root": session["root"], "repos": records}
-                    output_dir = os.path.dirname(input_file)
-                    if output_dir:
-                        os.makedirs(output_dir, exist_ok=True)
                     try:
-                        with open(input_file, "w", encoding="utf-8") as handle:
-                            json.dump(payload, handle, indent=2)
+                        _tui_save_scan(input_file, payload)
                     except OSError as exc:
                         _dialog_msgbox("Error", f"Failed to write scan file: {exc}")
                         continue
@@ -3139,8 +3225,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 continue
             # Ask for column selection
             try:
-                with open(input_file, "r", encoding="utf-8") as handle:
-                    peek = json.load(handle)
+                peek = _tui_read_json(input_file)
                 all_records = peek.get("repos", [])
                 if all_records:
                     available_cols = list(all_records[0].keys())
@@ -6362,7 +6447,7 @@ def cmd_fleet_apply_and_repair(args: argparse.Namespace) -> int:
     return rc
 
 
-def main() -> None:
+def _main() -> None:
     load_dotenv()
     parser = build_parser()
     if argcomplete:
@@ -6374,3 +6459,11 @@ def main() -> None:
         raise SystemExit(cmd_tui(args))
 
     raise SystemExit(args.func(args))
+
+
+def main() -> None:
+    try:
+        _main()
+    except (KeyboardInterrupt, progress.TaskCancelled):
+        print("\nCancelled.", file=sys.stderr)
+        raise SystemExit(130) from None

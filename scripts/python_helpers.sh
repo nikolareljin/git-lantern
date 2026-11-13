@@ -60,13 +60,8 @@ resolve_python3() {
   local requested="${1:-}"
 
   if [[ -n "$requested" ]]; then
-    local picked
     if python_can_run "$requested" && python_has_min_version "$requested" 3 12; then
       echo "$requested"
-      return 0
-    fi
-    if picked="$(pick_python3)"; then
-      echo "$picked"
       return 0
     fi
     return 1

@@ -15,6 +15,8 @@ def _dry_run(tmp_path: Path, system: str) -> dict[str, str]:
     uname.write_text(f"#!/bin/sh\nprintf '%s\\n' {system}\n", encoding="utf-8")
     uname.chmod(0o755)
     env = os.environ.copy()
+    for key in ("INSTALL_ROOT", "VENV_DIR", "BIN_LINK"):
+        env.pop(key, None)
     env["HOME"] = str(tmp_path / "home")
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     result = subprocess.run(
@@ -45,6 +47,16 @@ def test_non_macos_defaults_remain_system_paths(tmp_path):
     }
 
 
+def test_configured_install_paths_are_respected(tmp_path):
+    expected = {"install_root": str(tmp_path / "install"),
+                "venv_dir": str(tmp_path / "venv"), "bin_link": str(tmp_path / "bin/lantern")}
+    env = dict(os.environ, INSTALL_ROOT=expected["install_root"],
+               VENV_DIR=expected["venv_dir"], BIN_LINK=expected["bin_link"])
+    result = subprocess.run([str(ROOT / "install"), "--dry-run"], env=env,
+                            capture_output=True, text=True, check=True)
+    assert dict(line.split("=", 1) for line in result.stdout.splitlines()) == expected
+
+
 def test_explicit_paths_override_macos_defaults(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -66,3 +78,37 @@ def test_explicit_paths_override_macos_defaults(tmp_path):
         "venv_dir": "/tmp/custom/venv",
         "bin_link": "/tmp/bin/lantern",
     }
+
+
+def test_dry_run_warns_when_path_selects_another_install(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    active = fake_bin / "lantern"
+    active.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    active.chmod(0o755)
+    target = tmp_path / "new-bin" / "lantern"
+    env = dict(os.environ, PATH=f"{fake_bin}:/usr/bin:/bin")
+    result = subprocess.run(
+        [str(ROOT / "install"), "--dry-run", "--prefix", str(tmp_path / "install"), "--bin-link", str(target)],
+        capture_output=True, text=True, env=env, check=True,
+    )
+    assert "PATH selects another lantern installation" in result.stderr
+    assert str(active) in result.stderr and str(target) in result.stderr
+    assert dict(line.split("=", 1) for line in result.stdout.splitlines())["bin_link"] == str(target)
+
+
+def test_dry_run_accepts_another_link_to_the_selected_install(tmp_path):
+    prefix = tmp_path / "install"
+    executable = prefix / "venv" / "bin" / "lantern"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "lantern").symlink_to(executable)
+    env = dict(os.environ, PATH=f"{fake_bin}:/usr/bin:/bin")
+    result = subprocess.run(
+        [str(ROOT / "install"), "--dry-run", "--prefix", str(prefix), "--bin-link", str(tmp_path / "other-bin" / "lantern")],
+        capture_output=True, text=True, env=env, check=True,
+    )
+    assert "PATH selects another lantern installation" not in result.stderr

@@ -21,6 +21,8 @@ your shell's default Python is older. An existing installation virtualenv runnin
 older Python is refused before package changes; choose a new `--prefix` or recreate
 that dedicated virtualenv with Python 3.12+. A development `.venv` on older Python
 is recreated by the development scripts after checking that it is a virtualenv.
+An explicit `PYTHON_BIN` must name a runnable Python 3.12+ interpreter; an invalid
+override fails instead of silently selecting a different interpreter.
 
 Validate distribution artifacts from a development virtualenv:
 
@@ -29,7 +31,8 @@ python3 -m pip install -e ".[dev]"
 python3 scripts/check_package.py
 ```
 
-The check builds a source archive, rebuilds its wheel in isolation with Python
+The check installs current pip and the build frontend in a temporary virtualenv,
+then builds a source archive and rebuilds its wheel in isolation with Python
 warnings treated as errors, verifies license/version/runtime metadata and module
 contents, and installs the wheel with development dependencies into a temporary
 virtualenv. It checks the installed launcher and dependency consistency outside

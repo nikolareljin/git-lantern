@@ -82,7 +82,10 @@ lantern pr sweep nikolareljin/git-lantern --json
 ```
 
 Selection tips:
-- Branch cleanup defaults to a 30-day cutoff and "Confirm first" off. First-seen tracking must establish branch age before deletion; a first run normally skips branches. See the [cleanup workflow](docs/use-cases.md#clean-old-branches).
+- During background work, use Stop task (Enter) or Escape to return to the menu.
+  Ctrl+C exits the application. Completed changes remain applied.
+- Background TUI operations show the current stage and an animated elapsed timer. Cleanup always ends with a branch report, including skip reasons when nothing qualifies.
+- Branch cleanup defaults to a 30-day cutoff and "Confirm first" off. Automatic cleanup requires established first-seen age. Confirm first shows old inactive unknown-age branches unchecked and requires separate age approval before deletion. See the [cleanup workflow](docs/use-cases.md#clean-old-branches).
 - Use `--repos repo-a,repo-b` for explicit multi-repo actions.
 - `--checkout-latest-branch` now auto-targets only repos whose detected latest branch would actually change something, while still letting you override the scope with `--repos`.
 - Latest-branch checkout skips repos with tracked uncommitted changes, but it still allows untracked-only worktrees.
@@ -205,7 +208,15 @@ lantern sync --root "$HOME/workspace" --pull --only-clean --only-upstream
 
 Use `./install --dry-run` to print the resolved prefix and launcher path
 without changing the machine. Use explicit `--prefix` and `--bin-link` values
-when another tool owns the installation paths.
+when another tool owns the installation paths. The installer warns when `PATH`
+selects a different installation. On Linux, the defaults are `/opt/git-lantern`
+and `/usr/local/bin/lantern`. To update an existing per-user installation:
+
+```bash
+./install --prefix "$HOME/.local/opt/git-lantern" --bin-link "$HOME/.local/bin/lantern"
+```
+
+Use `command -v lantern` to check which launcher your shell selects.
 
 ## Shell completion
 
