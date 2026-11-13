@@ -47,7 +47,7 @@ python_can_run() {
 pick_python3() {
   for candidate in python3 python; do
     if python_can_run "$candidate"; then
-      if python_has_min_version "$candidate" 3 8; then
+      if python_has_min_version "$candidate" 3 12; then
         echo "$candidate"
         return 0
       fi
@@ -60,13 +60,8 @@ resolve_python3() {
   local requested="${1:-}"
 
   if [[ -n "$requested" ]]; then
-    local picked
-    if python_can_run "$requested" && python_has_min_version "$requested" 3 8; then
+    if python_can_run "$requested" && python_has_min_version "$requested" 3 12; then
       echo "$requested"
-      return 0
-    fi
-    if picked="$(pick_python3)"; then
-      echo "$picked"
       return 0
     fi
     return 1
@@ -107,13 +102,13 @@ ensure_venv() {
   }
 
   if [[ -x "$venv_dir/bin/python" ]]; then
-    if ! python_has_min_version "$venv_dir/bin/python" 3 8; then
+    if ! python_has_min_version "$venv_dir/bin/python" 3 12; then
       if ! safe_to_remove_venv "$venv_dir"; then
         echo "Refusing to remove unsafe virtualenv path: $venv_dir" >&2
         echo "Set VENV_DIR to a dedicated virtualenv directory and retry." >&2
         return 1
       fi
-      echo "Existing virtualenv at $venv_dir uses Python < 3.8; recreating." >&2
+      echo "Existing virtualenv at $venv_dir uses Python < 3.12; recreating." >&2
       rm -rf "$venv_dir"
     fi
   fi

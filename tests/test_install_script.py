@@ -15,6 +15,8 @@ def _dry_run(tmp_path: Path, system: str) -> dict[str, str]:
     uname.write_text(f"#!/bin/sh\nprintf '%s\\n' {system}\n", encoding="utf-8")
     uname.chmod(0o755)
     env = os.environ.copy()
+    for key in ("INSTALL_ROOT", "VENV_DIR", "BIN_LINK"):
+        env.pop(key, None)
     env["HOME"] = str(tmp_path / "home")
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     result = subprocess.run(
@@ -43,6 +45,16 @@ def test_non_macos_defaults_remain_system_paths(tmp_path):
         "venv_dir": "/opt/git-lantern/venv",
         "bin_link": "/usr/local/bin/lantern",
     }
+
+
+def test_configured_install_paths_are_respected(tmp_path):
+    expected = {"install_root": str(tmp_path / "install"),
+                "venv_dir": str(tmp_path / "venv"), "bin_link": str(tmp_path / "bin/lantern")}
+    env = dict(os.environ, INSTALL_ROOT=expected["install_root"],
+               VENV_DIR=expected["venv_dir"], BIN_LINK=expected["bin_link"])
+    result = subprocess.run([str(ROOT / "install"), "--dry-run"], env=env,
+                            capture_output=True, text=True, check=True)
+    assert dict(line.split("=", 1) for line in result.stdout.splitlines()) == expected
 
 
 def test_explicit_paths_override_macos_defaults(tmp_path):

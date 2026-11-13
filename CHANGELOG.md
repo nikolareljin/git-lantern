@@ -5,6 +5,11 @@ All notable changes to git-lantern are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Reject invalid explicit PYTHON_BIN overrides instead of silently selecting
+  another interpreter. Packaging validation accepts warning-like path text and
+  reports failing command exit codes.
+- Distribution checks bootstrap current pip and build in a temporary virtualenv,
+  so strict warning checks also work from a fresh Python installation.
 - Cleanup revalidates only the selected ref before each deletion instead of
   repeating every branch's merge and discussion checks. Show deletion X/Y.
 - Reject deletion if the server repository identity changes after branch selection.
@@ -31,6 +36,15 @@ All notable changes to git-lantern are documented in this file.
 - GitLab group and Bitbucket workspace filters for fleet repository discovery.
 
 ### Changed
+- Python 3.12+ is required. The installer and development scripts reject older
+  interpreters. Existing installations on older Python need a new virtualenv.
+- Package builds use setuptools 77+ and SPDX license metadata without deprecated
+  license tables. The package version still comes from VERSION.
+- `./install --dev` installs pytest, Ruff and the build frontend instead of warning
+  that the dev extra does not exist. CI checks source-archive rebuilds, wheel
+  metadata and isolated development installations on Python 3.12 and 3.13.
+- CI, Pages and man-page workflows use Node 24 checkout/setup actions instead of
+  deprecated Node 20 actions; artifact uploads and Pages deployment use current actions.
 - The Homebrew formula is committed to the tap by ci-helpers
   `homebrew-tap-publish.yml` with the tap's deploy key
   (`HOMEBREW_TAP_DEPLOY_KEY`, `HOMEBREW_TAP_REPO` secrets). Before, each

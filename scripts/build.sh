@@ -13,8 +13,8 @@ PYTHON_BIN="${PYTHON_BIN:-}"
 VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv}"
 
 if ! PYTHON_BIN="$(resolve_python3 "$PYTHON_BIN")"; then
-  echo "Failed to find a usable Python 3.8+ interpreter." >&2
-  echo "Ensure Python 3.8+ is installed and on PATH, or set PYTHON_BIN to a valid Python 3.8+ executable." >&2
+  echo "Failed to find a usable Python 3.12+ interpreter." >&2
+  echo "Ensure Python 3.12+ is installed and on PATH, or set PYTHON_BIN to a valid Python 3.12+ executable." >&2
   exit 1
 fi
 
